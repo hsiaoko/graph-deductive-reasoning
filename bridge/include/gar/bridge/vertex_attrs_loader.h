@@ -2,7 +2,7 @@
 
 // Shared vertex_attr loader for the deduce apps (CPU + GPU). Reads the
 // vertex_attr/ directory through MatrixGraph's AttributesIO and converts the
-// numeric columns into the chase engine's plain CPU column type. Must be
+// numeric columns into the graph kernel's plain CPU column type. Must be
 // included from a .cu translation unit (AttributesIO is CUDA-compiled).
 
 #include <cstdint>
@@ -10,17 +10,18 @@
 #include <string>
 
 #include "core/io/attributes_io.cuh"
-#include "gar/reason/chase.h"
+#include "gar/graph/vertex_attrs.h"
 
-namespace gar_apps {
+namespace gar {
+namespace bridge {
 
 // Loads vertex_attr/ (if present) into plain CPU attribute columns. Columns
 // of non-numeric types (strings/lists) are dropped — they carry no
 // comparable values for const/var predicates.
-inline gar::reason::VertexAttrs LoadVertexAttrs(const std::string& csr_dir) {
+inline graph::VertexAttrs LoadVertexAttrs(const std::string& csr_dir) {
   namespace mg_attr = sics::matrixgraph::core::data_structures;
   using sics::matrixgraph::core::io::AttributesIO;
-  gar::reason::VertexAttrs out;
+  graph::VertexAttrs out;
   namespace fs = std::filesystem;
   std::string dir = csr_dir;
   if (dir.back() != '/') dir += '/';
@@ -28,7 +29,7 @@ inline gar::reason::VertexAttrs LoadVertexAttrs(const std::string& csr_dir) {
   AttributesIO::Storage st;
   AttributesIO::Read(dir + "vertex_attr", &st);
   for (const auto& a : st.columns) {
-    gar::reason::AttrColumn col;
+    graph::AttrColumn col;
     col.name = a.name;
     if (a.valid != nullptr) {
       col.valid.assign(a.valid, a.valid + a.n_rows);
@@ -53,4 +54,5 @@ inline gar::reason::VertexAttrs LoadVertexAttrs(const std::string& csr_dir) {
   return out;
 }
 
-}  // namespace gar_apps
+}  // namespace bridge
+}  // namespace gar

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "gar/miner/triple_graph.h"
+#include "gar/graph/triple_graph.h"
 
 // PatternMatcher: enumerates embeddings of a small connected pattern on a
 // TripleGraph, under homomorphism semantics (distinct pattern vertices may
@@ -22,7 +22,7 @@
 // edge to a bound vertex is checked for existence via the unified
 // out-adjacency (OutEdgeRange binary search).
 namespace gar {
-namespace miner {
+namespace graph {
 
 struct PatternSpec {
   std::uint32_t num_vertices;
@@ -48,5 +48,5 @@ class PatternMatcher {
   const TripleGraph& g_;
 };
 
-}  // namespace miner
+}  // namespace graph
 }  // namespace gar

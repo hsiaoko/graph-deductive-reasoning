@@ -9,5 +9,5 @@ target_link_libraries(rule_set_info PRIVATE gar::core)
 
 if (GAR_ENABLE_MATRIXGRAPH)
     add_executable(matrixgraph_bridge matrixgraph_bridge.cpp)
-    target_link_libraries(matrixgraph_bridge PRIVATE gar::matrixgraph)
+    target_link_libraries(matrixgraph_bridge PRIVATE gar::bridge)
 endif ()

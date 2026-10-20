@@ -36,8 +36,9 @@
 #include <vector>
 
 #include "core/io/attributes_io.cuh"
-#include "gar/miner/pattern_matcher.h"
-#include "gar/miner/triple_graph.h"
+#include "gar/bridge/graph_loader.h"
+#include "gar/graph/pattern_matcher.h"
+#include "gar/graph/triple_graph.h"
 #include "gar/rule_loader.h"
 #include "gar/rule_store.h"
 
@@ -45,7 +46,7 @@ namespace {
 
 namespace mg_attr = sics::matrixgraph::core::data_structures;
 using sics::matrixgraph::core::io::AttributesIO;
-using gar::miner::PackPair;
+using gar::graph::PackPair;
 
 struct Args {
   std::string csr_dir;
@@ -125,7 +126,7 @@ struct Candidate {
 };
 
 struct RuleContext {
-  const gar::miner::TripleGraph* g;
+  const gar::graph::TripleGraph* g;
   const std::vector<Column>* cols;
   std::uint32_t n = 0;            // pattern vertices
   std::uint32_t pu = 0, pv = 0;   // pivot variables
@@ -280,7 +281,7 @@ std::vector<std::uint32_t> FilterActive(const RuleContext& ctx,
 // Enumerates body matches of the rule's pattern (arbitrary connected
 // topology, via PatternMatcher) and flags head satisfaction on the pivot
 // pair. Returns false when the enumeration hit the match cap (rule skipped).
-bool EnumerateMatches(const gar::miner::TripleGraph& g, const gar::GARule& rule,
+bool EnumerateMatches(const gar::graph::TripleGraph& g, const gar::GARule& rule,
                       std::uint64_t max_matches, RuleContext* ctx) {
   const auto& topo = rule.pattern;
   const auto n = static_cast<std::uint32_t>(topo.num_vertices());
@@ -302,7 +303,7 @@ bool EnumerateMatches(const gar::miner::TripleGraph& g, const gar::GARule& rule,
   if (pu >= n || pv >= n) return false;
 
   // Expand the CSR pattern into an edge list for the generic matcher.
-  gar::miner::PatternSpec spec;
+  gar::graph::PatternSpec spec;
   spec.num_vertices = n;
   for (std::uint32_t s = 0; s < n; ++s) {
     for (gar::EdgeIndex e = topo.offsets[s]; e < topo.offsets[s + 1]; ++e) {
@@ -310,7 +311,7 @@ bool EnumerateMatches(const gar::miner::TripleGraph& g, const gar::GARule& rule,
     }
   }
 
-  const gar::miner::PatternMatcher matcher(g);
+  const gar::graph::PatternMatcher matcher(g);
   std::vector<std::uint32_t> embs;
   bool capped = false;
   const std::uint64_t n_emb = matcher.Enumerate(spec, max_matches, &embs, &capped);
@@ -360,9 +361,9 @@ bool EnumerateMatches(const gar::miner::TripleGraph& g, const gar::GARule& rule,
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::miner::TripleGraph g =
-        gar::miner::TripleGraph::LoadImmutableCSR(args.csr_dir,
-                                                  /*with_inverses=*/true);
+    gar::graph::TripleGraph g =
+        gar::bridge::LoadTripleGraph(args.csr_dir,
+                                     /*with_inverses=*/true);
     std::cerr << "[mine_predicates] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
               << "\n";

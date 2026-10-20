@@ -8,18 +8,34 @@
 #include <unordered_set>
 #include <vector>
 
+namespace gar {
+namespace graph {
+class TripleGraph;
+}  // namespace graph
+
+namespace bridge {
+// Defined in gar/bridge/graph_loader.h; forward-declared here so that
+// TripleGraph can friend it (the loader fills the vertex-label fields
+// directly after building the graph).
+graph::TripleGraph LoadTripleGraph(
+    const std::filesystem::path& immutable_csr_dir, bool with_inverses);
+}  // namespace bridge
+
+namespace graph {
+
 // TripleGraph: an in-memory triple store (src, relation, dst) for rule
-// mining. Entities and relations are dictionary-encoded to uint32; inverse
-// relations (id + num_relations) are materialized so chain rules can walk
-// edges in both directions, following AMIE/AnyBURL practice.
+// mining and reasoning. Entities and relations are dictionary-encoded to
+// uint32; inverse relations (id + num_relations) are materialized so chain
+// rules can walk edges in both directions, following AMIE/AnyBURL practice.
 //
 // Input directory layout (produced by tools/prepare_finreflectkg.py):
 //   edges.bin       uint32 triples, [src, rel, dst] * m
 //   entities.tsv    id \t entity_name
 //   relations.tsv   id \t relation_name
-namespace gar {
-namespace miner {
-
+//
+// Loading from a MatrixGraph ImmutableCSR directory lives in the bridge
+// module (gar/bridge/graph_loader.h), keeping this header free of any
+// MatrixGraph layout knowledge.
 inline std::uint64_t PackPair(std::uint32_t src, std::uint32_t dst) {
   return (static_cast<std::uint64_t>(src) << 32) | dst;
 }
@@ -28,13 +44,6 @@ class TripleGraph {
  public:
   static TripleGraph Load(const std::filesystem::path& dir,
                           bool with_inverses = true);
-
-  // Loads from a MatrixGraph ImmutableCSR directory: topology from
-  // graphs/0.bin (out-CSR), relation ids from edge_attr/relationship.bin
-  // (row i == outgoing_edges slot i), names from dict/entities.tsv and
-  // dict/relations.tsv (written by kg_loader convert).
-  static TripleGraph LoadImmutableCSR(const std::filesystem::path& dir,
-                                      bool with_inverses = true);
 
   // Builds the index structures from dictionary-encoded triples
   // [src, rel, dst] * m. Shared by all loaders.
@@ -166,6 +175,11 @@ class TripleGraph {
   }
 
  private:
+  // The bridge-module ImmutableCSR loader fills the vertex-label fields
+  // after Build().
+  friend TripleGraph bridge::LoadTripleGraph(const std::filesystem::path&,
+                                             bool);
+
   // Rebuilds all_out_* from rel_pairs_ (after bulk edge insertion).
   void RebuildOutAdjacency();
 
@@ -192,5 +206,5 @@ class TripleGraph {
   bool has_vertex_labels_ = false;
 };
 
-}  // namespace miner
+}  // namespace graph
 }  // namespace gar

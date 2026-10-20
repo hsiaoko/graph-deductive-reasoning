@@ -1,8 +1,7 @@
-#include "gar/matrixgraph_bridge.h"
-
-#ifdef GAR_WITH_MATRIXGRAPH
+#include "gar/bridge/pattern_bridge.h"
 
 namespace gar {
+namespace bridge {
 
 sics::matrixgraph::core::data_structures::GARPatternArrays ToPatternArrays(
     const GARule& rule) {
@@ -53,6 +52,5 @@ sics::matrixgraph::core::data_structures::GARPatternArrays ToPatternArrays(
   return out;
 }
 
+}  // namespace bridge
 }  // namespace gar
-
-#endif  // GAR_WITH_MATRIXGRAPH

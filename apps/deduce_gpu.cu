@@ -2,7 +2,7 @@
 // with the per-rule match + X-evaluation + head emission running on the GPU
 // (MatrixGraph's task::GARDeduce). The round driver, fact dedup and graph
 // merging stay on the host and are SHARED with the CPU deduce
-// (gar::reason::MergeRoundFacts), so both engines produce the same derived
+// (gar::graph::MergeRoundFacts), so both engines produce the same derived
 // fact set round by round (row order inside a round may differ: GPU
 // emission is atomicAdd-ordered).
 //
@@ -42,16 +42,20 @@
 // NOTE: do not include <execution> here — it drags in AVX512 intrinsics
 // headers that nvcc + GCC 12 cannot compile (TBB headers are avoided in
 // this file for the same reason; parallel host-side filters live in the
-// reason library, see gar::reason::MarkAbsentEdges).
+// graph library, see gar::graph::MarkAbsentEdges).
 
 #include "closure_output.h"
 #include "core/data_structures/gar_deduce_arrays.h"
 #include "core/data_structures/gar_graph_arrays.h"
 #include "core/data_structures/gar_pattern_arrays.h"
 #include "core/task/gpu_task/gar_deduce.cuh"
+#include "gar/bridge/graph_loader.h"
+#include "gar/bridge/vertex_attrs_loader.h"
+#include "gar/graph/fact.h"
+#include "gar/graph/fact_merger.h"
+#include "gar/graph/triple_graph.h"
 #include "gar/reason/chase.h"
 #include "gar/rule_loader.h"
-#include "vertex_attrs_loader.h"
 
 namespace {
 
@@ -105,7 +109,7 @@ Args ParseArgs(int argc, char** argv) {
   return a;
 }
 
-bool HasEdge(const gar::miner::TripleGraph& g, std::uint32_t s,
+bool HasEdge(const gar::graph::TripleGraph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   const auto [b, e] = g.OutEdgeRange(s);
   const std::uint32_t* dsts = g.OutEdgeDsts();
@@ -155,9 +159,9 @@ struct PreparedRule {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::miner::TripleGraph g =
-        gar::miner::TripleGraph::LoadImmutableCSR(args.csr_dir,
-                                                  /*with_inverses=*/true);
+    gar::graph::TripleGraph g =
+        gar::bridge::LoadTripleGraph(args.csr_dir,
+                                     /*with_inverses=*/true);
     const std::uint32_t n = g.num_entities();
     const std::uint32_t num_rel = g.num_relations();
     std::cerr << "[deduce_gpu] |V|=" << n << " |R|=" << num_rel
@@ -182,7 +186,7 @@ int main(int argc, char** argv) {
 
     // ---- vertex attributes: plain columns (shared loader), then normalized
     // to double values + optional valid masks for the device ----
-    const gar::reason::VertexAttrs attrs = gar_apps::LoadVertexAttrs(args.csr_dir);
+    const gar::graph::VertexAttrs attrs = gar::bridge::LoadVertexAttrs(args.csr_dir);
     std::cerr << "[deduce_gpu] " << attrs.columns.size()
               << " numeric attribute columns\n";
     const std::size_t n_cols = attrs.columns.size();
@@ -481,7 +485,7 @@ int main(int argc, char** argv) {
                         static_cast<int>(e_src.size())};
       task.SetGraph(gg);
 
-      std::vector<std::vector<gar::reason::DerivedEdge>> contribs(
+      std::vector<std::vector<gar::graph::DerivedEdge>> contribs(
           rules.size());
       for (std::size_t i = 0; i < rules.size(); ++i) {
         if (skipped[i]) continue;
@@ -538,16 +542,16 @@ int main(int argc, char** argv) {
           // Same pre-filter as the CPU chase: only heads not already in
           // the (pre-merge) graph are candidates; within-round dedup and
           // credit happen in MergeRoundFacts. The filter runs in parallel
-          // inside the reason library (capped rules emit 1M heads/round).
+          // inside the graph library (capped rules emit 1M heads/round).
           std::vector<char> keep(static_cast<std::size_t>(n_heads));
-          gar::reason::MarkAbsentEdges(g, head_src.data(), head_dst.data(),
-                                       q.head_slot,
-                                       static_cast<std::size_t>(n_heads),
-                                       keep.data());
+          gar::graph::MarkAbsentEdges(g, head_src.data(), head_dst.data(),
+                                      q.head_slot,
+                                      static_cast<std::size_t>(n_heads),
+                                      keep.data());
           contribs[i].reserve(static_cast<std::size_t>(n_heads));
           for (int t = 0; t < n_heads; ++t) {
             if (keep[static_cast<std::size_t>(t)]) {
-              contribs[i].push_back(gar::reason::DerivedEdge{
+              contribs[i].push_back(gar::graph::DerivedEdge{
                   head_src[t], head_dst[t], q.head_slot,
                   static_cast<std::uint32_t>(i), round});
             }
@@ -580,8 +584,13 @@ int main(int argc, char** argv) {
                                    .count();
 
       const auto merge_t0 = std::chrono::steady_clock::now();
-      const gar::reason::RoundMerge merge = gar::reason::MergeRoundFacts(
-          contribs, args.cfg.max_derivations, g, &result);
+      std::vector<std::uint64_t> rule_derived(rules.size(), 0);
+      const gar::graph::RoundMerge merge = gar::graph::MergeRoundFacts(
+          contribs, args.cfg.max_derivations, g, &result.derived,
+          &rule_derived);
+      for (std::size_t i = 0; i < rules.size(); ++i) {
+        result.rules[i].derived += rule_derived[i];
+      }
       const double merge_secs = std::chrono::duration<double>(
                                     std::chrono::steady_clock::now() - merge_t0)
                                     .count();

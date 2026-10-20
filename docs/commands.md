@@ -155,7 +155,7 @@ GPU 49 秒 vs CPU 17.6 秒；dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 ## 2.6. 规则检验（validate_rules）
 
 挖掘 app 产规则，检验 app 验规则：在 KG 上重放每条规则
-（`PatternMatcher` 同态 + 顶点 label 后过滤 + `reason::EvalAntecedent`
+（`PatternMatcher` 同态 + 顶点 label 后过滤 + `graph::EvalAntecedent`
 求 X），按挖掘器口径重算 **pivot-pair** 质量——support = 满足
 body∧X∧head 的不同 pivot 对数，confidence = support / 满足 body∧X 的
 不同 pivot 对数——与 rule.yaml 里的挖掘期存储值对账。

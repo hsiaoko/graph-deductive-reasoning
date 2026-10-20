@@ -2,7 +2,7 @@
 //
 //   G_{i+1} = G_i ∪ { p₀(emb) | rule Q[x̄](X → p₀), emb ∈ Q(G_i), X(emb) }
 //
-// Topology matching reuses miner::PatternMatcher (homomorphism, edge labels,
+// Topology matching reuses graph::PatternMatcher (homomorphism, edge labels,
 // vertex-label constraints); X predicates (const/var/exists/edge) are
 // evaluated per embedding against the vertex_attr table and the current
 // graph. Derived edges are merged into the graph after each round, so the
@@ -29,9 +29,10 @@
 // headers that nvcc + GCC 12 cannot compile (MatrixGraph avoids it in .cu
 // files for the same reason).
 #include "closure_output.h"
+#include "gar/bridge/graph_loader.h"
+#include "gar/bridge/vertex_attrs_loader.h"
 #include "gar/reason/chase.h"
 #include "gar/rule_loader.h"
-#include "vertex_attrs_loader.h"
 
 namespace {
 
@@ -79,8 +80,8 @@ Args ParseArgs(int argc, char** argv) {
 }
 
 // Loads vertex_attr/ (if present) into the engine's plain CPU column type.
-gar::reason::VertexAttrs LoadAttrs(const std::string& csr_dir) {
-  return gar_apps::LoadVertexAttrs(csr_dir);
+gar::graph::VertexAttrs LoadAttrs(const std::string& csr_dir) {
+  return gar::bridge::LoadVertexAttrs(csr_dir);
 }
 
 }  // namespace
@@ -88,9 +89,9 @@ gar::reason::VertexAttrs LoadAttrs(const std::string& csr_dir) {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::miner::TripleGraph g =
-        gar::miner::TripleGraph::LoadImmutableCSR(args.csr_dir,
-                                                  /*with_inverses=*/true);
+    gar::graph::TripleGraph g =
+        gar::bridge::LoadTripleGraph(args.csr_dir,
+                                     /*with_inverses=*/true);
     std::cerr << "[deduce] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
               << "\n";
@@ -112,7 +113,7 @@ int main(int argc, char** argv) {
     }
     std::cerr << "[deduce] " << rules.size() << " rules\n";
 
-    gar::reason::VertexAttrs attrs = LoadAttrs(args.csr_dir);
+    gar::graph::VertexAttrs attrs = LoadAttrs(args.csr_dir);
     std::cerr << "[deduce] " << attrs.columns.size()
               << " numeric attribute columns\n";
 

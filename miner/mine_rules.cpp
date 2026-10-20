@@ -19,6 +19,7 @@
 #include <iostream>
 #include <string>
 
+#include "gar/bridge/graph_loader.h"
 #include "gar/miner/chain_miner.h"
 #include "gar/rule_store.h"
 
@@ -81,11 +82,11 @@ Args ParseArgs(int argc, char** argv) {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::miner::TripleGraph g =
+    gar::graph::TripleGraph g =
         args.graph_dir.empty()
-            ? gar::miner::TripleGraph::LoadImmutableCSR(
-                  args.csr_dir, args.cfg.with_inverses)
-            : gar::miner::TripleGraph::Load(args.graph_dir,
+            ? gar::bridge::LoadTripleGraph(args.csr_dir,
+                                           args.cfg.with_inverses)
+            : gar::graph::TripleGraph::Load(args.graph_dir,
                                             args.cfg.with_inverses);
     std::cerr << "[mine_rules] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges();

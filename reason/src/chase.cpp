@@ -4,8 +4,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
-#include <unordered_map>
-#include <unordered_set>
+
+#include "gar/graph/fact_merger.h"
+#include "gar/graph/pattern_matcher.h"
+#include "gar/graph/predicate_evaluator.h"
 
 #if defined(GAR_REASON_HAS_TBB)
 #include <tbb/blocked_range.h>
@@ -17,30 +19,7 @@ namespace reason {
 
 namespace {
 
-bool EvalCmp(CmpOp op, double lhs, double rhs) {
-  switch (op) {
-    case CmpOp::kEq: return lhs == rhs;
-    case CmpOp::kNe: return lhs != rhs;
-    case CmpOp::kLt: return lhs < rhs;
-    case CmpOp::kLe: return lhs <= rhs;
-    case CmpOp::kGt: return lhs > rhs;
-    case CmpOp::kGe: return lhs >= rhs;
-  }
-  return false;
-}
-
-double AttrValueAsDouble(const AttrValue& v, bool* ok) {
-  *ok = true;
-  if (const auto* i = std::get_if<std::int64_t>(&v)) {
-    return static_cast<double>(*i);
-  }
-  if (const auto* d = std::get_if<double>(&v)) return *d;
-  if (const auto* b = std::get_if<bool>(&v)) return *b ? 1.0 : 0.0;
-  *ok = false;  // string constants can't compare against numeric columns
-  return 0.0;
-}
-
-bool HasEdge(const gar::miner::TripleGraph& g, std::uint32_t s,
+bool HasEdge(const graph::TripleGraph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   const auto [b, e] = g.OutEdgeRange(s);
   const std::uint32_t* dsts = g.OutEdgeDsts();
@@ -53,60 +32,16 @@ bool HasEdge(const gar::miner::TripleGraph& g, std::uint32_t s,
 
 }  // namespace
 
-bool EvalAntecedent(const std::vector<Predicate>& antecedent,
-                    const std::uint32_t* emb, const VertexAttrs* attrs,
-                    const gar::miner::TripleGraph& g) {
-  for (const auto& pred : antecedent) {
-    switch (pred.kind) {
-      case PredKind::kConst: {
-        if (attrs == nullptr) return false;
-        const AttrColumn* col = attrs->Find(pred.attr);
-        if (col == nullptr) return false;
-        const auto row = emb[pred.node];
-        if (!col->Valid(row)) return false;
-        bool ok = false;
-        const double rhs = AttrValueAsDouble(pred.value, &ok);
-        if (!(ok && EvalCmp(pred.op, col->Value(row), rhs))) return false;
-        break;
-      }
-      case PredKind::kVar: {
-        if (attrs == nullptr) return false;
-        const AttrColumn* lhs = attrs->Find(pred.attr);
-        const AttrColumn* rhs = attrs->Find(pred.rhs_attr);
-        if (lhs == nullptr || rhs == nullptr) return false;
-        const auto ri = emb[pred.node], rj = emb[pred.rhs_node];
-        if (!lhs->Valid(ri) || !rhs->Valid(rj)) return false;
-        if (!EvalCmp(pred.op, lhs->Value(ri), rhs->Value(rj))) return false;
-        break;
-      }
-      case PredKind::kExists: {
-        if (attrs == nullptr) return false;
-        const AttrColumn* col = attrs->Find(pred.attr);
-        if (col == nullptr || !col->Valid(emb[pred.node])) return false;
-        break;
-      }
-      case PredKind::kEdge:
-        if (!HasEdge(g, emb[pred.src], emb[pred.dst], pred.label)) {
-          return false;
-        }
-        break;
-      case PredKind::kMl:
-        return false;  // unsupported on CPU
-    }
-  }
-  return true;
-}
-
 ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
                              const ChaseConfig& cfg) {
-  const gar::miner::PatternMatcher matcher(g_);
+  const graph::PatternMatcher matcher(g_);
   ChaseResult result;
   result.rules.resize(rules.size());
   result.matches.resize(rules.size());
 
   // Pre-validate rules and expand their patterns once.
   struct Prepared {
-    gar::miner::PatternSpec spec;
+    graph::PatternSpec spec;
     std::uint32_t pu = 0, pv = 0;  // pivot (unused for counting here)
     std::uint32_t head_slot = 0;
     bool has_head = false;
@@ -159,7 +94,7 @@ ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
 
   // X evaluation against one embedding (shared with validate_rules).
   auto eval_x = [&](const GARule& r, const std::uint32_t* emb) {
-    return EvalAntecedent(r.antecedent, emb, attrs_, g_);
+    return graph::EvalAntecedent(r.antecedent, emb, attrs_, g_);
   };
   const bool typed = g_.has_vertex_labels();
   auto label_ok = [&](const GARule& r, std::uint32_t node,
@@ -176,7 +111,7 @@ ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
   std::atomic<bool> capped_out{false};
   for (std::uint32_t round = 1; round <= cfg.max_rounds; ++round) {
     const auto round_t0 = std::chrono::steady_clock::now();
-    std::vector<std::vector<DerivedEdge>> contribs(rules.size());
+    std::vector<std::vector<graph::DerivedEdge>> contribs(rules.size());
 
     auto process_rule = [&](std::size_t i) {
       if (pp[i].skip) return;
@@ -230,10 +165,10 @@ ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
         }
 
         if (x_ok && pp[i].has_head && !head_hit) {
-          contribs[i].push_back(DerivedEdge{emb[pp[i].pu], emb[pp[i].pv],
-                                            pp[i].head_slot,
-                                            static_cast<std::uint32_t>(i),
-                                            round});
+          contribs[i].push_back(graph::DerivedEdge{emb[pp[i].pu], emb[pp[i].pv],
+                                                   pp[i].head_slot,
+                                                   static_cast<std::uint32_t>(i),
+                                                   round});
         }
       }
     };
@@ -255,8 +190,13 @@ ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
                                  .count();
 
     const auto merge_t0 = std::chrono::steady_clock::now();
-    const RoundMerge merge =
-        MergeRoundFacts(contribs, cfg.max_derivations, g_, &result);
+    std::vector<std::uint64_t> rule_derived(rules.size(), 0);
+    const graph::RoundMerge merge =
+        graph::MergeRoundFacts(contribs, cfg.max_derivations, g_,
+                               &result.derived, &rule_derived);
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+      result.rules[i].derived += rule_derived[i];
+    }
     const double merge_secs = std::chrono::duration<double>(
                                   std::chrono::steady_clock::now() - merge_t0)
                                   .count();
@@ -280,61 +220,6 @@ ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
     }
   }
   return result;
-}
-
-RoundMerge MergeRoundFacts(
-    const std::vector<std::vector<DerivedEdge>>& contribs,
-    std::uint64_t max_derivations, gar::miner::TripleGraph& g,
-    ChaseResult* result) {
-  // Ordered merge: dedupe (slot, src, dst) across rules; the lowest-index
-  // rule producing a fact gets the credit.
-  std::unordered_map<std::uint32_t,
-                     std::vector<std::pair<std::uint32_t, std::uint32_t>>>
-      pending;
-  std::unordered_map<std::uint32_t, std::unordered_set<std::uint64_t>>
-      pending_sets;
-  RoundMerge out;
-  for (std::size_t i = 0; i < contribs.size() && !out.deriv_capped; ++i) {
-    for (const auto& e : contribs[i]) {
-      if (!pending_sets[e.slot]
-               .insert(gar::miner::PackPair(e.src, e.dst))
-               .second) {
-        continue;
-      }
-      pending[e.slot].emplace_back(e.src, e.dst);
-      ++out.new_facts;
-      ++result->rules[i].derived;
-      result->derived.push_back(e);
-      if (result->derived.size() >= max_derivations) {
-        out.deriv_capped = true;
-        break;
-      }
-    }
-  }
-  if (out.new_facts > 0) {
-    // Merge the round's facts into the graph (base + inverse mirror), one
-    // out-adjacency rebuild for the whole batch.
-    g.AddEdgesBatch(pending);
-  }
-  return out;
-}
-
-void MarkAbsentEdges(const gar::miner::TripleGraph& g,
-                     const std::uint32_t* src, const std::uint32_t* dst,
-                     std::uint32_t slot, std::size_t n, char* keep) {
-#if defined(GAR_REASON_HAS_TBB)
-  tbb::parallel_for(
-      tbb::blocked_range<std::size_t>(0, n),
-      [&](const tbb::blocked_range<std::size_t>& r) {
-        for (std::size_t t = r.begin(); t != r.end(); ++t) {
-          keep[t] = !HasEdge(g, src[t], dst[t], slot) ? 1 : 0;
-        }
-      });
-#else
-  for (std::size_t t = 0; t < n; ++t) {
-    keep[t] = !HasEdge(g, src[t], dst[t], slot) ? 1 : 0;
-  }
-#endif
 }
 
 }  // namespace reason

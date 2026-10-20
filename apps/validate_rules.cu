@@ -1,8 +1,8 @@
 // validate_rules: re-verifies mined GAR rules on a knowledge graph — the
 // "inference check" counterpart of the mining apps. For every rule it
-// re-enumerates the pattern embeddings (miner::PatternMatcher, homomorphism
+// re-enumerates the pattern embeddings (graph::PatternMatcher, homomorphism
 // + vertex-label post-filter, the miners' counting convention), evaluates X
-// (gar::reason::EvalAntecedent), and recomputes the pivot-pair quality:
+// (gar::graph::EvalAntecedent), and recomputes the pivot-pair quality:
 //
 //   support    = |{(emb[pu], emb[pv]) : topology ∧ label ∧ X ∧ head ∈ G}|
 //   confidence = support / |{(emb[pu], emb[pv]) : topology ∧ label ∧ X}|
@@ -29,11 +29,12 @@
 // NOTE: do not include <execution> here — it drags in AVX512 intrinsics
 // headers that nvcc + GCC 12 cannot compile.
 
-#include "gar/miner/pattern_matcher.h"
-#include "gar/miner/triple_graph.h"
-#include "gar/reason/chase.h"
+#include "gar/bridge/graph_loader.h"
+#include "gar/bridge/vertex_attrs_loader.h"
+#include "gar/graph/pattern_matcher.h"
+#include "gar/graph/predicate_evaluator.h"
+#include "gar/graph/triple_graph.h"
 #include "gar/rule_loader.h"
-#include "vertex_attrs_loader.h"
 
 namespace {
 
@@ -77,7 +78,7 @@ Args ParseArgs(int argc, char** argv) {
   return a;
 }
 
-bool HasEdge(const gar::miner::TripleGraph& g, std::uint32_t s,
+bool HasEdge(const gar::graph::TripleGraph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   const auto [b, e] = g.OutEdgeRange(s);
   const std::uint32_t* dsts = g.OutEdgeDsts();
@@ -115,9 +116,9 @@ struct RuleReport {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::miner::TripleGraph g =
-        gar::miner::TripleGraph::LoadImmutableCSR(args.csr_dir,
-                                                  /*with_inverses=*/true);
+    gar::graph::TripleGraph g =
+        gar::bridge::LoadTripleGraph(args.csr_dir,
+                                     /*with_inverses=*/true);
     std::cerr << "[validate_rules] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
               << "\n";
@@ -139,12 +140,12 @@ int main(int argc, char** argv) {
     }
     std::cerr << "[validate_rules] " << rules.size() << " rules\n";
 
-    const gar::reason::VertexAttrs attrs =
-        gar_apps::LoadVertexAttrs(args.csr_dir);
-    const gar::reason::VertexAttrs* attrs_p =
+    const gar::graph::VertexAttrs attrs =
+        gar::bridge::LoadVertexAttrs(args.csr_dir);
+    const gar::graph::VertexAttrs* attrs_p =
         attrs.columns.empty() ? nullptr : &attrs;
 
-    const gar::miner::PatternMatcher matcher(g);
+    const gar::graph::PatternMatcher matcher(g);
     const bool typed = g.has_vertex_labels();
     std::vector<RuleReport> reports(rules.size());
     std::size_t n_pass = 0, n_drift = 0, n_skip = 0;
@@ -182,7 +183,7 @@ int main(int argc, char** argv) {
         continue;
       }
 
-      gar::miner::PatternSpec spec;
+      gar::graph::PatternSpec spec;
       spec.num_vertices = n;
       for (std::uint32_t s = 0; s < n; ++s) {
         for (gar::EdgeIndex e = r.pattern.offsets[s];
@@ -226,12 +227,12 @@ int main(int argc, char** argv) {
         }
         if (!label_ok) continue;
         ++rep.embeddings;
-        if (!gar::reason::EvalAntecedent(r.antecedent, emb, attrs_p, g)) {
+        if (!gar::graph::EvalAntecedent(r.antecedent, emb, attrs_p, g)) {
           continue;
         }
         ++rep.x_ok;
         const std::uint64_t key =
-            gar::miner::PackPair(emb[pu], emb[pv]);
+            gar::graph::PackPair(emb[pu], emb[pv]);
         if (!body_pairs.insert(key).second) continue;
         if (has_head && HasEdge(g, emb[pu], emb[pv], head_slot)) {
           head_pairs.insert(key);

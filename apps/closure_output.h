@@ -11,12 +11,12 @@
 #include <string>
 #include <vector>
 
-#include "gar/miner/triple_graph.h"
+#include "gar/graph/triple_graph.h"
 #include "gar/reason/chase.h"
 
 namespace gar_apps {
 
-inline void WriteClosureOutputs(const gar::miner::TripleGraph& g,
+inline void WriteClosureOutputs(const gar::graph::TripleGraph& g,
                                 const std::vector<std::string>& rule_ids,
                                 const gar::reason::ChaseResult& res,
                                 const std::string& out_root,

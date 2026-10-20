@@ -1,9 +1,9 @@
-#include "gar/miner/pattern_matcher.h"
+#include "gar/graph/pattern_matcher.h"
 
 #include <algorithm>
 
 namespace gar {
-namespace miner {
+namespace graph {
 
 namespace {
 
@@ -214,5 +214,5 @@ std::uint64_t PatternMatcher::Enumerate(const PatternSpec& p,
   return count;
 }
 
-}  // namespace miner
+}  // namespace graph
 }  // namespace gar

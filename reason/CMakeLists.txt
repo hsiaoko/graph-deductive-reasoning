@@ -12,7 +12,7 @@ add_library(gar::reason ALIAS gar_reason)
 target_include_directories(gar_reason PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(gar_reason PUBLIC gar::miner)
+target_link_libraries(gar_reason PUBLIC gar::graph)
 target_compile_features(gar_reason PUBLIC cxx_std_20)
 
 # oneTBB (bundled with MatrixGraph) for rule-level parallelism in the chase;

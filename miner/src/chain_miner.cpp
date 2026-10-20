@@ -9,6 +9,9 @@
 namespace gar {
 namespace miner {
 
+using graph::PackPair;
+using graph::TripleGraph;
+
 ChainMiner::ChainMiner(const TripleGraph& graph, MinerConfig config)
     : g_(graph), cfg_(std::move(config)) {}
 

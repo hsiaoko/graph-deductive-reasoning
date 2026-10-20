@@ -20,14 +20,26 @@
 │   │   ├── predicate.h       #   五种谓词：const/var/edge/exists/ml
 │   │   ├── rule.h            #   GARule = (Q, X -> p₀)：pivot、可选 consequent、quality
 │   │   ├── rule_loader.h     #   YAML/目录/规则集加载（容错解析）
-│   │   ├── rule_store.h      #   规则集 YAML 写出（挖掘结果序列化）
-│   │   └── matrixgraph_bridge.h  # 零拷贝桥接到 MatrixGraph GARPatternArrays
+│   │   └── rule_store.h      #   规则集 YAML 写出（挖掘结果序列化）
+│   └── src/
+├── graph/                    # 图与语义内核（纯 CPU，无 MatrixGraph 依赖）
+│   ├── include/gar/graph/
+│   │   ├── triple_graph.h    #   三元组存储（uint32 字典编码 + 逆关系 + 多种索引）
+│   │   ├── pattern_matcher.h #   任意连通小拓扑的 embedding 枚举（CPU 回溯）
+│   │   ├── vertex_attrs.h    #   顶点属性列（AttrColumn/VertexAttrs，纯 CPU 类型）
+│   │   ├── fact.h            #   DerivedEdge：一轮 chase 导出的新事实
+│   │   ├── predicate_evaluator.h  # EvalAntecedent：X 谓词对单个 embedding 求值
+│   │   └── fact_merger.h     #   MergeRoundFacts/MarkAbsentEdges：轮末事实合并
+│   └── src/
+├── bridge/                   # MatrixGraph 适配层（唯一可 include MatrixGraph 的库）
+│   ├── include/gar/bridge/
+│   │   ├── graph_loader.h    #   ImmutableCSR → TripleGraph
+│   │   ├── vertex_attrs_loader.h  # vertex_attr → CPU 属性列（.cu 内联头）
+│   │   └── pattern_bridge.h  #   零拷贝桥接到 MatrixGraph GARPatternArrays
 │   └── src/
 ├── miner/                    # GAR 挖掘
 │   ├── include/gar/miner/
-│   │   ├── triple_graph.h    #   三元组存储（uint32 字典编码 + 逆关系 + 多种索引）
 │   │   ├── chain_miner.h     #   链式规则挖掘（AMIE 式，support/confidence）
-│   │   ├── pattern_matcher.h #   任意连通小拓扑的 embedding 枚举（CPU 回溯）
 │   │   └── pattern_miner.h   #   通用拓扑规则挖掘（星型/三角/带环，逐层扩展）
 │   ├── mine_rules.cpp        #   链式挖掘命令行
 │   └── mine_graph_rules.cpp  #   通用拓扑挖掘命令行
@@ -42,7 +54,6 @@
 │   ├── deduce.cu             # 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase）
 │   ├── deduce_gpu.cu         # 演绎 GPU 版：匹配 + X 求值 + head 发射在 device（GARDeduce）
 │   ├── validate_rules.cu     # 规则检验：重算 pivot-pair support/confidence 并与挖掘值对账
-│   ├── vertex_attrs_loader.h # deduce 双端共享：vertex_attr → CPU 属性列
 │   └── closure_output.h      # deduce 双端共享：summary/closure/matches 输出
 ├── docs/
 │   └── commands.md           # 命令手册：挖掘与规则查看 CLI 参考
@@ -337,8 +348,8 @@ isPartOf` 上 3016 拓扑匹配 → 1137 过 X → 1107 已在图中（恰为挖
 邻接段扫描**（CPU `PatternMatcher` 有序 pair 数组的 device 对应物，非
 frontier×candidates 暴力对）；X 谓词（含属性列，device 常驻缓存）与 head 发射
 同 kernel 完成。**主端逻辑与 CPU 完全共享**：轮驱动、head 存在性预过滤
-（`reason::MarkAbsentEdges`，TBB 并行）、按规则序去重合并
-（`reason::MergeRoundFacts`）、输出文件（`apps/closure_output.h`）。
+（`graph::MarkAbsentEdges`，TBB 并行）、按规则序去重合并
+（`graph::MergeRoundFacts`）、输出文件（`apps/closure_output.h`）。
 
 **双端一致性实证**：synth、dbpedia（166 条带 X 规则、60 列 literals）与
 fb15k 全 1,652 规则 2 轮无截断（648,595 条闭包事实）上 `summary.yaml`
@@ -403,9 +414,10 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 | CMake target | 说明 |
 |---|---|
 | `gar::core` | 规则表示与加载（CSR + YAML，纯 CPU） |
-| `gar::miner` | GAR 挖掘（ChainMiner 链式 + PatternMiner 通用拓扑 + PatternMatcher 枚举器，纯 CPU） |
+| `gar::graph` | 图与语义内核（TripleGraph + PatternMatcher + 谓词求值/事实合并，纯 CPU） |
+| `gar::miner` | GAR 挖掘（ChainMiner 链式 + PatternMiner 通用拓扑，纯 CPU） |
 | `gar::reason` | GAR 演绎（ChaseEngine：拓扑 + X 谓词的朴素 chase，纯 CPU） |
-| `gar::matrixgraph` | 到 MatrixGraph 的桥接（依赖 `matrixgraph_core`，CUDA） |
+| `gar::bridge` | 到 MatrixGraph 的桥接（依赖 `matrixgraph_core`，CUDA） |
 
 ## 可执行程序
 

@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "gar/miner/pattern_matcher.h"
-#include "gar/miner/triple_graph.h"
+#include "gar/graph/pattern_matcher.h"
+#include "gar/graph/triple_graph.h"
 #include "gar/rule.h"
 
 // PatternMiner: mines GAR rules whose body is an arbitrary small connected
@@ -55,7 +55,7 @@ struct PatternMinerStats {
 
 class PatternMiner {
  public:
-  PatternMiner(const TripleGraph& graph, PatternMinerConfig config);
+  PatternMiner(const graph::TripleGraph& graph, PatternMinerConfig config);
 
   // Runs the mining pass and returns the rules (quality fields filled).
   std::vector<GARule> Mine();
@@ -69,7 +69,7 @@ class PatternMiner {
     std::vector<std::array<std::uint32_t, 3>> edges;  // (src, dst, slot)
   };
 
-  const TripleGraph& g_;
+  const graph::TripleGraph& g_;
   PatternMinerConfig cfg_;
   PatternMinerStats stats_;
 };

@@ -58,6 +58,10 @@ endif ()
 # Project Components
 #######################
 add_subdirectory(core)
+add_subdirectory(graph)
+if (GAR_ENABLE_MATRIXGRAPH)
+    add_subdirectory(bridge)
+endif ()
 add_subdirectory(miner)
 add_subdirectory(reason)
 add_subdirectory(apps)

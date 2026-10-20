@@ -14,6 +14,11 @@
 namespace gar {
 namespace miner {
 
+using graph::PackPair;
+using graph::PatternMatcher;
+using graph::PatternSpec;
+using graph::TripleGraph;
+
 namespace {
 
 using Edge = std::array<std::uint32_t, 3>;  // (src, dst, slot)
