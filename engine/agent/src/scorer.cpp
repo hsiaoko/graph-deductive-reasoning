@@ -82,10 +82,10 @@ double ResidualCost(const std::vector<Fact>& premises,
 }
 
 double Total(const HandcraftedConfig& cfg, double confidence,
-             const ScoredMotif& sm) {
-  return cfg.alpha * (sm.rel_fam + cfg.nu * sm.rel_evd +
-                      cfg.nu2 * (cfg.use_confidence ? confidence : 0.0)) -
-         cfg.beta * sm.dcost;
+             ScoredMotif* sm) {
+  sm->rel = sm->rel_fam + cfg.nu * sm->rel_evd +
+            cfg.nu2 * (cfg.use_confidence ? confidence : 0.0);
+  return cfg.alpha * sm->rel - cfg.beta * sm->dcost;
 }
 
 }  // namespace
@@ -108,7 +108,7 @@ void ExactScorer::Score(const GARule& rule, const Motif& mu,
       premises.empty() ? 0.0
                        : static_cast<double>(n_hits) / premises.size();
   out->dcost = ResidualCost(premises, hits, *cost_);
-  out->total = Total(cfg_, rule.quality.confidence, *out);
+  out->total = Total(cfg_, rule.quality.confidence, out);
 }
 
 void HdcScorer::Score(const GARule& rule, const Motif& mu,
@@ -145,7 +145,7 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
     }
   }
   out->dcost = ResidualCost(premises, hits, *cost_);
-  out->total = Total(cfg_, rule.quality.confidence, *out);
+  out->total = Total(cfg_, rule.quality.confidence, out);
 }
 
 }  // namespace agent

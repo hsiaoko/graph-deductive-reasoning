@@ -197,7 +197,7 @@ fb15k 全规则集 1,652/1,652 全 PASS（同一图上挖掘值与重算值完�
 ./build/bin/gar_reason --mode agent --csr <immutable_csr_dir> --rules <rules_root> \
     --goal 'rel_name(src,dst)' --budget 30 \
     [--policy deterministic|random|hybrid] [--scorer exact|hdc] [--hdc-dim 8192] \
-    [--executor greedy] [--seed 42] [--max-candidates-per-rule 256] \
+    [--executor greedy|bnb] [--top-k N] [--seed 42] [--max-candidates-per-rule 256] \
     [--alpha 1] [--beta 1] [--gamma 0.5] [--nu 1] [--nu2 0.5] [--tau-hdc 0.15] \
     [--no-confidence] [--out <dir>] [--verify-against-closure] [--print 20]
 ```
@@ -207,6 +207,14 @@ fb15k 全规则集 1,652/1,652 全 PASS（同一图上挖掘值与重算值完�
   `closure_edges.tsv`（与 deduce 同布局）、`summary.yaml`（goal/derived/成本/终止原因/达成）。
 - `--verify-against-closure` 在 app 层另跑 CpuChaseEngine 全闭包并断言
   agent 导出 ⊆ 闭包（soundness 写入 summary.yaml）。
+- `--executor bnb` 是论文 Figure 6 的 HybNS best-first 分支定界：`--top-k 0`
+  （默认）为精确模式，搜索穷尽时给出最优性证书（`certified_optimal`，Theorem 5）
+  或预算不足证书（`certified_no_chain`）+ anytime 贪心续跑回退；`--top-k N>0`
+  截断每分支候选（无证书）。
 - 已知局限：greedy 无回溯，rel_fam 高的浅层 decoy 规则会吸干预算
-  （fb15k olympics 区的 athletes↔medals_won 互逆规则对即为例证）；深层目标的
-  最优链交给 BranchBoundExecutor（price 重排，下一阶段）。
+  （fb15k olympics 区的 athletes↔medals_won 互逆规则对即为例证）。
+- 规模注意（fb15k 实测）：精确 bnb 的兄弟分支退役粒度是"每展开一个 motif"，
+  等价 price 的候选在大 DG 邻域里成百上千，展开数可上千（~0.1s 与 ~40MB
+  每分支）；用 `--max-candidates-per-rule`/`--top-k`/紧凑 budget 控制搜索规模。
+  正例：5a 困死 greedy 的 round-2 goal `athletes(/m/05r4w,/m/09n48)` 由 bnb
+  以 budget 2 找到最优 2 步链（gar_000815 → gar_000063，certified_optimal）。

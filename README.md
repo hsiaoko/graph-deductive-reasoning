@@ -67,7 +67,7 @@
 │   └── agent/                #   策略制导演绎（policy-guided deduction，论文核心）
 │       ├── include/gar/engine/agent/
 │       │   ├── reasoning_agent.h     # ReasoningAgent：composition root
-│       │   ├── executor.h            # Executor 基类 + GreedyExecutor（bnb 预留 top_k）
+│       │   ├── executor.h            # Executor 基类 + GreedyExecutor + BranchBoundExecutor（HybNS 分支定界）
 │       │   ├── motif_generator.h     # NaiveMotifGenerator（d(p₀)<∞ 硬过滤前置）
 │       │   ├── scorer.h              # ExactScorer / HdcScorer（rel_fam/rel_evd/dcost/price）
 │       │   ├── policy.h              # Deterministic / Randomized / HybridNeuroSymbolic

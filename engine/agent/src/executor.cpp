@@ -1,5 +1,6 @@
 #include "gar/engine/agent/executor.h"
 
+#include "apply_helpers.h"
 #include "gar/graph/predicate_evaluator.h"
 
 namespace gar {
@@ -98,32 +99,18 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
         break;
       }
     } else {
-      // Classify the blocking precondition: re-evaluate per predicate in
-      // order (EvalAntecedent short-circuits the same way) and take the
-      // first failure; an edge predicate is dynamic iff some rule derives
-      // its (base) relation, everything else is static (reads G only).
-      bool dynamic = false;
-      std::size_t fail_idx = rule.antecedent.size();
-      for (std::size_t j = 0; j < rule.antecedent.size(); ++j) {
-        const gar::Predicate& pred = rule.antecedent[j];
-        if (!graph::EvalAntecedent({pred}, emb, state->attrs(), g)) {
-          fail_idx = j;
-          if (pred.kind == gar::PredKind::kEdge) {
-            const std::uint32_t id =
-                ctx.table->Find(analysis::PredicateIdOf(pred, rule));
-            dynamic = id != analysis::kInvalidPredicate &&
-                      ctx.dg->InDegree(id) > 0;
-          }
-          break;
-        }
-      }
-      failures->RecordFailure(MotifHash(mu.rule, emb, n), dynamic,
+      // Classify the blocking precondition (shared helper, chase
+      // semantics): an edge predicate is dynamic iff some rule derives its
+      // (base) relation, everything else is static (reads G only).
+      const FailureInfo fi =
+          ClassifyFailure(rule, emb, state->attrs(), g, ctx);
+      failures->RecordFailure(MotifHash(mu.rule, emb, n), fi.dynamic,
                               state->version());
       // Witness the match and the evaluated prefix, failing one included
       // ("a match computed is information gained", §4.1.1).
       const std::size_t upto =
-          fail_idx < rule.antecedent.size()
-              ? n_pattern + fail_idx + 1
+          fi.fail_idx < rule.antecedent.size()
+              ? n_pattern + fi.fail_idx + 1
               : premises.size();
       for (std::size_t i = 0; i < upto && i < premises.size(); ++i) {
         witness->WitnessFact(premises[i], ctx.encoder);

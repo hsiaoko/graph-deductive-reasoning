@@ -37,7 +37,12 @@ struct AgentContext {
 struct ExecConfig {
   std::uint64_t budget = 100;
   std::uint32_t match_cap_per_rule = 256;
-  std::uint32_t top_k = 0;  // reserved for branch-and-bound (next phase)
+  std::uint32_t top_k = 0;  // bnb: 0 = keep all candidates (exact mode,
+                            // Theorem 5 certificate); k > 0 truncates
+  // Subgoal-utility decay (§3.2): a derived fact on predicate q earns
+  // w_q = utility_gamma^{d(q)}. Mirrors the scorer's gamma; the app wires
+  // HandcraftedConfig::gamma through.
+  double utility_gamma = 0.5;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its
@@ -60,10 +65,16 @@ struct AgentResult {
   std::vector<AgentStep> chain;
   std::vector<graph::DerivedEdge> derived;  // every fact derived, in order
   double total_cost = 0.0;
+  double utility = 0.0;       // sum of w_q over derived facts (§3.2)
   bool goal_derived = false;
   bool budget_exhausted = false;
   std::string termination;  // "goal" | "no_candidates" | "budget" |
-                            // "goal_already_in_graph"
+                            // "goal_already_in_graph" | "anytime_fallback"
+  // Branch-and-bound certificates (greedy leaves all of these false):
+  bool certified_optimal = false;    // top_k==0 and search exhausted (Thm 5)
+  bool certified_no_chain = false;   // top_k==0, no chain fits the budget
+  bool anytime_fallback = false;     // returned chain is the line-14 fallback
+  std::uint64_t expansions = 0;      // branches actually expanded (bnb)
 };
 
 class Executor {
@@ -80,6 +91,15 @@ class Executor {
 // failure; unit cost = 1). Terminates on goal derived, no candidates, or
 // budget exhausted.
 class GreedyExecutor final : public Executor {
+ public:
+  AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
+                  FailureRegistry* failures, const AgentContext& ctx,
+                  const ExecConfig& cfg, const ExecKit& kit) override;
+};
+
+// BranchBoundExecutor: the HybNS best-first branch-and-bound (paper
+// Figure 6) — see branch_bound_executor.h for the branch-state design.
+class BranchBoundExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
                   FailureRegistry* failures, const AgentContext& ctx,

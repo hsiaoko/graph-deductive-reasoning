@@ -56,7 +56,7 @@ void PrintUsage() {
          "  gar_reason --mode agent --csr <csr_dir> --rules <rules_root> "
          "--goal 'rel_name(src,dst)' --budget B [--policy "
          "deterministic|random|hybrid] [--scorer exact|hdc] [--hdc-dim N] "
-         "[--executor greedy] [--seed N] [--max-candidates-per-rule N] "
+         "[--executor greedy|bnb] [--top-k N] [--seed N] [--max-candidates-per-rule N] "
          "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
          "[--tau-hdc F] [--no-confidence] [--out <dir>] "
          "[--verify-against-closure] [--print N]\n";
@@ -94,7 +94,7 @@ Args ParseArgs(int argc, char** argv) {
         (a.agent.policy != "deterministic" && a.agent.policy != "random" &&
          a.agent.policy != "hybrid") ||
         (a.agent.scorer != "exact" && a.agent.scorer != "hdc") ||
-        a.agent.executor != "greedy") {
+        (a.agent.executor != "greedy" && a.agent.executor != "bnb")) {
       PrintUsage();
       std::exit(2);
     }

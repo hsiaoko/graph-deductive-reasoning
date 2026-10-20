@@ -32,7 +32,8 @@ struct AgentModeArgs {
   std::uint64_t budget = 100;
   std::string policy = "deterministic";   // deterministic|random|hybrid
   std::string scorer = "exact";           // exact|hdc
-  std::string executor = "greedy";        // greedy (bnb: next phase)
+  std::string executor = "greedy";        // greedy|bnb
+  std::uint32_t top_k = 0;                // bnb: 0 = exact (no truncation)
   std::uint32_t hdc_dim = gar::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
   std::uint32_t max_candidates_per_rule = 256;
@@ -49,6 +50,8 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--policy") a->policy = next();
   else if (k == "--scorer") a->scorer = next();
   else if (k == "--executor") a->executor = next();
+  else if (k == "--top-k")
+    a->top_k = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--hdc-dim") a->hdc_dim = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--seed") a->seed = std::stoull(next());
   else if (k == "--max-candidates-per-rule")
@@ -180,18 +183,26 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
     comps.policy = std::make_unique<agent::DeterministicPolicy>();
   }
   comps.generator = std::make_unique<agent::NaiveMotifGenerator>();
-  comps.executor = std::make_unique<agent::GreedyExecutor>();
+  if (args.executor == "bnb") {
+    comps.executor = std::make_unique<agent::BranchBoundExecutor>();
+  } else {
+    comps.executor = std::make_unique<agent::GreedyExecutor>();
+  }
 
   agent::ReasoningAgent rag(std::move(comps), &dg, encoder);
   agent::AgentState state(g, attrs.columns.empty() ? nullptr : &attrs, rules);
   agent::ExecConfig ec;
   ec.budget = args.budget;
   ec.match_cap_per_rule = args.max_candidates_per_rule;
+  ec.top_k = args.top_k;
+  ec.utility_gamma = args.score.gamma;
 
   std::cerr << "[gar_reason] running: policy=" << args.policy
             << " scorer=" << args.scorer << " executor=" << args.executor
             << " budget=" << args.budget << " hdc_dim=" << args.hdc_dim
-            << " seed=" << args.seed << "\n";
+            << " seed=" << args.seed;
+  if (args.executor == "bnb") std::cerr << " top_k=" << args.top_k;
+  std::cerr << "\n";
   const auto run_t0 = std::chrono::steady_clock::now();
   const agent::AgentResult res = rag.Run(&state, goal, ec);
   const double wall =
@@ -279,7 +290,15 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "goal_derived: " << (res.goal_derived ? "true" : "false") << "\n"
       << "budget_exhausted: " << (res.budget_exhausted ? "true" : "false")
       << "\n"
-      << "termination: " << res.termination << "\n";
+      << "termination: " << res.termination << "\n"
+      << "utility: " << res.utility << "\n"
+      << "expansions: " << res.expansions << "\n"
+      << "certified_optimal: " << (res.certified_optimal ? "true" : "false")
+      << "\n"
+      << "certified_no_chain: "
+      << (res.certified_no_chain ? "true" : "false") << "\n"
+      << "anytime_fallback: " << (res.anytime_fallback ? "true" : "false")
+      << "\n";
     if (args.verify_against_closure) {
       f << "soundness: " << (sound ? "pass" : "fail") << "\n";
     }

@@ -30,9 +30,10 @@ struct ScoredMotif {
   Motif motif;
   double rel_fam = 0.0;   // familiarity: gamma^{sum_q d(q)} (App. H ScoreF)
   double rel_evd = 0.0;   // evidence: witnessed-premise share / HDC cosine
+  double rel = 0.0;       // rel_fam + nu*rel_evd + nu2*conf (relevance part)
   double dcost = 0.0;     // estimated application cost, unwitnessed premises
   double price = 0.0;     // completion-price lower bound w0 + d(p0) (§3.4)
-  double total = 0.0;     // alpha*(rel_fam + nu*rel_evd + nu2*conf) - beta*dcost
+  double total = 0.0;     // alpha*rel - beta*dcost
   bool admissible = false;  // d(p0) < inf and the grounded conclusion is new
 };
 

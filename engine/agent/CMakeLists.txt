@@ -13,6 +13,7 @@ add_library(gar_engine_agent STATIC
     src/scorer.cpp
     src/motif_generator.cpp
     src/executor.cpp
+    src/branch_bound_executor.cpp
 )
 add_library(gar::engine::agent ALIAS gar_engine_agent)
 
