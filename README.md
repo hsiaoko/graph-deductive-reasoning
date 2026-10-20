@@ -37,6 +37,20 @@
 │   │   ├── vertex_attrs_loader.h  # vertex_attr → CPU 属性列（.cu 内联头）
 │   │   └── pattern_bridge.h  #   零拷贝桥接到 MatrixGraph GARPatternArrays
 │   └── src/
+├── hdc/                      # HDC 数值库（bit-packed 超向量，纯 CPU，零仓库内依赖）
+│   ├── include/gar/hdc/
+│   │   ├── const.h           #   维度档位 + ChooseDim（App I：(m+N)² ≤ D）
+│   │   ├── hypervector.h     #   Hypervector：Bind(XOR)/Permute(循环移位)/Hamming/Cosine
+│   │   ├── encoder.h         #   HdcEncoder：符号在线哈希 + v_p ⊕ ⨁ᵢ ρⁱ(v_aᵢ)
+│   │   └── evidence.h        #   EvidenceVector：int16 坐标累加器 + cosine 读数
+│   └── src/
+├── analysis/                 # L2 分析服务（只依赖 core + graph）
+│   ├── include/gar/analysis/
+│   │   ├── predicate_table.h #   PredicateTable：谓词名 → 稠密 id（身份规则唯一来源）
+│   │   ├── dependency_graph.h#   DependencyGraph：BuildDG + 反向 BFS/Dijkstra d(·) + Tarjan SCC + dot/yaml
+│   │   ├── rule_stats.h      #   RuleSetStats：规则集与依赖形态统计
+│   │   └── goal_sampler.h    #   GoalSampler：可导出槽位上的目标事实采样（纯采样，无 chase）
+│   └── src/
 ├── miner/                    # GAR 挖掘
 │   ├── include/gar/miner/
 │   │   ├── chain_miner.h     #   链式规则挖掘（AMIE 式，support/confidence）
@@ -421,6 +435,8 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 |---|---|
 | `gar::core` | 规则表示与加载（CSR + YAML，纯 CPU） |
 | `gar::graph` | 图与语义内核（TripleGraph + PatternMatcher + 谓词求值/事实合并，纯 CPU） |
+| `gar::hdc` | HDC 数值内核（bit-packed 超向量：bind/bundle/permute/cosine，零依赖纯 CPU） |
+| `gar::analysis` | L2 分析服务（PredicateTable + DependencyGraph/SCC + RuleSetStats + GoalSampler；仅依赖 core+graph） |
 | `gar::miner` | GAR 挖掘（ChainMiner 链式 + PatternMiner 通用拓扑，纯 CPU） |
 | `gar::engine::deduction` | GAR 演绎引擎家族（DeductionEngine 基类；CpuChaseEngine 朴素 chase 纯 CPU + GpuDeduceEngine） |
 | `gar::bridge` | 到 MatrixGraph 的桥接（依赖 `matrixgraph_core`，CUDA） |
