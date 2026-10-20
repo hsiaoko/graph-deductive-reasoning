@@ -43,17 +43,22 @@
 │   │   └── pattern_miner.h   #   通用拓扑规则挖掘（星型/三角/带环，逐层扩展）
 │   ├── mine_rules.cpp        #   链式挖掘命令行
 │   └── mine_graph_rules.cpp  #   通用拓扑挖掘命令行
-├── reason/                   # GAR 推理（chase / 逻辑闭包，纯 CPU）
-│   ├── include/gar/reason/
-│   │   └── chase.h           #   ChaseEngine：拓扑匹配 + X 谓词过滤 + 迭代至不动点
-│   └── src/
+├── engine/                   # 演绎引擎家族
+│   └── deduction/            #   全闭包演绎（chase）：抽象基类 + CPU/GPU 双实现
+│       ├── include/gar/engine/deduction/
+│       │   ├── deduction_engine.h    # DeductionEngine 基类 + ChaseConfig/ChaseResult 契约
+│       │   ├── cpu_chase_engine.h    # CpuChaseEngine：拓扑匹配 + X 谓词 + 迭代至不动点（oneTBB）
+│       │   └── gpu_deduce_engine.h   # GpuDeduceEngine：匹配/X/head 发射在 device（GARDeduce）
+│       └── src/
 ├── apps/
 │   ├── kg_loader.cu          # KG 装载：TripleGraph -> MatrixGraph ImmutableCSR + CLI 展示
 │   ├── match_pattern.cu      # 规则模式匹配：GARMatch（GPU）物化匹配表 + 属性谓词统计
 │   ├── mine_predicates.cu    # 阶段三：在规则匹配上挖 const/var 属性谓词（回填 X）
-│   ├── deduce.cu             # 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase）
-│   ├── deduce_gpu.cu         # 演绎 GPU 版：匹配 + X 求值 + head 发射在 device（GARDeduce）
+│   ├── deduce.cu             # 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase，薄壳）
+│   ├── deduce_gpu.cu         # 演绎 GPU 版（薄壳）：匹配 + X 求值 + head 发射在 device（GARDeduce）
+│   ├── gar_reason.cu         # 演绎统一入口：--mode full --engine cpu|gpu（--threads 限 CPU 并行度）
 │   ├── validate_rules.cu     # 规则检验：重算 pivot-pair support/confidence 并与挖掘值对账
+│   ├── full_deduce_cli.h     # gar_reason/deduce/deduce_gpu 共享：CLI 解析 + 加载 + 输出
 │   └── closure_output.h      # deduce 双端共享：summary/closure/matches 输出
 ├── docs/
 │   └── commands.md           # 命令手册：挖掘与规则查看 CLI 参考
@@ -310,8 +315,9 @@ var 候选要求等值组两侧都 ≥2 个实体。
 
 ## 演绎（deduce，逻辑闭包）
 
-给定规则集目录与 KG，做完整的 **chase**（CPU `reason::ChaseEngine` / GPU
-MatrixGraph `task::GARDeduce`，两个 app：`deduce` / `deduce_gpu`）：
+给定规则集目录与 KG，做完整的 **chase**（CPU `engine::deduction::CpuChaseEngine` / GPU
+`engine::deduction::GpuDeduceEngine`（MatrixGraph `task::GARDeduce`），统一入口
+`gar_reason --mode full --engine cpu|gpu`，旧 app `deduce` / `deduce_gpu` 为薄壳）：
 
 ```
 G_{i+1} = G_i ∪ { p₀(emb) | 规则 Q[x̄](X → p₀)，emb ∈ Q(G_i)，X(emb) 成立 }
@@ -416,7 +422,7 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 | `gar::core` | 规则表示与加载（CSR + YAML，纯 CPU） |
 | `gar::graph` | 图与语义内核（TripleGraph + PatternMatcher + 谓词求值/事实合并，纯 CPU） |
 | `gar::miner` | GAR 挖掘（ChainMiner 链式 + PatternMiner 通用拓扑，纯 CPU） |
-| `gar::reason` | GAR 演绎（ChaseEngine：拓扑 + X 谓词的朴素 chase，纯 CPU） |
+| `gar::engine::deduction` | GAR 演绎引擎家族（DeductionEngine 基类；CpuChaseEngine 朴素 chase 纯 CPU + GpuDeduceEngine） |
 | `gar::bridge` | 到 MatrixGraph 的桥接（依赖 `matrixgraph_core`，CUDA） |
 
 ## 可执行程序
@@ -427,6 +433,7 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 | `mine_graph_rules` | 通用拓扑 GAR 挖掘（星型/三角/带环，k≤2 时与 mine_rules 一致） |
 | `deduce` | 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase，拓扑 + X 谓词） |
 | `deduce_gpu` | 演绎 GPU 版（MatrixGraph GARDeduce：匹配/X 求值/head 发射在 device） |
+| `gar_reason` | 演绎统一入口（--mode full --engine cpu|gpu，输出与旧 app 逐字节一致；--threads 限 CPU 并行度） |
 | `validate_rules` | 规则检验：重算 pivot-pair support/confidence 与挖掘值对账（PASS/DRIFT） |
 | `kg_loader` | TripleGraph ↔ MatrixGraph ImmutableCSR 转换与 CLI 展示 |
 | `match_pattern` | 规则模式回放（复用 MatrixGraph GPU GARMatch）→ 匹配表 + 属性谓词统计 |

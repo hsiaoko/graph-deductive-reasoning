@@ -2,8 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 project(gar_bridge LANGUAGES CXX)
 
 #######################
-# gar_bridge: MatrixGraph adapter — the only library module allowed to
-# include MatrixGraph headers
+# gar_bridge: MatrixGraph adapter — ImmutableCSR/attribute loading and
+# rule→pattern conversion (with engine/deduction's GPU engine, one of the
+# two sanctioned MatrixGraph contact points)
 #######################
 add_library(gar_bridge STATIC
     src/graph_loader.cpp

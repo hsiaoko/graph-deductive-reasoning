@@ -113,7 +113,7 @@ EOF
 （含逆槽位），支持跨规则链式推导。双引擎，CLI 与输出布局完全相同：
 
 ```bash
-# CPU（reason::ChaseEngine，轮内 oneTBB 规则级并行）
+# CPU（engine::deduction::CpuChaseEngine，轮内 oneTBB 规则级并行）
 ./build/bin/deduce \
     --csr /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr \
     --rules /ssd_data/zhuxk/graphs/KG/fb15k-237/rules \

@@ -38,7 +38,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(deduce deduce.cu)
-    target_link_libraries(deduce PRIVATE gar::bridge gar::reason)
+    target_link_libraries(deduce PRIVATE gar::bridge gar::engine::deduction)
     target_compile_options(deduce PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -49,7 +49,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(deduce_gpu deduce_gpu.cu)
-    target_link_libraries(deduce_gpu PRIVATE gar::bridge gar::reason)
+    target_link_libraries(deduce_gpu PRIVATE gar::bridge gar::engine::deduction)
     target_compile_options(deduce_gpu PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -60,11 +60,22 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(validate_rules validate_rules.cu)
-    target_link_libraries(validate_rules PRIVATE gar::bridge gar::reason)
+    target_link_libraries(validate_rules PRIVATE gar::bridge)
     target_compile_options(validate_rules PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
     set_target_properties(validate_rules PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        POSITION_INDEPENDENT_CODE ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    )
+
+    add_executable(gar_reason gar_reason.cu)
+    target_link_libraries(gar_reason PRIVATE gar::bridge gar::engine::deduction)
+    target_compile_options(gar_reason PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
+    )
+    set_target_properties(gar_reason PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
         POSITION_INDEPENDENT_CODE ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON

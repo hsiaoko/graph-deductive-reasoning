@@ -63,7 +63,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     add_subdirectory(bridge)
 endif ()
 add_subdirectory(miner)
-add_subdirectory(reason)
+add_subdirectory(engine)
 add_subdirectory(apps)
 
 if (GAR_BUILD_EXAMPLES)

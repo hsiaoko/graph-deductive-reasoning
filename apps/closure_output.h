@@ -11,14 +11,14 @@
 #include <string>
 #include <vector>
 
+#include "gar/engine/deduction/deduction_engine.h"
 #include "gar/graph/triple_graph.h"
-#include "gar/reason/chase.h"
 
 namespace gar_apps {
 
 inline void WriteClosureOutputs(const gar::graph::TripleGraph& g,
                                 const std::vector<std::string>& rule_ids,
-                                const gar::reason::ChaseResult& res,
+                                const gar::engine::deduction::ChaseResult& res,
                                 const std::string& out_root,
                                 bool write_matches) {
   std::filesystem::create_directories(out_root);

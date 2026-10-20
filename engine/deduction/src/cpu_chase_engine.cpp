@@ -1,21 +1,24 @@
-#include "gar/reason/chase.h"
+#include "gar/engine/deduction/cpu_chase_engine.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <memory>
 
 #include "gar/graph/fact_merger.h"
 #include "gar/graph/pattern_matcher.h"
 #include "gar/graph/predicate_evaluator.h"
 
-#if defined(GAR_REASON_HAS_TBB)
+#if defined(GAR_ENGINE_DEDUCTION_HAS_TBB)
 #include <tbb/blocked_range.h>
+#include <tbb/global_control.h>
 #include <tbb/parallel_for.h>
 #endif
 
 namespace gar {
-namespace reason {
+namespace engine {
+namespace deduction {
 
 namespace {
 
@@ -32,8 +35,16 @@ bool HasEdge(const graph::TripleGraph& g, std::uint32_t s,
 
 }  // namespace
 
-ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
-                             const ChaseConfig& cfg) {
+ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
+                                const ChaseConfig& cfg) {
+#if defined(GAR_ENGINE_DEDUCTION_HAS_TBB)
+  // ChaseConfig::threads caps TBB parallelism for this Run (0 = all cores).
+  std::unique_ptr<tbb::global_control> tbb_limit;
+  if (cfg.threads > 0) {
+    tbb_limit = std::make_unique<tbb::global_control>(
+        tbb::global_control::max_allowed_parallelism, cfg.threads);
+  }
+#endif
   const graph::PatternMatcher matcher(g_);
   ChaseResult result;
   result.rules.resize(rules.size());
@@ -173,7 +184,7 @@ ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
       }
     };
 
-#if defined(GAR_REASON_HAS_TBB)
+#if defined(GAR_ENGINE_DEDUCTION_HAS_TBB)
     tbb::parallel_for(
         tbb::blocked_range<std::size_t>(0, rules.size()),
         [&](const tbb::blocked_range<std::size_t>& range) {
@@ -222,5 +233,6 @@ ChaseResult ChaseEngine::Run(const std::vector<GARule>& rules,
   return result;
 }
 
-}  // namespace reason
+}  // namespace deduction
+}  // namespace engine
 }  // namespace gar
