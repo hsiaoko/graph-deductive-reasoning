@@ -75,8 +75,8 @@
 │       │   ├── failure_registry.h    # static 永久退休 / dynamic 按版本重准入
 │       │   ├── witness.h             # WitnessLog：exact 集 + HDC 证据向量双写
 │       │   ├── cost_model.h          # CostModel/UnitCostModel（w₀ 下界）
+│       │   ├── branch_bound_executor.h # 分支状态设计（TripleGraph 克隆/分支）
 │       │   ├── fact.h / goal.h / motif.h
-│       │   └── ...
 │       └── src/
 ├── apps/
 │   ├── kg_loader.cu          # KG 装载：TripleGraph -> MatrixGraph ImmutableCSR + CLI 展示
@@ -85,11 +85,15 @@
 │   ├── deduce.cu             # 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase，薄壳）
 │   ├── deduce_gpu.cu         # 演绎 GPU 版（薄壳）：匹配 + X 求值 + head 发射在 device（GARDeduce）
 │   ├── gar_reason.cu         # 演绎统一入口：--mode full（cpu|gpu）/ --mode agent（策略制导，--goal/--budget/--policy/--scorer）
+│   ├── gar_analyze.cu        # 分析工具链：rules-stats/gen-goals/gen-workload/chain-cmp/verify
 │   ├── validate_rules.cu     # 规则检验：重算 pivot-pair support/confidence 并与挖掘值对账
+│   ├── agent_mode.h          # gar_reason/gar_analyze 共享：agent 模式 CLI + 组装（MakeReasoningAgent）
 │   ├── full_deduce_cli.h     # gar_reason/deduce/deduce_gpu 共享：CLI 解析 + 加载 + 输出
 │   └── closure_output.h      # deduce 双端共享：summary/closure/matches 输出
 ├── docs/
-│   └── commands.md           # 命令手册：挖掘与规则查看 CLI 参考
+│   ├── requirements.md       # 需求文档（v0.1→v0.4 终版留档）
+│   ├── agent_design.md       # 架构设计：五级层化 + 依赖禁令 + 语义口径
+│   └── commands.md           # 命令手册：挖掘/演绎/分析 CLI 参考
 ├── tools/
 │   ├── prepare_finreflectkg.py  # FinReflectKG parquet -> TripleGraph 二进制
 │   ├── prepare_triples.py    # 通用三元组转换（tsv/nt/ogb-biokg -> TripleGraph）
@@ -120,7 +124,7 @@ cmake --build build -j
 
 选项：
 
-- `-DGAR_ENABLE_MATRIXGRAPH=ON/OFF`：是否启用 MatrixGraph（CUDA）集成；OFF 时仅构建纯 CPU 的 `gar_core`/`gar_miner`
+- `-DGAR_ENABLE_MATRIXGRAPH=ON/OFF`：是否启用 MatrixGraph（CUDA）集成；OFF 时构建纯 CPU 库（core/hdc/graph/analysis/miner 库本体），bridge/engine/app 不可用
 - `-DGAR_BUILD_EXAMPLES=ON/OFF`
 
 ## 规则格式
@@ -441,6 +445,32 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 ./build/bin/rule_set_info /tmp/synth_rules
 ./build/bin/kg_loader convert --graph data/synth --out /tmp/synth_csr
 ./build/bin/match_pattern --csr /tmp/synth_csr --rule /tmp/synth_rules/gar_000001
+```
+
+### 最小闭环（mine → full → agent → verify，全在 data/synth 上）
+
+```bash
+# 1. 挖掘 + 转 CSR
+./build/bin/mine_rules --graph data/synth --out /tmp/synth_rules --min-supp 2 --min-conf 0.5
+./build/bin/kg_loader convert --graph data/synth --out /tmp/synth_csr
+
+# 2. 全闭包演绎（CPU；--engine gpu 为 GPU 版，输出逐字节一致）
+./build/bin/gar_reason --mode full --engine cpu \
+    --csr /tmp/synth_csr --rules /tmp/synth_rules --out /tmp/synth_full
+
+# 3. 策略制导演绎：朝一个闭包第二轮才导出的事实做目标推理
+./build/bin/gar_reason --mode agent \
+    --csr /tmp/synth_csr --rules /tmp/synth_rules \
+    --goal 'lives_in(p0,t1)' --budget 20 \
+    --policy hybrid --scorer exact --executor bnb \
+    --out /tmp/synth_agent --verify-against-closure
+#    → goal_derived=true，certified_optimal=true，2 步最优链（greedy 需 7 步）
+
+# 4. 三方对账（agent vs cpu 闭包）
+./build/bin/gar_analyze verify --run \
+    --csr /tmp/synth_csr --rules /tmp/synth_rules \
+    --goal 'lives_in(p0,t1)' --budget 20 --executor bnb
+#    → verdict: CONSISTENT
 ```
 
 ## 库目标
