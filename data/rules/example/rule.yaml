@@ -1,0 +1,50 @@
+# Example graph association rule (GAR) in the unified YAML format.
+#
+# Pattern Q (topology in csr_offsets.bin / csr_indices.bin; the inline
+# `pattern.edges` below is the readable logical view):
+#
+#     v0:Person --works_at--> v1:Company
+#     v0:Person --lives_in--> v2:City
+#     v1:Company --located_in--> v2:City
+#
+# Rule: a person who works at a company located in the city they live in,
+# and who is at least 18, is a "local employee".
+rule:
+  id: "gar_example_001"
+  name: "local_employee"
+  description: "Person working at a company located in the city they live in."
+
+  labels:
+    Person: 1
+    Company: 2
+    City: 3
+    works_at: 10
+    lives_in: 11
+    located_in: 12
+    is_local: 13
+
+  pattern:
+    num_vertices: 3
+    nodes:
+      - {id: 0, var: "x",  label: "Person"}
+      - {id: 1, var: "y1", label: "Company"}
+      - {id: 2, var: "z",  label: "City"}
+    edges:
+      - {src: 0, dst: 1, label: "works_at"}
+      - {src: 0, dst: 2, label: "lives_in"}
+      - {src: 1, dst: 2, label: "located_in"}
+    pivot: [0]
+
+  predicates:  # X
+    - {var: 0, attr: "age", op: ">=", value: 18}                                  # const
+    - {lhs: {var: 0, attr: "city"}, op: "=", rhs: {var: 2, attr: "name"}}         # var
+    - {src: 0, dst: 1, label: "works_at"}                                         # edge l(x,y)
+
+  consequent:  # p0
+    {var: 0, attr: "is_local", op: "==", value: true}
+
+  quality:
+    support: 0
+    confidence: 0.0
+    dataset: "synthetic"
+    miner: "handwritten"
