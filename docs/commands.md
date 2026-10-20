@@ -218,3 +218,25 @@ fb15k 全规则集 1,652/1,652 全 PASS（同一图上挖掘值与重算值完�
   每分支）；用 `--max-candidates-per-rule`/`--top-k`/紧凑 budget 控制搜索规模。
   正例：5a 困死 greedy 的 round-2 goal `athletes(/m/05r4w,/m/09n48)` 由 bnb
   以 budget 2 找到最优 2 步链（gar_000815 → gar_000063，certified_optimal）。
+
+## 分析工具链（gar_analyze）
+
+子命令式单一二进制；逻辑全部在 analysis / engine 库，app 只做组合与 IO。
+
+```bash
+./build/bin/gar_analyze rules-stats  --rules <root> [--dot out.dot] [--yaml out.yaml]
+./build/bin/gar_analyze gen-goals    --csr <dir> --rules <root> --per-slot N --seed S --out goals.tsv [--threads N]
+./build/bin/gar_analyze gen-workload --csr <dir> --rules <root> --num-tasks N --seed S --out tasks.tsv [--budgets 0.5,1,2,4]
+./build/bin/gar_analyze chain-cmp    --agent-out <dir> --closure-out <dir> [--goal 'rel(src,dst)']
+./build/bin/gar_analyze verify       --run --csr <dir> --rules <root> --goal 'rel(src,dst)' [--budget B] [--policy ..] [--scorer ..] [--executor greedy|bnb] [--gpu]
+./build/bin/gar_analyze verify       --from-dirs <agent> <cpu> [<gpu>] --goal 'rel(src,dst)'
+./build/bin/gar_analyze verify       --tasks tasks.tsv --csr <dir> --rules <root> [--policy ..] ...
+```
+
+- gen-goals 按论文 §7 的 workload 构造：采样边**整体留出**（hold-out，
+  `TripleGraph::RemoveEdgesBatch`）后跑一次无约束 chase，只保留闭包重新导出的
+  目标；`bstar_round`=chase 首次导出轮次（经验口径），`bstar_dg`=DG 谓词级
+  导出深度（下界口径，`DependencyGraph::DerivationDepths`）。
+- verify 判定：CONSISTENT / BUDGET-LIMITED / DIVERGENT（退出码 1）/
+  INFEASIBLE；--run/--tasks 对全 grounding 目标先 hold-out 目标边再跑
+  agent 与闭包（Γ0 = G \ {g}）。--tasks 是逐任务闭包，开销随任务数线性。

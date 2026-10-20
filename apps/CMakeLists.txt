@@ -80,4 +80,17 @@ if (GAR_ENABLE_MATRIXGRAPH)
         POSITION_INDEPENDENT_CODE ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
+
+    add_executable(gar_analyze gar_analyze.cu)
+    target_link_libraries(gar_analyze PRIVATE
+        gar::bridge gar::engine::deduction gar::engine::agent gar::analysis
+    )
+    target_compile_options(gar_analyze PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
+    )
+    set_target_properties(gar_analyze PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        POSITION_INDEPENDENT_CODE ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    )
 endif ()

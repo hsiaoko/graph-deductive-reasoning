@@ -192,5 +192,36 @@ std::uint64_t TripleGraph::AddEdgesBatch(
   return added;
 }
 
+std::uint64_t TripleGraph::RemoveEdgesBatch(
+    const std::unordered_map<
+        std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
+        by_slot) {
+  const bool mirrored = rel_pairs_.size() > num_relations_;
+  std::uint64_t removed = 0;
+  for (const auto& [slot, edges] : by_slot) {
+    if (slot >= rel_pairs_.size()) {
+      throw std::runtime_error("TripleGraph::RemoveEdges: slot out of range");
+    }
+    const std::uint32_t inv_slot =
+        slot < num_relations_ ? slot + num_relations_ : slot - num_relations_;
+    auto remove_from = [&](std::uint32_t s, std::uint32_t src,
+                           std::uint32_t dst) {
+      const std::uint64_t key = PackPair(src, dst);
+      if (rel_pair_sets_[s].erase(key) == 0) return false;
+      auto& v = rel_pairs_[s];
+      v.erase(std::lower_bound(v.begin(), v.end(), key));
+      return true;
+    };
+    for (const auto& [s, d] : edges) {
+      if (!remove_from(slot, s, d)) continue;
+      if (mirrored) remove_from(inv_slot, d, s);
+      if (slot < num_relations_) --num_edges_;
+      ++removed;
+    }
+  }
+  if (removed > 0) RebuildOutAdjacency();
+  return removed;
+}
+
 }  // namespace graph
 }  // namespace gar

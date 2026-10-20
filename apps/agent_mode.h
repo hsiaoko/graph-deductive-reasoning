@@ -112,6 +112,39 @@ inline gar::engine::agent::Goal ParseGoalSpec(const std::string& spec,
   return goal;
 }
 
+// Builds the agent composition root from CLI-flavored args. Shared by
+// gar_reason --mode agent and gar_analyze verify (identical defaults and
+// wiring in both).
+inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
+    const AgentModeArgs& args, const gar::analysis::DependencyGraph* dg) {
+  namespace agent = gar::engine::agent;
+  const gar::hdc::HdcEncoder encoder({args.hdc_dim, args.seed});
+  agent::ReasoningAgent::Components comps;
+  comps.cost_model = std::make_unique<agent::UnitCostModel>();
+  if (args.scorer == "exact") {
+    comps.scorer = std::make_unique<agent::ExactScorer>(args.score,
+                                                        comps.cost_model.get());
+  } else {
+    comps.scorer = std::make_unique<agent::HdcScorer>(args.score,
+                                                      comps.cost_model.get(),
+                                                      encoder);
+  }
+  if (args.policy == "random") {
+    comps.policy = std::make_unique<agent::RandomizedPolicy>(args.seed);
+  } else if (args.policy == "hybrid") {
+    comps.policy = std::make_unique<agent::HybridNeuroSymbolicPolicy>();
+  } else {
+    comps.policy = std::make_unique<agent::DeterministicPolicy>();
+  }
+  comps.generator = std::make_unique<agent::NaiveMotifGenerator>();
+  if (args.executor == "bnb") {
+    comps.executor = std::make_unique<agent::BranchBoundExecutor>();
+  } else {
+    comps.executor = std::make_unique<agent::GreedyExecutor>();
+  }
+  return agent::ReasoningAgent(std::move(comps), dg, encoder);
+}
+
 // Renders a derived fact as "rel(src,dst)" with entity names.
 inline std::string FormatFact(const gar::graph::TripleGraph& g,
                               const gar::graph::DerivedEdge& e) {
@@ -164,32 +197,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << "s)\n";
 
   // ---- components (composition root wiring) ----
-  const gar::hdc::HdcEncoder encoder({args.hdc_dim, args.seed});
-  agent::ReasoningAgent::Components comps;
-  comps.cost_model = std::make_unique<agent::UnitCostModel>();
-  if (args.scorer == "exact") {
-    comps.scorer =
-        std::make_unique<agent::ExactScorer>(args.score, comps.cost_model.get());
-  } else {
-    comps.scorer = std::make_unique<agent::HdcScorer>(args.score,
-                                                      comps.cost_model.get(),
-                                                      encoder);
-  }
-  if (args.policy == "random") {
-    comps.policy = std::make_unique<agent::RandomizedPolicy>(args.seed);
-  } else if (args.policy == "hybrid") {
-    comps.policy = std::make_unique<agent::HybridNeuroSymbolicPolicy>();
-  } else {
-    comps.policy = std::make_unique<agent::DeterministicPolicy>();
-  }
-  comps.generator = std::make_unique<agent::NaiveMotifGenerator>();
-  if (args.executor == "bnb") {
-    comps.executor = std::make_unique<agent::BranchBoundExecutor>();
-  } else {
-    comps.executor = std::make_unique<agent::GreedyExecutor>();
-  }
-
-  agent::ReasoningAgent rag(std::move(comps), &dg, encoder);
+  agent::ReasoningAgent rag = MakeReasoningAgent(args, &dg);
   agent::AgentState state(g, attrs.columns.empty() ? nullptr : &attrs, rules);
   agent::ExecConfig ec;
   ec.budget = args.budget;

@@ -465,6 +465,7 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 | `deduce` | 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase，拓扑 + X 谓词） |
 | `deduce_gpu` | 演绎 GPU 版（MatrixGraph GARDeduce：匹配/X 求值/head 发射在 device） |
 | `gar_reason` | 演绎统一入口（--mode full --engine cpu|gpu，输出与旧 app 逐字节一致；--threads 限 CPU 并行度） |
+| `gar_analyze` | 分析工具链（rules-stats / gen-goals / gen-workload / chain-cmp / verify 三方对账） |
 | `validate_rules` | 规则检验：重算 pivot-pair support/confidence 与挖掘值对账（PASS/DRIFT） |
 | `kg_loader` | TripleGraph ↔ MatrixGraph ImmutableCSR 转换与 CLI 展示 |
 | `match_pattern` | 规则模式回放（复用 MatrixGraph GPU GARMatch）→ 匹配表 + 属性谓词统计 |

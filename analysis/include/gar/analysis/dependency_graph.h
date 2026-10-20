@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "gar/analysis/predicate_table.h"
+#include "gar/graph/triple_graph.h"
 #include "gar/rule.h"
 
 namespace gar {
@@ -64,6 +65,23 @@ class DependencyGraph {
   }
   [[nodiscard]] const PredicateTable& table() const { return *table_; }
 
+  // Forward derivation depths (the B* lower-bound read of the graph,
+  // gar_analyze gen-goals): target(p) = fewest rule applications that can
+  // derive a NEW fact of predicate p, counted predicate-level (data-blind
+  // beyond the anchor set): 1 + min over rules deriving p of max over
+  // premise costs, where a premise costs 0 when base-anchored (a
+  // data-readable precondition: attribute/ML, or a relation with base
+  // instances) and its own target depth otherwise. An anchored predicate
+  // that is also derivable still gets a finite target from its rules.
+  // Cycles that never bottom out at an anchor stay kUnreachable. This is a
+  // LOWER bound on the instance-level chain length (per premise it counts
+  // the cheapest derivation of the predicate, not of the specific
+  // instance); the chase's first-derivation round is the empirical
+  // counterpart (see gar_analyze gen-goals' output header). Dijkstra over
+  // the rule hypergraph, lazy PQ.
+  [[nodiscard]] std::vector<std::uint32_t> DerivationDepths(
+      const std::vector<char>& base_anchored) const;
+
   // Serializes the graph as Graphviz dot (SCCs as clusters; when
   // `distances` is given, node labels carry " (d=k)") and as YAML
   // (nodes / arcs / per-SCC annotation).
@@ -88,6 +106,13 @@ class DependencyGraph {
   std::vector<std::uint32_t> in_off_;
   std::vector<std::uint32_t> in_arcs_;   // arc ids
 };
+
+// Anchor flags for DerivationDepths: a predicate is base-anchored when its
+// preconditions read data directly — attribute/ML predicates (no relation
+// by that name in the graph) always anchor; a relation anchors iff it has
+// at least one base edge in `g`.
+[[nodiscard]] std::vector<char> BaseAnchoredPredicates(
+    const DependencyGraph& dg, const graph::TripleGraph& g);
 
 }  // namespace analysis
 }  // namespace gar

@@ -7,6 +7,7 @@
 #include <queue>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -26,6 +27,116 @@ std::string Quote(const std::string& s) {
 }
 
 }  // namespace
+
+std::vector<std::uint32_t> DependencyGraph::DerivationDepths(
+    const std::vector<char>& base_anchored) const {
+  const std::size_t n = table_->size();
+
+  // Group arcs into rules: one consequent per rule, so a rule's arcs share
+  // the head (dst); premises = distinct src set.
+  struct RuleArcs {
+    std::uint32_t head = 0;
+    std::vector<std::uint32_t> premises;
+  };
+  std::unordered_map<std::uint32_t, RuleArcs> by_rule;
+  for (const auto& a : arcs_) {
+    auto& ra = by_rule[a.rule];
+    ra.head = a.dst;
+    if (std::find(ra.premises.begin(), ra.premises.end(), a.src) ==
+        ra.premises.end()) {
+      ra.premises.push_back(a.src);
+    }
+  }
+
+  // Dijkstra over the rule hypergraph, tracking two depth notions:
+  //   cost[p]   premise-side price of p: 0 when base-anchored (readable
+  //             from data), else the settled derivation depth;
+  //   target[p] derive-side price of p: min over rules deriving p of
+  //             1 + max premise cost — the fewest applications that can
+  //             derive a NEW fact of p (this is the bstar_dg read; an
+  //             anchored but derivable p still gets a finite target).
+  // A rule is ready when all premises have finite cost; its candidate is
+  // 1 + max premise cost. Candidates are popped in increasing order, so
+  // the first candidate settling a head is its minimum (least fixpoint).
+  struct RuleState {
+    std::uint32_t head;
+    std::uint32_t pending;      // premises without a finite cost yet
+    std::uint32_t max_settled;  // max cost over ready premises
+  };
+  std::vector<RuleState> rstates;
+  std::unordered_map<std::uint32_t, std::vector<std::uint32_t>>
+      used_by;  // predicate -> rule indices referencing it as premise
+  rstates.reserve(by_rule.size());
+  std::vector<std::uint32_t> cost(n, kUnreachable);
+  std::vector<std::uint32_t> target(n, kUnreachable);
+  for (std::uint32_t p = 0; p < n; ++p) {
+    if (p < base_anchored.size() && base_anchored[p]) cost[p] = 0;
+  }
+  for (const auto& [rule_idx, ra] : by_rule) {
+    (void)rule_idx;
+    RuleState rs;
+    rs.head = ra.head;
+    rs.pending = 0;
+    rs.max_settled = 0;
+    for (const std::uint32_t q : ra.premises) {
+      if (cost[q] == kUnreachable) {
+        ++rs.pending;
+      } else {
+        rs.max_settled = std::max(rs.max_settled, cost[q]);
+      }
+      used_by[q].push_back(static_cast<std::uint32_t>(rstates.size()));
+    }
+    rstates.push_back(rs);
+  }
+  using Entry = std::pair<std::uint32_t, std::uint32_t>;  // (cand, rule)
+  std::priority_queue<Entry, std::vector<Entry>, std::greater<>> pq;
+  for (std::uint32_t i = 0; i < rstates.size(); ++i) {
+    if (rstates[i].pending == 0) {
+      pq.emplace(rstates[i].max_settled + 1, i);
+    }
+  }
+  std::vector<char> settled(n, 0);
+  while (!pq.empty()) {
+    const auto [d, ri] = pq.top();
+    pq.pop();
+    const RuleState& rs = rstates[ri];
+    if (settled[rs.head]) continue;  // an earlier (smaller) candidate won
+    settled[rs.head] = 1;
+    target[rs.head] = d;
+    if (cost[rs.head] == kUnreachable) {
+      // Non-anchored head becomes premise-usable at its derivation depth.
+      cost[rs.head] = d;
+      for (const std::uint32_t rj : used_by[rs.head]) {
+        RuleState& s = rstates[rj];
+        if (s.pending == 0) continue;
+        s.max_settled = std::max(s.max_settled, d);
+        if (--s.pending == 0) pq.emplace(s.max_settled + 1, rj);
+      }
+    }
+  }
+  return target;
+}
+
+std::vector<char> BaseAnchoredPredicates(const DependencyGraph& dg,
+                                         const graph::TripleGraph& g) {
+  // Name -> base relation id map, built once (the graph has no reverse
+  // dictionary).
+  std::unordered_map<std::string, std::uint32_t> rel_by_name;
+  for (std::uint32_t r = 0; r < g.num_relations(); ++r) {
+    rel_by_name.emplace(g.RelationName(r), r);
+  }
+  std::vector<char> anchored(dg.NumPredicates(), 0);
+  for (std::uint32_t p = 0; p < dg.NumPredicates(); ++p) {
+    const std::string& name = dg.table().Name(p);
+    const auto it = rel_by_name.find(name);
+    if (it == rel_by_name.end()) {
+      anchored[p] = 1;  // attribute/ML precondition: reads data directly
+    } else {
+      anchored[p] = g.RelationPairs(it->second).empty() ? 0 : 1;
+    }
+  }
+  return anchored;
+}
 
 void DependencyGraph::Build(const std::vector<gar::GARule>& rules,
                             PredicateTable* table) {

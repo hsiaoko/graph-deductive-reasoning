@@ -146,6 +146,17 @@ class TripleGraph {
           std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
           by_slot);
 
+  // Batch edge removal (the hold-out operation of workload construction,
+  // paper §7: "we held out X triples as target facts; a task takes one of
+  // them as g and the rest of the graph as Γ0"): removes each (src, dst)
+  // from the slot, mirroring the inverse slot when built with inverses;
+  // missing edges are skipped; the unified out-adjacency is rebuilt once
+  // when anything changed. Returns the number of edges actually removed.
+  std::uint64_t RemoveEdgesBatch(
+      const std::unordered_map<
+          std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
+          by_slot);
+
   [[nodiscard]] const std::string& EntityName(std::uint32_t id) const {
     return entity_names_[id];
   }
