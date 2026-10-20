@@ -1,11 +1,13 @@
-// gar_reason: unified entry point for the deduction engine family.
+// gar_reason: unified entry point for the reasoning engine family.
 //
-// --mode full runs the whole rule set to a (capped) fixpoint, on the CPU
-// chase (engine::deduction::CpuChaseEngine, oneTBB) or the GPU engine
-// (engine::deduction::GpuDeduceEngine, MatrixGraph task::GARDeduce); both
-// engines share the same semantics and the same output layout as the legacy
-// deduce / deduce_gpu apps. The argument surface is structured so further
-// modes (agent-guided deduction) can plug in later.
+// --mode full  runs the whole rule set to a (capped) fixpoint, on the CPU
+//     chase (engine::deduction::CpuChaseEngine, oneTBB) or the GPU engine
+//     (engine::deduction::GpuDeduceEngine, MatrixGraph task::GARDeduce);
+//     both share the semantics and the output layout of the legacy
+//     deduce / deduce_gpu apps.
+// --mode agent runs policy-guided deduction (engine::agent): a single
+//     greedy chain toward a goal fact under a budget, with pluggable
+//     policy / scorer / executor.
 //
 // Usage:
 //   gar_reason --mode full --engine cpu|gpu --csr <immutable_csr_dir>
@@ -14,16 +16,23 @@
 //              [--max-matches 1000000] [--no-matches] [--print 20]
 //              [--threads 0]
 //
-// Output under <out_dir>:
-//   summary.yaml        per-rule embeddings / X-satisfied / derived + totals
-//   closure_edges.tsv   src \t relation \t dst \t round \t rule_id
-//   matches/<rule>.tsv  final-round embeddings (entity names) + x_ok + head
+//   gar_reason --mode agent --csr <dir> --rules <root>
+//              --goal 'rel_name(src,dst)' --budget B
+//              [--policy deterministic|random|hybrid] [--scorer exact|hdc]
+//              [--hdc-dim N] [--executor greedy] [--seed 42]
+//              [--max-candidates-per-rule 256]
+//              [--alpha A] [--beta B] [--gamma G] [--nu N] [--nu2 N2]
+//              [--tau-hdc T] [--no-confidence]
+//              [--out <dir>] [--verify-against-closure] [--print 20]
+//
+// Agent-mode goal arguments are entity names; '_' leaves an argument open.
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
 
+#include "agent_mode.h"
 #include "full_deduce_cli.h"
 #include "gar/engine/deduction/cpu_chase_engine.h"
 #include "gar/engine/deduction/gpu_deduce_engine.h"
@@ -31,10 +40,27 @@
 namespace {
 
 struct Args {
-  std::string mode;    // "full" (only mode for now)
-  std::string engine;  // "cpu" | "gpu"
+  std::string mode;    // "full" | "agent"
+  std::string engine;  // full mode: "cpu" | "gpu"
   gar_apps::FullDeduceArgs full;
+  gar_apps::AgentModeArgs agent;
 };
+
+void PrintUsage() {
+  std::cerr
+      << "usage:\n"
+         "  gar_reason --mode full --engine cpu|gpu --csr <csr_dir> "
+         "--rules <rules_root> --out <out_dir> [--max-rounds N] "
+         "[--max-derivations N] [--max-matches N] [--no-matches] "
+         "[--print N] [--threads N]\n"
+         "  gar_reason --mode agent --csr <csr_dir> --rules <rules_root> "
+         "--goal 'rel_name(src,dst)' --budget B [--policy "
+         "deterministic|random|hybrid] [--scorer exact|hdc] [--hdc-dim N] "
+         "[--executor greedy] [--seed N] [--max-candidates-per-rule N] "
+         "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
+         "[--tau-hdc F] [--no-confidence] [--out <dir>] "
+         "[--verify-against-closure] [--print N]\n";
+}
 
 Args ParseArgs(int argc, char** argv) {
   Args a;
@@ -49,21 +75,59 @@ Args ParseArgs(int argc, char** argv) {
     };
     if (k == "--mode") a.mode = next();
     else if (k == "--engine") a.engine = next();
-    else if (!gar_apps::ParseFullDeduceOption(k, next, &a.full,
-                                              /*allow_threads=*/true)) {
+    else if (gar_apps::ParseFullDeduceOption(k, next, &a.full,
+                                             /*allow_threads=*/true)) {
+    } else if (!gar_apps::ParseAgentModeOption(k, next, &a.agent)) {
       std::cerr << "unknown option: " << k << "\n";
       std::exit(2);
     }
   }
-  if (a.mode != "full" || (a.engine != "cpu" && a.engine != "gpu") ||
-      a.full.csr_dir.empty() || a.full.rules_root.empty()) {
-    std::cerr << "usage: gar_reason --mode full --engine cpu|gpu "
-                 "--csr <csr_dir> --rules <rules_root> --out <out_dir> "
-                 "[--max-rounds N] [--max-derivations N] [--max-matches N] "
-                 "[--no-matches] [--print N] [--threads N]\n";
+  if (a.mode == "full") {
+    if ((a.engine != "cpu" && a.engine != "gpu") || a.full.csr_dir.empty() ||
+        a.full.rules_root.empty()) {
+      PrintUsage();
+      std::exit(2);
+    }
+  } else if (a.mode == "agent") {
+    if (a.full.csr_dir.empty() || a.full.rules_root.empty() ||
+        a.agent.goal_spec.empty() || a.agent.budget == 0 ||
+        (a.agent.policy != "deterministic" && a.agent.policy != "random" &&
+         a.agent.policy != "hybrid") ||
+        (a.agent.scorer != "exact" && a.agent.scorer != "hdc") ||
+        a.agent.executor != "greedy") {
+      PrintUsage();
+      std::exit(2);
+    }
+  } else {
+    PrintUsage();
     std::exit(2);
   }
   return a;
+}
+
+int RunFullMode(const Args& args) {
+  // Log tag / summary title mirror the legacy apps, so gar_reason's
+  // output is byte-identical to deduce (--engine cpu) resp. deduce_gpu
+  // (--engine gpu).
+  const bool cpu = args.engine == "cpu";
+  const char* log_tag = cpu ? "deduce" : "deduce_gpu";
+  const char* summary_title = cpu ? "chase" : "chase (GPU)";
+
+  gar_apps::FullDeduceInputs in =
+      gar_apps::LoadFullDeduceInputs(args.full, log_tag);
+  const gar::graph::VertexAttrs* attrs =
+      in.attrs.columns.empty() ? nullptr : &in.attrs;
+
+  namespace deduction = gar::engine::deduction;
+  std::unique_ptr<deduction::DeductionEngine> engine;
+  if (cpu) {
+    engine = std::make_unique<deduction::CpuChaseEngine>(in.graph, attrs);
+  } else {
+    engine = std::make_unique<deduction::GpuDeduceEngine>(in.graph, attrs);
+  }
+  const auto res = engine->Run(in.rules, args.full.cfg);
+  gar_apps::ReportFullDeduce(args.full, in, res, log_tag, summary_title);
+  return 0;
 }
 
 }  // namespace
@@ -71,30 +135,12 @@ Args ParseArgs(int argc, char** argv) {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    // Log tag / summary title mirror the legacy apps, so gar_reason's
-    // output is byte-identical to deduce (--engine cpu) resp. deduce_gpu
-    // (--engine gpu).
-    const bool cpu = args.engine == "cpu";
-    const char* log_tag = cpu ? "deduce" : "deduce_gpu";
-    const char* summary_title = cpu ? "chase" : "chase (GPU)";
-
-    gar_apps::FullDeduceInputs in =
-        gar_apps::LoadFullDeduceInputs(args.full, log_tag);
-    const gar::graph::VertexAttrs* attrs =
-        in.attrs.columns.empty() ? nullptr : &in.attrs;
-
-    namespace deduction = gar::engine::deduction;
-    std::unique_ptr<deduction::DeductionEngine> engine;
-    if (cpu) {
-      engine = std::make_unique<deduction::CpuChaseEngine>(in.graph, attrs);
-    } else {
-      engine = std::make_unique<deduction::GpuDeduceEngine>(in.graph, attrs);
+    if (args.mode == "agent") {
+      return gar_apps::RunAgentMode(args.full, args.agent);
     }
-    const auto res = engine->Run(in.rules, args.full.cfg);
-    gar_apps::ReportFullDeduce(args.full, in, res, log_tag, summary_title);
+    return RunFullMode(args);
   } catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << "\n";
     return 1;
   }
-  return 0;
 }

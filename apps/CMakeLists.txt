@@ -71,7 +71,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(gar_reason gar_reason.cu)
-    target_link_libraries(gar_reason PRIVATE gar::bridge gar::engine::deduction)
+    target_link_libraries(gar_reason PRIVATE gar::bridge gar::engine::deduction gar::engine::agent)
     target_compile_options(gar_reason PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )

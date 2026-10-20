@@ -16,21 +16,28 @@
 
 namespace gar_apps {
 
+// closure_edges.tsv writer, shared by the full-closure apps and the agent
+// mode (identical layout: src \t relation \t dst \t round \t rule_id).
+inline void WriteClosureEdges(
+    const std::string& out_root, const gar::graph::TripleGraph& g,
+    const std::vector<std::string>& rule_ids,
+    const std::vector<gar::graph::DerivedEdge>& derived) {
+  std::ofstream f(out_root + "/closure_edges.tsv");
+  f << "# src\trelation\tdst\tround\trule\n";
+  for (const auto& e : derived) {
+    f << g.EntityName(e.src) << '\t' << g.SlotName(e.slot) << '\t'
+      << g.EntityName(e.dst) << '\t' << e.round << '\t'
+      << rule_ids[e.rule] << "\n";
+  }
+}
+
 inline void WriteClosureOutputs(const gar::graph::TripleGraph& g,
                                 const std::vector<std::string>& rule_ids,
                                 const gar::engine::deduction::ChaseResult& res,
                                 const std::string& out_root,
                                 bool write_matches) {
   std::filesystem::create_directories(out_root);
-  {
-    std::ofstream f(out_root + "/closure_edges.tsv");
-    f << "# src\trelation\tdst\tround\trule\n";
-    for (const auto& e : res.derived) {
-      f << g.EntityName(e.src) << '\t' << g.SlotName(e.slot) << '\t'
-        << g.EntityName(e.dst) << '\t' << e.round << '\t'
-        << rule_ids[e.rule] << "\n";
-    }
-  }
+  WriteClosureEdges(out_root, g, rule_ids, res.derived);
   {
     std::ofstream f(out_root + "/summary.yaml");
     f << "rounds: " << res.rounds << "\nfixpoint: "

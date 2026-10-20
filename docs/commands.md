@@ -188,3 +188,25 @@ fb15k 全规则集 1,652/1,652 全 PASS（同一图上挖掘值与重算值完�
 | `dbpedia/rules_enriched` | 166 | 带 X 谓词（supp500/conf0.3） |
 
 根路径均为 `/ssd_data/zhuxk/graphs/KG/`。
+
+## 策略制导演绎（gar_reason --mode agent，论文 §3-§5）
+
+单链 greedy 朝目标事实演绎；全闭包入口见 `--mode full`（cpu|gpu）。
+
+```bash
+./build/bin/gar_reason --mode agent --csr <immutable_csr_dir> --rules <rules_root> \
+    --goal 'rel_name(src,dst)' --budget 30 \
+    [--policy deterministic|random|hybrid] [--scorer exact|hdc] [--hdc-dim 8192] \
+    [--executor greedy] [--seed 42] [--max-candidates-per-rule 256] \
+    [--alpha 1] [--beta 1] [--gamma 0.5] [--nu 1] [--nu2 0.5] [--tau-hdc 0.15] \
+    [--no-confidence] [--out <dir>] [--verify-against-closure] [--print 20]
+```
+
+- goal 参数为实体名，`_` 表示开放变元；关系名经图的关系字典解析为 slot。
+- 输出（--out）：`chain.tsv`（每步 rule/embedding/成败/成本/导出事实）、
+  `closure_edges.tsv`（与 deduce 同布局）、`summary.yaml`（goal/derived/成本/终止原因/达成）。
+- `--verify-against-closure` 在 app 层另跑 CpuChaseEngine 全闭包并断言
+  agent 导出 ⊆ 闭包（soundness 写入 summary.yaml）。
+- 已知局限：greedy 无回溯，rel_fam 高的浅层 decoy 规则会吸干预算
+  （fb15k olympics 区的 athletes↔medals_won 互逆规则对即为例证）；深层目标的
+  最优链交给 BranchBoundExecutor（price 重排，下一阶段）。

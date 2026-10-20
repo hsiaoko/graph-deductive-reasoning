@@ -58,11 +58,25 @@
 │   ├── mine_rules.cpp        #   链式挖掘命令行
 │   └── mine_graph_rules.cpp  #   通用拓扑挖掘命令行
 ├── engine/                   # 演绎引擎家族
-│   └── deduction/            #   全闭包演绎（chase）：抽象基类 + CPU/GPU 双实现
-│       ├── include/gar/engine/deduction/
-│       │   ├── deduction_engine.h    # DeductionEngine 基类 + ChaseConfig/ChaseResult 契约
-│       │   ├── cpu_chase_engine.h    # CpuChaseEngine：拓扑匹配 + X 谓词 + 迭代至不动点（oneTBB）
-│       │   └── gpu_deduce_engine.h   # GpuDeduceEngine：匹配/X/head 发射在 device（GARDeduce）
+│   ├── deduction/            #   全闭包演绎（chase）：抽象基类 + CPU/GPU 双实现
+│   │   ├── include/gar/engine/deduction/
+│   │   │   ├── deduction_engine.h    # DeductionEngine 基类 + ChaseConfig/ChaseResult 契约
+│   │   │   ├── cpu_chase_engine.h    # CpuChaseEngine：拓扑匹配 + X 谓词 + 迭代至不动点（oneTBB）
+│   │   │   └── gpu_deduce_engine.h   # GpuDeduceEngine：匹配/X/head 发射在 device（GARDeduce）
+│   │   └── src/
+│   └── agent/                #   策略制导演绎（policy-guided deduction，论文核心）
+│       ├── include/gar/engine/agent/
+│       │   ├── reasoning_agent.h     # ReasoningAgent：composition root
+│       │   ├── executor.h            # Executor 基类 + GreedyExecutor（bnb 预留 top_k）
+│       │   ├── motif_generator.h     # NaiveMotifGenerator（d(p₀)<∞ 硬过滤前置）
+│       │   ├── scorer.h              # ExactScorer / HdcScorer（rel_fam/rel_evd/dcost/price）
+│       │   ├── policy.h              # Deterministic / Randomized / HybridNeuroSymbolic
+│       │   ├── state.h               # AgentState（Γ 只增 + version 计数）
+│       │   ├── failure_registry.h    # static 永久退休 / dynamic 按版本重准入
+│       │   ├── witness.h             # WitnessLog：exact 集 + HDC 证据向量双写
+│       │   ├── cost_model.h          # CostModel/UnitCostModel（w₀ 下界）
+│       │   ├── fact.h / goal.h / motif.h
+│       │   └── ...
 │       └── src/
 ├── apps/
 │   ├── kg_loader.cu          # KG 装载：TripleGraph -> MatrixGraph ImmutableCSR + CLI 展示
@@ -70,7 +84,7 @@
 │   ├── mine_predicates.cu    # 阶段三：在规则匹配上挖 const/var 属性谓词（回填 X）
 │   ├── deduce.cu             # 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase，薄壳）
 │   ├── deduce_gpu.cu         # 演绎 GPU 版（薄壳）：匹配 + X 求值 + head 发射在 device（GARDeduce）
-│   ├── gar_reason.cu         # 演绎统一入口：--mode full --engine cpu|gpu（--threads 限 CPU 并行度）
+│   ├── gar_reason.cu         # 演绎统一入口：--mode full（cpu|gpu）/ --mode agent（策略制导，--goal/--budget/--policy/--scorer）
 │   ├── validate_rules.cu     # 规则检验：重算 pivot-pair support/confidence 并与挖掘值对账
 │   ├── full_deduce_cli.h     # gar_reason/deduce/deduce_gpu 共享：CLI 解析 + 加载 + 输出
 │   └── closure_output.h      # deduce 双端共享：summary/closure/matches 输出
@@ -439,6 +453,7 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 | `gar::analysis` | L2 分析服务（PredicateTable + DependencyGraph/SCC + RuleSetStats + GoalSampler；仅依赖 core+graph） |
 | `gar::miner` | GAR 挖掘（ChainMiner 链式 + PatternMiner 通用拓扑，纯 CPU） |
 | `gar::engine::deduction` | GAR 演绎引擎家族（DeductionEngine 基类；CpuChaseEngine 朴素 chase 纯 CPU + GpuDeduceEngine） |
+| `gar::engine::agent` | 策略制导演绎（ReasoningAgent + GreedyExecutor + Scorer/Policy 插件，依赖 graph/analysis/hdc/core） |
 | `gar::bridge` | 到 MatrixGraph 的桥接（依赖 `matrixgraph_core`，CUDA） |
 
 ## 可执行程序
