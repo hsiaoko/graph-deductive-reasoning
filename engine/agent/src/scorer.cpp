@@ -104,6 +104,8 @@ void ExactScorer::Score(const GARule& rule, const Motif& mu,
     hits[i] = ctx.witness->Contains(premises[i]);
     n_hits += hits[i];
   }
+  out->premises_total = static_cast<std::uint32_t>(premises.size());
+  out->premises_witnessed = static_cast<std::uint32_t>(n_hits);
   out->rel_evd =
       premises.empty() ? 0.0
                        : static_cast<double>(n_hits) / premises.size();
@@ -144,6 +146,10 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
                     args, p.arity)) >= cfg_.tau_hdc;
     }
   }
+  std::uint32_t n_hits = 0;
+  for (const char h : hits) n_hits += h;
+  out->premises_total = static_cast<std::uint32_t>(premises.size());
+  out->premises_witnessed = n_hits;
   out->dcost = ResidualCost(premises, hits, *cost_);
   out->total = Total(cfg_, rule.quality.confidence, out);
 }

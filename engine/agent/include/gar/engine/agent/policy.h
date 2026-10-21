@@ -7,11 +7,19 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
+#include <string>
 #include <vector>
 
+#include "gar/analysis/dependency_graph.h"
+#include "gar/engine/agent/goal.h"
+#include "gar/engine/agent/jev_client.h"
 #include "gar/engine/agent/motif.h"
+#include "gar/graph/triple_graph.h"
+#include "gar/rule.h"
 
 namespace gar {
 namespace engine {
@@ -94,6 +102,86 @@ class HybridNeuroSymbolicPolicy final : public Policy {
     }
     return best;
   }
+};
+
+struct JevConfig {
+  std::string endpoint = "http://127.0.0.1:8080";
+  std::uint32_t timeout_ms = 2000;
+  std::size_t top_k = 8;
+  bool sample = false;
+  std::uint64_t seed = 42;
+};
+
+// JevPolicy: the LLM decision-model policy (paper §5.3). Per step:
+// admissible hard-filter (same symbolic guarantee as the hybrid policy,
+// Corollary 4) -> keep the top_k candidates by the handcrafted score ->
+// hand them to the Jev decision model with a candidate dossier (rule
+// id/name/description, d(p0), price, witnessed x/y, confidence, the
+// shortest derivation path to the goal, recursive-family annotation) ->
+// the returned probabilities ARE pi. "Rank, not invent": candidates and
+// every logical check stay symbolic; the model only ranks.
+//
+// Calls are control overhead: wall-clock, NOT charged to the budget B
+// (§5.3). Counters are public for the app to report (summary.yaml's
+// control_overhead section).
+//
+// On any client failure (connect/timeout/parse/unmappable answer) it warns
+// once on stderr and falls back to plain argmax-total over ALL candidates
+// (exactly DeterministicPolicy's selection).
+//
+// NOTE: with BranchBoundExecutor the ranking comes from the scorer (the
+// symbolic f), so a Jev policy makes no calls there (calls()==0); Jev
+// ranks inside the greedy loop, which is the §5.1 policy point.
+class JevPolicy final : public Policy {
+ public:
+  JevPolicy(JevConfig cfg, std::unique_ptr<JevClient> client,
+            const Goal* goal, const graph::TripleGraph* g,
+            const analysis::DependencyGraph* dg,
+            const std::vector<GARule>* rules,
+            const std::vector<std::string>* rule_ids, double budget)
+      : cfg_(std::move(cfg)),
+        client_(std::move(client)),
+        goal_(goal),
+        g_(g),
+        dg_(dg),
+        rules_(rules),
+        rule_ids_(rule_ids),
+        remaining_(budget),
+        rng_(cfg_.seed) {}
+
+  std::optional<std::size_t> Select(
+      const std::vector<ScoredMotif>& cands) override;
+
+  void OnApplication(const Motif& mu, bool success, double cost) override {
+    (void)mu;
+    (void)success;
+    remaining_ -= cost;
+  }
+
+  [[nodiscard]] std::uint64_t calls() const { return calls_; }
+  [[nodiscard]] double total_wall_ms() const { return wall_ms_; }
+  [[nodiscard]] std::uint64_t fallbacks() const { return fallbacks_; }
+
+ private:
+  JevConfig cfg_;
+  std::unique_ptr<JevClient> client_;
+  const Goal* goal_;
+  const graph::TripleGraph* g_;
+  const analysis::DependencyGraph* dg_;
+  const std::vector<GARule>* rules_;
+  const std::vector<std::string>* rule_ids_;
+  double remaining_;
+  std::mt19937 rng_;
+
+  std::uint64_t calls_ = 0;
+  double wall_ms_ = 0.0;
+  std::uint64_t fallbacks_ = 0;
+  bool warned_ = false;
+
+  // Lazily computed per-goal tables (d(.) for the dossier text).
+  std::vector<std::uint32_t> distances_;
+  std::uint32_t goal_pred_ = analysis::kInvalidPredicate;
+  void EnsureGoalTables();
 };
 
 }  // namespace agent

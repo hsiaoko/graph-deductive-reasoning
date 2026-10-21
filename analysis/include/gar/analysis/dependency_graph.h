@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 #include "gar/analysis/predicate_table.h"
@@ -54,6 +55,35 @@ class DependencyGraph {
     bool recursive;
   };
   [[nodiscard]] std::vector<Scc> StronglyConnectedComponents() const;
+
+  // SCC id of `pred` when it belongs to a recursive family, -1 otherwise.
+  // The Tarjan result is computed once and cached (mutable cache, logically
+  // const).
+  [[nodiscard]] int RecursiveFamilyOf(std::uint32_t pred) const;
+
+  // One step of a shortest rule path toward the goal: the next predicate
+  // hop and the rule witnessing the arc. BFS tree parent, so d(parent) =
+  // d(pred) - 1 in the unit-cost DistancesTo table (weighted Dijkstra and
+  // unit BFS agree on the path SET for unit weights).
+  struct PathParent {
+    std::uint32_t parent = kInvalidPredicate;  // next hop toward the goal
+    std::uint32_t via_rule = UINT32_MAX;       // contributing rule index
+  };
+  // Unit-cost BFS parent table toward `goal_pred`; unreachable predicates
+  // keep parent == kInvalidPredicate.
+  [[nodiscard]] std::vector<PathParent> ShortestPathTo(
+      std::uint32_t goal_pred) const;
+
+  // Renders the shortest derivation route from `from_pred` to `goal_pred`
+  // as explainable text, e.g.
+  //   medals_won --[gar_000063]--> athletes
+  // (rule labels come from `rule_ids` when given, else the rule index as
+  // "rN"). Returns "" when no path exists; from == goal renders just the
+  // predicate name. Used to hand the scorer/policy a derivation route from
+  // a candidate's conclusion to the goal.
+  [[nodiscard]] std::string RenderPath(
+      std::uint32_t from_pred, std::uint32_t goal_pred,
+      const std::vector<std::string>* rule_ids = nullptr) const;
 
   [[nodiscard]] std::uint32_t NumPredicates() const;
   [[nodiscard]] std::uint64_t NumArcs() const { return arcs_.size(); }
@@ -105,6 +135,11 @@ class DependencyGraph {
   std::vector<std::uint32_t> out_arcs_;  // arc ids
   std::vector<std::uint32_t> in_off_;
   std::vector<std::uint32_t> in_arcs_;   // arc ids
+
+  // Tarjan cache (filled lazily by EnsureSccCache; logically const).
+  void EnsureSccCache() const;
+  mutable std::optional<std::vector<Scc>> scc_cache_;
+  mutable std::vector<int> recursive_family_of_;  // pred -> scc id, -1 = none
 };
 
 // Anchor flags for DerivationDepths: a predicate is base-anchored when its

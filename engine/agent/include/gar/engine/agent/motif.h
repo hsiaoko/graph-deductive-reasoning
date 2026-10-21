@@ -35,6 +35,10 @@ struct ScoredMotif {
   double price = 0.0;     // completion-price lower bound w0 + d(p0) (§3.4)
   double total = 0.0;     // alpha*rel - beta*dcost
   bool admissible = false;  // d(p0) < inf and the grounded conclusion is new
+  // Premise accounting behind rel_evd (filled by the scorers): the exact
+  // counts, rendered "x/y" into the Jev state text.
+  std::uint32_t premises_total = 0;
+  std::uint32_t premises_witnessed = 0;
 };
 
 // Rule head resolution, identical to the chase (cpu_chase_engine.cpp): the

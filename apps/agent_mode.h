@@ -30,7 +30,7 @@ namespace gar_apps {
 struct AgentModeArgs {
   std::string goal_spec;  // "rel_name(src,dst)"; '_' = open argument
   std::uint64_t budget = 100;
-  std::string policy = "deterministic";   // deterministic|random|hybrid
+  std::string policy = "deterministic";   // deterministic|random|hybrid|jev
   std::string scorer = "exact";           // exact|hdc
   std::string executor = "greedy";        // greedy|bnb
   std::uint32_t top_k = 0;                // bnb: 0 = exact (no truncation)
@@ -39,6 +39,10 @@ struct AgentModeArgs {
   std::uint32_t max_candidates_per_rule = 256;
   gar::engine::agent::HandcraftedConfig score;
   bool verify_against_closure = false;
+  // Jev (LLM decision model) policy knobs; --jev-mock swaps the HTTP client
+  // for the network-free MockJevClient (development/regression support).
+  gar::engine::agent::JevConfig jev;
+  bool jev_mock = false;
 };
 
 // Parses one agent-mode option; returns false when `k` is not one.
@@ -64,6 +68,13 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--tau-hdc") a->score.tau_hdc = std::stod(next());
   else if (k == "--no-confidence") a->score.use_confidence = false;
   else if (k == "--verify-against-closure") a->verify_against_closure = true;
+  else if (k == "--jev-endpoint") a->jev.endpoint = next();
+  else if (k == "--jev-timeout-ms")
+    a->jev.timeout_ms = static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--jev-top-k")
+    a->jev.top_k = static_cast<std::size_t>(std::stoull(next()));
+  else if (k == "--jev-sample") a->jev.sample = true;
+  else if (k == "--jev-mock") a->jev_mock = true;
   else return false;
   return true;
 }
@@ -114,9 +125,16 @@ inline gar::engine::agent::Goal ParseGoalSpec(const std::string& spec,
 
 // Builds the agent composition root from CLI-flavored args. Shared by
 // gar_reason --mode agent and gar_analyze verify (identical defaults and
-// wiring in both).
+// wiring in both). When args.policy == "jev", a JevPolicy is built from
+// `jev_ctx` (goal/graph/rules/rule_ids — the policy needs them for the
+// state text) and *jev_out is set for control-overhead reporting.
 inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
-    const AgentModeArgs& args, const gar::analysis::DependencyGraph* dg) {
+    const AgentModeArgs& args, const gar::analysis::DependencyGraph* dg,
+    const gar::engine::agent::Goal* goal = nullptr,
+    const gar::graph::TripleGraph* graph = nullptr,
+    const std::vector<gar::GARule>* rules = nullptr,
+    const std::vector<std::string>* rule_ids = nullptr,
+    gar::engine::agent::JevPolicy** jev_out = nullptr) {
   namespace agent = gar::engine::agent;
   const gar::hdc::HdcEncoder encoder({args.hdc_dim, args.seed});
   agent::ReasoningAgent::Components comps;
@@ -129,7 +147,24 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
                                                       comps.cost_model.get(),
                                                       encoder);
   }
-  if (args.policy == "random") {
+  if (args.policy == "jev") {
+    if (goal == nullptr || graph == nullptr || rules == nullptr) {
+      throw std::invalid_argument("--policy jev needs goal/graph/rules "
+                                  "context (MakeReasoningAgent)");
+    }
+    std::unique_ptr<agent::JevClient> client;
+    if (args.jev_mock) {
+      client = std::make_unique<agent::MockJevClient>(args.seed);
+    } else {
+      client = std::make_unique<agent::HttpJevClient>(args.jev.endpoint,
+                                                      args.jev.timeout_ms);
+    }
+    auto jev = std::make_unique<agent::JevPolicy>(
+        args.jev, std::move(client), goal, graph, dg, rules, rule_ids,
+        static_cast<double>(args.budget));
+    if (jev_out != nullptr) *jev_out = jev.get();
+    comps.policy = std::move(jev);
+  } else if (args.policy == "random") {
     comps.policy = std::make_unique<agent::RandomizedPolicy>(args.seed);
   } else if (args.policy == "hybrid") {
     comps.policy = std::make_unique<agent::HybridNeuroSymbolicPolicy>();
@@ -197,7 +232,10 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << "s)\n";
 
   // ---- components (composition root wiring) ----
-  agent::ReasoningAgent rag = MakeReasoningAgent(args, &dg);
+  agent::JevPolicy* jev = nullptr;
+  agent::ReasoningAgent rag = MakeReasoningAgent(
+      args, &dg, &goal, &g, &rules, &rule_ids,
+      args.policy == "jev" ? &jev : nullptr);
   agent::AgentState state(g, attrs.columns.empty() ? nullptr : &attrs, rules);
   agent::ExecConfig ec;
   ec.budget = args.budget;
@@ -307,6 +345,14 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << (res.certified_no_chain ? "true" : "false") << "\n"
       << "anytime_fallback: " << (res.anytime_fallback ? "true" : "false")
       << "\n";
+    if (jev != nullptr) {
+      // §5.3: decision-model calls are control overhead — wall-clock, not
+      // charged to the budget.
+      f << "control_overhead:\n"
+        << "  calls: " << jev->calls() << "\n"
+        << "  wall_ms: " << jev->total_wall_ms() << "\n"
+        << "  fallbacks: " << jev->fallbacks() << "\n";
+    }
     if (args.verify_against_closure) {
       f << "soundness: " << (sound ? "pass" : "fail") << "\n";
     }

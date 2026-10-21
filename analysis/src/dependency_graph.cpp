@@ -257,8 +257,8 @@ std::uint32_t DependencyGraph::Distance(std::uint32_t pred,
   return DistancesTo(goal)[pred];
 }
 
-std::vector<DependencyGraph::Scc>
-DependencyGraph::StronglyConnectedComponents() const {
+void DependencyGraph::EnsureSccCache() const {
+  if (scc_cache_) return;
   // Tarjan, recursive (predicate counts are small: hundreds, not millions).
   const std::size_t n = table_->size();
   std::vector<std::int32_t> index(n, -1), low(n, 0);
@@ -307,7 +307,77 @@ DependencyGraph::StronglyConnectedComponents() const {
   for (std::uint32_t v = 0; v < n; ++v) {
     if (index[v] < 0) visit(v);
   }
-  return out;
+  recursive_family_of_.assign(n, -1);
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    if (!out[i].recursive) continue;
+    for (const std::uint32_t m : out[i].members) {
+      recursive_family_of_[m] = static_cast<int>(i);
+    }
+  }
+  scc_cache_ = std::move(out);
+}
+
+std::vector<DependencyGraph::Scc>
+DependencyGraph::StronglyConnectedComponents() const {
+  EnsureSccCache();
+  return *scc_cache_;
+}
+
+int DependencyGraph::RecursiveFamilyOf(std::uint32_t pred) const {
+  EnsureSccCache();
+  if (pred >= recursive_family_of_.size()) return -1;
+  return recursive_family_of_[pred];
+}
+
+std::vector<DependencyGraph::PathParent> DependencyGraph::ShortestPathTo(
+    std::uint32_t goal_pred) const {
+  const std::size_t n = table_->size();
+  if (goal_pred >= n) {
+    throw std::invalid_argument("ShortestPathTo: unknown goal predicate");
+  }
+  // Same unit-cost BFS as DistancesTo, tracking the tree parent (first
+  // discovery = shortest; multiple arcs (q,p) collapse to the first rule).
+  std::vector<PathParent> parent(n);
+  std::vector<char> seen(n, 0);
+  std::vector<std::uint32_t> queue{goal_pred};
+  seen[goal_pred] = 1;
+  for (std::size_t head = 0; head < queue.size(); ++head) {
+    const std::uint32_t p = queue[head];
+    for (std::uint32_t e = in_off_[p]; e < in_off_[p + 1]; ++e) {
+      const Arc& a = arcs_[in_arcs_[e]];
+      if (seen[a.src]) continue;
+      seen[a.src] = 1;
+      parent[a.src] = PathParent{p, a.rule};
+      queue.push_back(a.src);
+    }
+  }
+  return parent;
+}
+
+std::string DependencyGraph::RenderPath(
+    std::uint32_t from_pred, std::uint32_t goal_pred,
+    const std::vector<std::string>* rule_ids) const {
+  const std::size_t n = table_->size();
+  if (from_pred >= n || goal_pred >= n) return "";
+  if (from_pred == goal_pred) return table_->Name(from_pred);
+  const auto parent = ShortestPathTo(goal_pred);
+  std::string out;
+  std::vector<char> visited(n, 0);  // defensive; a BFS tree cannot cycle
+  std::uint32_t cur = from_pred;
+  while (true) {
+    if (visited[cur]) return "";
+    visited[cur] = 1;
+    out += table_->Name(cur);
+    if (cur == goal_pred) return out;
+    const PathParent& pp = parent[cur];
+    if (pp.parent == kInvalidPredicate) return "";
+    out += " --[";
+    out += (rule_ids != nullptr && pp.via_rule < rule_ids->size())
+               ? (*rule_ids)[pp.via_rule]
+               : "r" + std::to_string(pp.via_rule);
+    out += "]--> ";
+    cur = pp.parent;
+  }
 }
 
 std::uint32_t DependencyGraph::NumPredicates() const {

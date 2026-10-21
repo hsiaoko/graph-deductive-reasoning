@@ -18,7 +18,7 @@
 //
 //   gar_reason --mode agent --csr <dir> --rules <root>
 //              --goal 'rel_name(src,dst)' --budget B
-//              [--policy deterministic|random|hybrid] [--scorer exact|hdc]
+//              [--policy deterministic|random|hybrid|jev] [--scorer exact|hdc]
 //              [--hdc-dim N] [--executor greedy] [--seed 42]
 //              [--max-candidates-per-rule 256]
 //              [--alpha A] [--beta B] [--gamma G] [--nu N] [--nu2 N2]
@@ -55,11 +55,13 @@ void PrintUsage() {
          "[--print N] [--threads N]\n"
          "  gar_reason --mode agent --csr <csr_dir> --rules <rules_root> "
          "--goal 'rel_name(src,dst)' --budget B [--policy "
-         "deterministic|random|hybrid] [--scorer exact|hdc] [--hdc-dim N] "
+         "deterministic|random|hybrid|jev] [--scorer exact|hdc] [--hdc-dim N] "
          "[--executor greedy|bnb] [--top-k N] [--seed N] [--max-candidates-per-rule N] "
          "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
          "[--tau-hdc F] [--no-confidence] [--out <dir>] "
-         "[--verify-against-closure] [--print N]\n";
+         "[--verify-against-closure] [--print N]\n"
+         "    jev: [--jev-endpoint URL] [--jev-timeout-ms N] [--jev-top-k N] "
+         "[--jev-sample] [--jev-mock]\n";
 }
 
 Args ParseArgs(int argc, char** argv) {
@@ -92,7 +94,7 @@ Args ParseArgs(int argc, char** argv) {
     if (a.full.csr_dir.empty() || a.full.rules_root.empty() ||
         a.agent.goal_spec.empty() || a.agent.budget == 0 ||
         (a.agent.policy != "deterministic" && a.agent.policy != "random" &&
-         a.agent.policy != "hybrid") ||
+         a.agent.policy != "hybrid" && a.agent.policy != "jev") ||
         (a.agent.scorer != "exact" && a.agent.scorer != "hdc") ||
         (a.agent.executor != "greedy" && a.agent.executor != "bnb")) {
       PrintUsage();

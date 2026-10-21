@@ -168,7 +168,7 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 |---|---|---|
 | `--goal 'rel(s,d)'` | 必填 | 目标事实；实体名，`_` = 开放变元 |
 | `--budget N` | 100 | 单链成本上限（unit cost：一次应用 = 1，成败都计费） |
-| `--policy` | deterministic | argmax / softmax(total/τ)（`--seed` 可复现）/ admissible 硬过滤+argmax |
+| `--policy` | deterministic | argmax / softmax(total/τ)（`--seed` 可复现）/ admissible 硬过滤+argmax / **jev**（LLM 决策模型，§5.3） |
 | `--scorer` | exact | exact（见证前提比例）/ hdc（cos(v_μ,E) 证据向量读数） |
 | `--executor` | greedy | greedy（§5.1 提交式）/ bnb（Figure 6 分支定界） |
 | `--top-k N` | 0 | bnb 每分支候选截断；0=精确模式（带证书） |
@@ -176,6 +176,16 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--max-candidates-per-rule` | 256 | 每规则每步 motif 枚举上限 |
 | `--alpha/--beta/--gamma/--nu/--nu2/--tau-hdc` | 1/1/0.5/1/0.5/0.15 | 打分权重（total=α·(rel_fam+ν·rel_evd+ν2·conf)−β·dcost） |
 | `--verify-against-closure` | 关 | app 层另跑 CpuChaseEngine 全闭包，断言 agent 导出 ⊆ 闭包（soundness 写入 summary.yaml） |
+| `--jev-endpoint URL` | http://127.0.0.1:8080 | Jev System One 本地端点（纯 HTTP，超时 `--jev-timeout-ms` 默认 2000ms） |
+| `--jev-top-k N` | 8 | 每步送 Jev 排序的候选数（按 total 截取，admissible 硬过滤前置） |
+| `--jev-sample` | 关 | 按 Jev 返回的 π 采样（固定种子可复现）；默认 argmax π |
+| `--jev-mock` | 关 | 用内置 MockJevClient（无网络，按 witnessed 比例+定值噪声出概率），供无 Jev 环境开发/回归 |
+
+jev 说明：decision model 只排序不发明（"rank, not invent"），候选与全部逻辑
+校验都在符号侧；调用计 control overhead（墙钟，不进预算 B），
+summary.yaml 的 `control_overhead{calls, wall_ms, fallbacks}` 记录。HTTP
+异常/超时/解析失败时警告一次并回退 argmax total（与 deterministic 逐字节一致）。
+与 bnb 组合时打分由 scorer 承担，Jev 不产生调用（calls=0）。
 
 输出（`--out`）：`chain.tsv`（每步 rule/embedding/成败/成本/导出事实）、
 `closure_edges.tsv`（与 full 同布局）、`summary.yaml`（goal/derived/成本/

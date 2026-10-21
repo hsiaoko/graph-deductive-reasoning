@@ -588,6 +588,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
                        const agent::Goal& goal,
                        gar::graph::TripleGraph* g_base,
                        const std::vector<gar::GARule>& rules,
+                       const std::vector<std::string>& rule_ids,
                        const gar::graph::VertexAttrs* attrs,
                        const analysis::DependencyGraph& dg,
                        const std::vector<std::uint32_t>& depths,
@@ -606,7 +607,8 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   // the base stays untouched)
   {
     gar::graph::TripleGraph g_agent = g0;
-    agent::ReasoningAgent rag = gar_apps::MakeReasoningAgent(agent_args, &dg);
+    agent::ReasoningAgent rag = gar_apps::MakeReasoningAgent(
+        agent_args, &dg, &goal, &g0, &rules, &rule_ids);
     agent::AgentState state(g_agent, attrs, rules);
     agent::ExecConfig ec;
     ec.budget = agent_args.budget;
@@ -678,7 +680,7 @@ int CmdVerifyRun(const VerifyArgs& a) {
   const gar::graph::VertexAttrs* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
   const VerdictInput v =
-      VerifyOne(a.io, a.agent, goal, &in.graph, in.rules, attrs, dg, depths,
+      VerifyOne(a.io, a.agent, goal, &in.graph, in.rules, in.rule_ids, attrs, dg, depths,
                 a.gpu, &agent_res);
   const std::string verdict = VerdictOf(v);
   WriteVerifyReport(a.report, ParseTextGoal(a.agent.goal_spec), v, verdict,
@@ -770,7 +772,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
     const agent::Goal goal = gar_apps::ParseGoalSpec(spec, in.graph);
     agent::AgentResult agent_res;
     const VerdictInput v =
-        VerifyOne(a.io, task_args, goal, &in.graph, in.rules, attrs, dg,
+        VerifyOne(a.io, task_args, goal, &in.graph, in.rules, in.rule_ids, attrs, dg,
                   depths, a.gpu, &agent_res);
     const std::string verdict = VerdictOf(v);
     if (verdict == "CONSISTENT") ++n_consistent;
