@@ -90,6 +90,11 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
   std::uint64_t spent = 0;
   constexpr std::size_t kMaxCollected = 8;  // distinct facts per open target
   std::unordered_set<std::uint64_t> active;  // recursion cycle guard
+  // Target-level failure memo: a target that yields nothing at the current
+  // fact-set version is not retried from other parents (the repeated
+  // identical subgoal attempts otherwise drain the budget on recursive
+  // families). Re-admitted on Gamma growth, like dynamic motif failures.
+  std::unordered_map<std::uint64_t, std::uint64_t> failed_targets;
 
   // Applies one motif: evaluates X (charged), derives on success. Returns
   // the derived fact on success, nullopt on failure. Shared by the full
@@ -162,6 +167,99 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
     return true;
   };
 
+  // CollectCandidateValues: the free-endpoint values that rules deriving
+  // `slot` could produce RIGHT NOW with `pinned_val` on one side — the
+  // 1-step match horizon (no application, no charge). Used by the
+  // semi-join pre-check in the derive-first path: compatibility is tested
+  // on candidate values BEFORE paying for derivations.
+  auto collect_candidate_values = [&](gar::LabelID slot, bool pin_src,
+                                      std::uint32_t pinned_val)
+      -> std::vector<std::uint32_t> {
+    std::vector<std::uint32_t> vals;
+    std::unordered_set<std::uint32_t> seen;
+    const std::string& pred_name = g.RelationName(slot);
+    const auto it = head_index.find(pred_name);
+    if (it == head_index.end()) return vals;
+    for (const std::uint32_t ri : it->second) {
+      const GARule& r = rules[ri];
+      const RuleHead head = ResolveRuleHead(r);
+      std::unordered_map<std::uint32_t, std::uint32_t> pins;
+      if (pin_src) {
+        pins[head.pu] = pinned_val;
+      } else {
+        pins[head.pv] = pinned_val;
+      }
+      const auto spec = build_spec(r);
+      std::vector<std::uint32_t> embs;
+      bool capped = false;
+      const std::uint64_t n_emb = matcher.Enumerate(
+          spec, cfg.match_cap_per_rule, &embs, &capped, pins);
+      const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+      const std::uint32_t free_v = pin_src ? head.pv : head.pu;
+      for (std::uint64_t k = 0; k < n_emb; ++k) {
+        const std::uint32_t* emb = embs.data() + k * n;
+        if (!label_ok(r, emb)) continue;
+        if (!graph::EvalAntecedent(r.antecedent, emb, state->attrs(), g)) {
+          continue;
+        }
+        if (seen.insert(emb[free_v]).second) vals.push_back(emb[free_v]);
+      }
+    }
+    return vals;
+  };
+
+  // PresentValues: free-endpoint values of `slot` edges ALREADY in the
+  // current fact set under the pin (base + derived; a graph read, not an
+  // application — no charge). Candidate sets for the two-sided coordination
+  // are present-first, then derivable: present ends make pairs for free.
+  auto present_values = [&](gar::LabelID slot, bool pin_src,
+                            std::uint32_t pinned) {
+    const std::uint32_t rel =
+        pin_src ? slot : slot + static_cast<std::uint32_t>(g.num_relations());
+    const auto [ptr, cnt] = g.OutNeighbors(pinned, rel);
+    return std::vector<std::uint32_t>(ptr, ptr + cnt);
+  };
+  auto merge_candidates = [](std::vector<std::uint32_t> present,
+                             const std::vector<std::uint32_t>& derivable) {
+    std::unordered_set<std::uint32_t> seen(present.begin(), present.end());
+    for (const std::uint32_t v : derivable) {
+      if (seen.insert(v).second) present.push_back(v);
+    }
+    return present;
+  };
+
+  // OneLevelDerives: would any rule deriving `slot` fire RIGHT NOW with both
+  // endpoints pinned (1-step match horizon, no charge)? The two-sided
+  // coordination prices a missing semi-join edge with this before paying for
+  // its derivation, so wrong candidate pairs cost nothing but the probe.
+  auto one_level_derives = [&](gar::LabelID slot, std::uint32_t src,
+                               std::uint32_t dst) {
+    const std::string& pred_name = g.RelationName(slot);
+    const auto it = head_index.find(pred_name);
+    if (it == head_index.end()) return false;
+    for (const std::uint32_t ri : it->second) {
+      const GARule& r = rules[ri];
+      const RuleHead head = ResolveRuleHead(r);
+      std::unordered_map<std::uint32_t, std::uint32_t> pins;
+      pins[head.pu] = src;
+      pins[head.pv] = dst;
+      const auto spec = build_spec(r);
+      std::vector<std::uint32_t> embs;
+      bool capped = false;
+      const std::uint64_t n_emb = matcher.Enumerate(
+          spec, cfg.match_cap_per_rule, &embs, &capped, pins);
+      const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+      for (std::uint64_t k = 0; k < n_emb; ++k) {
+        const std::uint32_t* emb = embs.data() + k * n;
+        if (!label_ok(r, emb)) continue;
+        if (graph::EvalAntecedent(r.antecedent, emb, state->attrs(), g)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   // TryTarget: make facts matching `t` hold (derive them if derivable).
   // Returns the (capped) set of (src,dst) pairs now present.
   //   - both sides pinned: present -> {it}; else derive.
@@ -185,6 +283,12 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
     };
     if (out_of_budget() || depth > cfg.max_subgoal_depth) return got;
     if (!active.insert(TargetKey(t)).second) return got;  // cycle
+    {
+      const auto ft = failed_targets.find(TargetKey(t));
+      if (ft != failed_targets.end() && ft->second == state->version()) {
+        return got;  // proven unproductive at this fact set
+      }
+    }
 
     const std::string& pred_name = g.RelationName(t.slot);
     if (DebugBackward()) {
@@ -235,6 +339,9 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
       }
       return scored[x].motif.embedding < scored[y].motif.embedding;
     });
+    if (DebugBackward()) {
+      std::fprintf(stderr, "[bwd]   pass1 mus=%zu\n", mus.size());
+    }
     for (const std::size_t oi : ord) {
       if (out_of_budget()) break;
       if (got.size() >= kMaxCollected) break;
@@ -298,8 +405,34 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
       gar::EdgeIndex oe1, oe2;
       std::uint32_t open_d;   // min d(base slot of opened edges)
       bool derive_first;      // 2-open with one goal-pinned endpoint each
+      std::uint32_t tier;     // derive-first evidence: 1 both sides have
+                              // 1-level candidates, 2 one side, 3 neither
       double rel_fam;
       double conf;
+    };
+    // Cache for the derive-first ordering probes (valid within this call's
+    // collection phase; ordering only, never a soundness input).
+    std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> tier_cache;
+    auto tier_vals = [&](gar::LabelID base, bool pin_src,
+                         std::uint32_t pinned)
+        -> const std::vector<std::uint32_t>& {
+      const std::uint64_t key = (static_cast<std::uint64_t>(base) << 33) ^
+                                (static_cast<std::uint64_t>(pin_src ? 1 : 0)
+                                 << 32) ^
+                                pinned;
+      const auto itc = tier_cache.find(key);
+      if (itc != tier_cache.end()) return itc->second;
+      // Present endpoints first, then 1-level-derivable ones: the ordering
+      // probes judge an opening by everything that can ground it.
+      auto merged = present_values(base, pin_src, pinned);
+      {
+        const auto& deriv = collect_candidate_values(base, pin_src, pinned);
+        std::unordered_set<std::uint32_t> seen(merged.begin(), merged.end());
+        for (const std::uint32_t v : deriv) {
+          if (seen.insert(v).second) merged.push_back(v);
+        }
+      }
+      return tier_cache.emplace(key, std::move(merged)).first->second;
     };
     std::vector<OpenAttempt> attempts;
     for (const std::uint32_t ri : it->second) {
@@ -353,6 +486,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
       for (const auto& [oe1, oe2] : open_sets) {
         std::uint32_t od = open_d(oe1);
         bool df = false;
+        std::uint32_t tier = 3;
         if (oe2 != gar::EdgeIndex(UINT32_MAX)) {
           od = std::max(od, open_d(oe2));
           // derive-first eligible: each opened edge has exactly one
@@ -365,18 +499,119 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
           };
           if (one_pinned(pedges[oe1]) && one_pinned(pedges[oe2])) {
             df = true;
+            // Ordering probe (no charge, cached per side): 1-level
+            // candidate values for each opened edge's free endpoint in
+            // base orientation (inverse edges flip the side).
+            auto side_vals_of = [&](const PE& pe)
+                -> const std::vector<std::uint32_t>& {
+              const bool ps =
+                  (t.src && pe.s == pu) || (t.dst && pe.s == pv);
+              const bool inv = pe.slot >= g.num_relations();
+              const gar::LabelID base =
+                  inv ? pe.slot - g.num_relations() : pe.slot;
+              const std::uint32_t pinned =
+                  ps ? (pe.s == pu ? *t.src : *t.dst)
+                     : (pe.d == pu ? *t.src : *t.dst);
+              return tier_vals(base, inv ? !ps : ps, pinned);
+            };
+            const auto& va = side_vals_of(pedges[oe1]);
+            const auto& vb = side_vals_of(pedges[oe2]);
+            tier = (!va.empty() && !vb.empty()) ? 1
+                   : (!va.empty() || !vb.empty()) ? 2
+                                                  : 3;
+            if (tier == 1) {
+              // Promote to tier 0 when a candidate pair composes through
+              // the remaining sub-pattern — edges present now OR 1-level
+              // derivable (the chased shapes derive the middle edge too).
+              // Composition evidence beats blind two-sided collects.
+              const PE& A2 = pedges[oe1];
+              const PE& B2 = pedges[oe2];
+              const bool a_ps =
+                  (t.src && A2.s == pu) || (t.dst && A2.s == pv);
+              const bool b_ps =
+                  (t.src && B2.s == pu) || (t.dst && B2.s == pv);
+              const std::uint32_t a_free_v = a_ps ? A2.d : A2.s;
+              const std::uint32_t b_free_v = b_ps ? B2.d : B2.s;
+              auto pinned_or = [&](std::uint32_t v, std::uint32_t v1,
+                                   std::uint32_t v2, bool& is_free) {
+                if (v == pu && t.src) {
+                  is_free = false;
+                  return *t.src;
+                }
+                if (v == pv && t.dst) {
+                  is_free = false;
+                  return *t.dst;
+                }
+                is_free = true;
+                return v == a_free_v ? v1 : v2;
+              };
+              bool sj = true;
+              for (std::size_t i = 0; i < pedges.size(); ++i) {
+                if (i == oe1 || i == oe2) continue;
+                for (const std::uint32_t v : {pedges[i].s, pedges[i].d}) {
+                  bool dummy;
+                  pinned_or(v, 0, 0, dummy);
+                  if (dummy && v != a_free_v && v != b_free_v) sj = false;
+                }
+              }
+              bool composable = false;
+              std::size_t n1 = 0;
+              for (const std::uint32_t v1 : va) {
+                if (composable || sj == false || ++n1 > 64) break;
+                std::size_t n2 = 0;
+                for (const std::uint32_t v2 : vb) {
+                  if (++n2 > 64) break;
+                  bool edges_ok = true;
+                  for (std::size_t i = 0; i < pedges.size() && edges_ok;
+                       ++i) {
+                    if (i == oe1 || i == oe2) continue;
+                    const PE& pe = pedges[i];
+                    bool f1, f2;
+                    const std::uint32_t s = pinned_or(pe.s, v1, v2, f1);
+                    const std::uint32_t d = pinned_or(pe.d, v1, v2, f2);
+                    const bool inv = pe.slot >= g.num_relations();
+                    const gar::LabelID bs =
+                        inv ? pe.slot - g.num_relations() : pe.slot;
+                    const std::uint32_t cs = inv ? d : s;
+                    const std::uint32_t cd = inv ? s : d;
+                    if (state->ContainsEdge(bs, cs, cd)) continue;
+                    if (head_index.find(g.RelationName(bs)) ==
+                        head_index.end()) {
+                      edges_ok = false;
+                      break;
+                    }
+                    // 1-level derivable? (cached collect: src-pinned free
+                    // dst values)
+                    const auto& reach = tier_vals(bs, true, cs);
+                    if (std::find(reach.begin(), reach.end(), cd) ==
+                        reach.end()) {
+                      edges_ok = false;
+                    }
+                  }
+                  if (edges_ok) {
+                    composable = true;
+                    break;
+                  }
+                }
+              }
+              if (composable) tier = 0;
+            }
           }
         }
-        attempts.push_back(OpenAttempt{ri, oe1, oe2, od, df, probe.rel_fam,
+        attempts.push_back(OpenAttempt{ri, oe1, oe2, od, df, tier,
+                                       probe.rel_fam,
                                        r.quality.confidence});
       }
     }
     std::sort(attempts.begin(), attempts.end(),
               [](const OpenAttempt& a, const OpenAttempt& b) {
                 // derive-first-eligible openings first (coordinated
-                // intermediates are the rare winning shape), then by the
-                // opened edges' distance to the goal, then rule quality.
+                // intermediates are the rare winning shape); among them the
+                // evidence tier (both sides 1-level-derivable beats blind
+                // deep chains), then the opened edges' distance to the goal,
+                // then rule quality.
                 if (a.derive_first != b.derive_first) return a.derive_first;
+                if (a.tier != b.tier) return a.tier < b.tier;
                 if (a.open_d != b.open_d) return a.open_d < b.open_d;
                 if (a.rel_fam != b.rel_fam) return a.rel_fam > b.rel_fam;
                 if (a.conf != b.conf) return a.conf > b.conf;
@@ -385,6 +620,19 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                 return a.oe2 < b.oe2;
               });
 
+    if (DebugBackward()) {
+      std::size_t pos = 0;
+      for (const auto& att : attempts) {
+        std::fprintf(stderr,
+                     "[bwd]   attempt#%zu rule=%u oe=(%u,%u) open_d=%u df=%d "
+                     "tier=%u rel_fam=%.3f conf=%.3f\n",
+                     pos++, att.rule, att.oe1,
+                     att.oe2 == gar::EdgeIndex(UINT32_MAX) ? 999u : att.oe2,
+                     att.open_d, static_cast<int>(att.derive_first), att.tier,
+                     att.rel_fam, att.conf);
+        if (pos > 40) break;
+      }
+    }
     for (const auto& att : attempts) {
       if (!got.empty() || out_of_budget()) break;
       const std::uint32_t ri = att.rule;
@@ -473,13 +721,133 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
               }
               return tt;
             };
-            const auto c1 =
-                try_target(open_target(A, a_src_pinned), depth + 1,
-                           local_cap / 2);
-            const auto c2 =
-                try_target(open_target(B, b_src_pinned), depth + 1,
-                           local_cap / 2);
-            if (!c1.empty() && !c2.empty()) {
+            // Two-sided derivation coordination: candidate values for the
+            // two free endpoints WITHOUT deriving (match horizon, no
+            // charge, base-orientation pins — inverse edges flip the side),
+            // then intersect over the remaining pattern edges. Only a
+            // composing pair pays for derivations; a missing remaining edge
+            // whose predicate is itself derivable is derived for the pair
+            // (the fb15k film/award shape: the middle person/nominated_for
+            // edge is a chase-derived fact, not a base edge).
+            const PE& Ae = pedges[oe1];
+            const PE& Be = pedges[oe2];
+            const std::uint32_t a_free = a_src_pinned ? Ae.d : Ae.s;
+            const std::uint32_t b_free = b_src_pinned ? Be.d : Be.s;
+            auto base_pin_src = [&](const PE& pe, bool pat_src_pinned) {
+              return (pe.slot >= g.num_relations()) ? !pat_src_pinned
+                                                    : pat_src_pinned;
+            };
+            const Target t1o = open_target(A, a_src_pinned);
+            const Target t2o = open_target(B, b_src_pinned);
+            const std::vector<std::uint32_t> vals1 = merge_candidates(
+                present_values(t1o.slot, base_pin_src(Ae, a_src_pinned),
+                               full_pins.at(a_src_pinned ? Ae.s : Ae.d)),
+                collect_candidate_values(
+                    t1o.slot, base_pin_src(Ae, a_src_pinned),
+                    full_pins.at(a_src_pinned ? Ae.s : Ae.d)));
+            const std::vector<std::uint32_t> vals2 = merge_candidates(
+                present_values(t2o.slot, base_pin_src(Be, b_src_pinned),
+                               full_pins.at(b_src_pinned ? Be.s : Be.d)),
+                collect_candidate_values(
+                    t2o.slot, base_pin_src(Be, b_src_pinned),
+                    full_pins.at(b_src_pinned ? Be.s : Be.d)));
+            // The pre-check is only well-defined when every remaining-edge
+            // endpoint is pinned or one of the two free endpoints
+            // (otherwise fall back to the derive-collect path below).
+            bool semi_joinable = true;
+            for (std::size_t i = 0; i < pedges.size(); ++i) {
+              if (i == oe1 || i == oe2) continue;
+              for (const std::uint32_t v : {pedges[i].s, pedges[i].d}) {
+                if (!full_pins.count(v) && v != a_free && v != b_free) {
+                  semi_joinable = false;
+                }
+              }
+            }
+            auto ground_of = [&](std::uint32_t v, std::uint32_t v1,
+                                 std::uint32_t v2) {
+              if (full_pins.count(v)) return full_pins.at(v);
+              return v == a_free ? v1 : v2;
+            };
+            // Remaining edges grounded by pins+(v1,v2); fills `missing` with
+            // the grounded targets absent from the current fact set.
+            auto collect_missing = [&](std::uint32_t v1, std::uint32_t v2,
+                                       std::vector<Target>* missing) {
+              for (std::size_t i = 0; i < pedges.size(); ++i) {
+                if (i == oe1 || i == oe2) continue;
+                const PE& pe = pedges[i];
+                const std::uint32_t s = ground_of(pe.s, v1, v2);
+                const std::uint32_t d = ground_of(pe.d, v1, v2);
+                const std::uint32_t bs = pe.slot >= g.num_relations()
+                                             ? pe.slot - g.num_relations()
+                                             : pe.slot;
+                const std::uint32_t cs = pe.slot >= g.num_relations() ? d : s;
+                const std::uint32_t cd = pe.slot >= g.num_relations() ? s : d;
+                if (!state->ContainsEdge(bs, cs, cd)) {
+                  missing->push_back(Target{bs, cs, cd});
+                }
+              }
+            };
+            bool compatible = false;
+            std::uint32_t v1_hit = 0, v2_hit = 0;
+            if (semi_joinable) {
+              for (const std::uint32_t v1 : vals1) {
+                for (const std::uint32_t v2 : vals2) {
+                  std::vector<Target> missing;
+                  collect_missing(v1, v2, &missing);
+                  if (missing.empty()) {
+                    compatible = true;
+                    v1_hit = v1;
+                    v2_hit = v2;
+                    break;
+                  }
+                }
+                if (compatible) break;
+              }
+            }
+            // A remaining edge whose predicate has deriving rules may still
+            // appear (be derived); only when none can is an incompatible
+            // pre-check a sound rejection.
+            bool mid_derivable = false;
+            for (std::size_t i = 0; i < pedges.size() && !mid_derivable; ++i) {
+              if (i == oe1 || i == oe2) continue;
+              const gar::LabelID bs = pedges[i].slot >= g.num_relations()
+                                          ? pedges[i].slot -
+                                                g.num_relations()
+                                          : pedges[i].slot;
+              if (head_index.find(g.RelationName(bs)) != head_index.end()) {
+                mid_derivable = true;
+              }
+            }
+            if (DebugBackward()) {
+              std::fprintf(stderr,
+                           "[bwd]   df rule=%u vals1=%zu vals2=%zu compat=%d "
+                           "mideriv=%d\n",
+                           ri, vals1.size(), vals2.size(),
+                           static_cast<int>(compatible),
+                           static_cast<int>(mid_derivable));
+            }
+            // Free reject only when BOTH sides produced candidate values,
+            // none compose, and no remaining edge can ever appear; an empty
+            // side is ambiguous (the value may need a deeper chain).
+            if (semi_joinable && !vals1.empty() && !vals2.empty() &&
+                !compatible && !mid_derivable) {
+              continue;
+            }
+            // Pin the free end (base orientation) of an open target.
+            auto pin_free = [&](Target* tt, const PE& pe,
+                                bool pat_src_pinned, std::uint32_t v) {
+              const bool inv = pe.slot >= g.num_relations();
+              if (pat_src_pinned == inv) {
+                tt->src = v;
+              } else {
+                tt->dst = v;
+              }
+            };
+            const std::uint64_t side_cap =
+                std::min<std::uint64_t>(local_cap / 2, 3);
+            // Full-pattern verify after the opened edges hold: pinned
+            // re-enumeration + one application.
+            auto verify_full = [&]() {
               const auto full = build_spec(r);
               std::unordered_map<std::uint32_t, std::uint32_t> fpins;
               if (t.src) fpins[head.pu] = *t.src;
@@ -498,6 +866,118 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                   }
                   break;
                 }
+              }
+            };
+            if (semi_joinable && compatible) {
+              if (DebugBackward()) {
+                std::fprintf(stderr, "[bwd]   df mode=compat\n");
+              }
+              // Compatible pair present in the fact set: derive both opened
+              // edges pinned to it (the second only if the first holds).
+              Target t1 = t1o, t2 = t2o;
+              pin_free(&t1, Ae, a_src_pinned, v1_hit);
+              pin_free(&t2, Be, b_src_pinned, v2_hit);
+              if (!try_target(t1, depth + 1, side_cap).empty() &&
+                  !try_target(t2, depth + 1, side_cap).empty()) {
+                verify_full();
+              }
+            } else if (semi_joinable && !vals1.empty() && !vals2.empty()) {
+              // No pair composes yet, but the remaining edges may be
+              // derivable: walk candidate pairs and semi-join them through
+              // the remaining sub-pattern (a missing edge is derived only
+              // when a 1-level match for it exists — wrong pairs cost
+              // nothing but the free probes). The side with fewer
+              // candidates drives the loop; its values come present-first
+              // (already in the fact set — free), then from a paid
+              // derive-collect.
+              const bool collect_side1 = vals1.size() <= vals2.size();
+              const PE& CE = collect_side1 ? Ae : Be;
+              const bool c_pat_src =
+                  collect_side1 ? a_src_pinned : b_src_pinned;
+              const bool c_pin_base_src =
+                  (c_pat_src != (CE.slot >= g.num_relations()));
+              const auto& pvals = collect_side1 ? vals2 : vals1;
+              constexpr std::size_t kMaxPairs = 64;
+              bool done = false;
+              std::unordered_set<std::uint32_t> cseen;
+              auto run_pairs = [&](const std::vector<std::uint32_t>& cvals) {
+                std::size_t nc = 0;
+                for (const std::uint32_t cv : cvals) {
+                  if (done || out_of_budget() || ++nc > kMaxPairs) break;
+                  if (!cseen.insert(cv).second) continue;
+                  std::size_t tried = 0;
+                  for (const std::uint32_t pv : pvals) {
+                    if (done || out_of_budget() ||
+                        ++tried > kMaxPairs) {
+                      break;
+                    }
+                    const std::uint32_t v1 = collect_side1 ? cv : pv;
+                    const std::uint32_t v2 = collect_side1 ? pv : cv;
+                    std::vector<Target> missing;
+                    collect_missing(v1, v2, &missing);
+                    bool pair_ok = true;
+                    for (const Target& mt : missing) {
+                      if (head_index.find(g.RelationName(mt.slot)) ==
+                              head_index.end() ||
+                          !one_level_derives(mt.slot, *mt.src, *mt.dst) ||
+                          try_target(mt, depth + 1, 2).empty()) {
+                        pair_ok = false;
+                        break;
+                      }
+                    }
+                    if (DebugBackward() &&
+                        (pair_ok || (!missing.empty() &&
+                                     head_index.find(g.RelationName(
+                                         missing.front().slot)) !=
+                                        head_index.end() &&
+                                     one_level_derives(
+                                         missing.front().slot,
+                                         *missing.front().src,
+                                         *missing.front().dst)))) {
+                      std::fprintf(stderr,
+                                   "[bwd]   pair v1=%s v2=%s miss=%zu ok=%d\n",
+                                   g.EntityName(v1).c_str(),
+                                   g.EntityName(v2).c_str(), missing.size(),
+                                   static_cast<int>(pair_ok));
+                    }
+                    if (!pair_ok) continue;
+                    Target tp = collect_side1 ? t2o : t1o;
+                    pin_free(&tp, collect_side1 ? Be : Ae,
+                             collect_side1 ? b_src_pinned : a_src_pinned, pv);
+                    if (try_target(tp, depth + 1, side_cap).empty()) {
+                      continue;
+                    }
+                    verify_full();
+                    done = !got.empty();
+                  }
+                }
+              };
+              // Pass A: values already present under the collect side's pin
+              // (free — no derivation needed for that side).
+              run_pairs(present_values(
+                  collect_side1 ? t1o.slot : t2o.slot,
+                  base_pin_src(CE, c_pat_src),
+                  full_pins.at(c_pat_src ? CE.s : CE.d)));
+              // Pass B: pay for the derive-collect only if the present
+              // values composed nothing.
+              if (!done && !out_of_budget()) {
+                const auto cc = try_target(collect_side1 ? t1o : t2o,
+                                           depth + 1, side_cap);
+                if (!cc.empty()) {
+                  std::vector<std::uint32_t> cvals;
+                  for (const auto& pr : cc) {
+                    cvals.push_back(c_pin_base_src ? pr.second : pr.first);
+                  }
+                  run_pairs(cvals);
+                }
+              }
+            } else {
+              // A side has no 1-level evidence (or the pre-check is N/A):
+              // open derive-collect both sides; the second is skipped when
+              // the first yields nothing.
+              if (!try_target(t1o, depth + 1, side_cap).empty() &&
+                  !try_target(t2o, depth + 1, side_cap).empty()) {
+                verify_full();
               }
             }
             if (!got.empty()) break;
@@ -543,7 +1023,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
           t1.src = a;
           t1.dst = b;
           ++spent;  // the subgoal attempt charges one application
-          if (try_target(t1, depth + 1, local_cap / 2).empty()) continue;
+          if (try_target(t1, depth + 1, std::min<std::uint64_t>(local_cap / 2, 3)).empty()) continue;
           const auto full = build_spec(r);
           std::unordered_map<std::uint32_t, std::uint32_t> fpins;
           if (t.src) fpins[head.pu] = *t.src;
@@ -608,7 +1088,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
           Target t1 = ground_target(oe1);
           bool ok = false;
           if (!two) {
-            ok = !try_target(t1, depth + 1, local_cap / 2).empty();
+            ok = !try_target(t1, depth + 1, std::min<std::uint64_t>(local_cap / 2, 3)).empty();
           } else {
             // Two opened edges share one variable. The shared variable is
             // free iff unpinned and uncovered by the sub-pattern.
@@ -622,8 +1102,20 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                 shared != UINT32_MAX && !full_pins.count(shared) &&
                 !has_edge[shared];
             if (!shared_free) {
-              ok = !try_target(t1, depth + 1, local_cap / 2).empty() &&
-                   !try_target(ground_target(oe2), depth + 1, local_cap / 2).empty();
+              // Gate the charged recursive derivations with free 1-step
+              // probes: a grounded opened edge with no current presence and
+              // no 1-level match would only thrash the recursion budget.
+              auto probe_ok = [&](const Target& tt) {
+                if (!tt.src || !tt.dst) return true;  // open side: keep
+                if (state->ContainsEdge(tt.slot, *tt.src, *tt.dst)) {
+                  return true;
+                }
+                return one_level_derives(tt.slot, *tt.src, *tt.dst);
+              };
+              const Target t2g = ground_target(oe2);
+              ok = probe_ok(t1) && probe_ok(t2g) &&
+                   !try_target(t1, depth + 1, std::min<std::uint64_t>(local_cap / 2, 3)).empty() &&
+                   !try_target(t2g, depth + 1, std::min<std::uint64_t>(local_cap / 2, 3)).empty();
             } else {
               // Collect candidate values for the shared variable by
               // deriving the first edge with that side open.
@@ -635,14 +1127,14 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
               } else {
                 open1.src = t1.src;  // free dst
               }
-              const auto cands = try_target(open1, depth + 1, local_cap / 2);
+              const auto cands = try_target(open1, depth + 1, std::min<std::uint64_t>(local_cap / 2, 3));
               for (const auto& [fs, fd] : cands) {
                 const std::uint32_t shared_val =
                     share_is_src_of_1 ? fs : fd;
                 Target t2 = ground_target(oe2);
                 if (B.s == shared) t2.src = shared_val;
                 if (B.d == shared) t2.dst = shared_val;
-                if (!try_target(t2, depth + 1, local_cap / 2).empty()) {
+                if (!try_target(t2, depth + 1, std::min<std::uint64_t>(local_cap / 2, 3)).empty()) {
                   ok = true;
                   break;
                 }
@@ -678,6 +1170,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                    t.src ? g.EntityName(*t.src).c_str() : "_",
                    t.dst ? g.EntityName(*t.dst).c_str() : "_", got.size());
     }
+    if (got.empty()) failed_targets[TargetKey(t)] = state->version();
     active.erase(TargetKey(t));
     return got;
   };
