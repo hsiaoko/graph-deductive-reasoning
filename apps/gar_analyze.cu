@@ -25,6 +25,7 @@
 // sampled triples from the graph (Γ0 = the rest), run the unrestricted
 // chase once, and keep only goals the closure re-derives.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -763,7 +764,11 @@ int CmdVerifyTasks(const VerifyArgs& a) {
               n_infeasible = 0, n_derived = 0, n_feasible = 0;
   std::ofstream rep(a.report);
   rep << "# workload verify: " << a.tasks_path << "\n"
-      << "# goal\tbudget\tverdict\tagent_steps\tagent_cost\n";
+      << "# goal\tbudget\tverdict\tagent_steps\tagent_cost\tagent_wall_ms\n";
+  // Shared-closure state for the no-op hold-out fast path (see loop).
+  bool shared_closure_ready = false;
+  std::optional<gar::graph::TripleGraph> shared_g_cpu, shared_g_gpu;
+  std::optional<deduction::ChaseResult> shared_cpu_res, shared_gpu_res;
   // Per task the goal edge is held out and both engines re-run on the
   // held-out graph (paper task semantics: Γ0 = G minus the held-out goal).
   // NOTE: this makes --tasks cost one closure per task — fine on small
@@ -788,9 +793,84 @@ int CmdVerifyTasks(const VerifyArgs& a) {
 
     const agent::Goal goal = gar_apps::ParseGoalSpec(spec, in.graph);
     agent::AgentResult agent_res;
-    const VerdictInput v =
-        VerifyOne(a.io, task_args, goal, &in.graph, in.rules, in.rule_ids, attrs, dg,
-                  depths, a.gpu, &agent_res, a.chase_cfg);
+    // Shared-closure fast path: when the goal edge is not a base edge, the
+    // hold-out is a no-op (RemoveEdgesBatch on an absent edge), so one
+    // closure serves every such task. Base-edge goals (synth-style
+    // workloads) keep the per-task hold-out chase via VerifyOne.
+    const bool goal_is_base =
+        goal.args[0] && goal.args[1] &&
+        in.graph.RelationPairSet(goal.slot)
+            .count(gar::graph::PackPair(*goal.args[0], *goal.args[1])) != 0;
+    double agent_wall_ms = 0.0;
+    VerdictInput v;
+    if (goal_is_base) {
+      v = VerifyOne(a.io, task_args, goal, &in.graph, in.rules, in.rule_ids,
+                    attrs, dg, depths, a.gpu, &agent_res, a.chase_cfg);
+    } else {
+      if (!shared_closure_ready) {
+        shared_g_cpu = in.graph;  // hold-out is a no-op here
+        deduction::ChaseConfig cfg = a.chase_cfg;
+        cfg.keep_matches = false;
+        deduction::CpuChaseEngine eng(*shared_g_cpu, attrs);
+        shared_cpu_res = eng.Run(in.rules, cfg);
+        if (a.gpu) {
+          shared_g_gpu = in.graph;
+          deduction::GpuDeduceEngine geng(*shared_g_gpu, attrs);
+          shared_gpu_res = geng.Run(in.rules, cfg);
+        }
+        shared_closure_ready = true;
+      }
+      const auto a_t0 = std::chrono::steady_clock::now();
+      {
+        gar::graph::TripleGraph g_agent = in.graph;
+        agent::ReasoningAgent rag =
+            gar_apps::MakeReasoningAgent(task_args, &dg, &goal,
+                                         &g_agent, &in.rules, &in.rule_ids);
+        agent::AgentState state(g_agent, attrs, in.rules);
+        agent::ExecConfig ec;
+        ec.budget = task_args.budget;
+        ec.match_cap_per_rule = task_args.max_candidates_per_rule;
+        ec.top_k = task_args.top_k;
+        ec.utility_gamma = task_args.score.gamma;
+        agent_res = rag.Run(&state, goal, ec);
+      }
+      agent_wall_ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - a_t0)
+                          .count();
+      v.budget = task_args.budget;
+      v.agent_goal = agent_res.goal_derived;
+      v.budget_exhausted = agent_res.budget_exhausted;
+      // Fast path implies the goal is not a base edge, so "in the cpu
+      // closure" reduces to "derived by the shared chase".
+      v.goal_in_cpu = false;
+      for (const auto& e : shared_cpu_res->derived) {
+        if (agent::GoalSatisfied(goal, e)) {
+          v.goal_in_cpu = true;
+          break;
+        }
+      }
+      if (a.gpu) {
+        v.has_gpu = true;
+        v.goal_in_gpu = false;
+        for (const auto& e : shared_gpu_res->derived) {
+          if (agent::GoalSatisfied(goal, e)) {
+            v.goal_in_gpu = true;
+            break;
+          }
+        }
+      }
+      for (const auto& e : agent_res.derived) {
+        if (!shared_g_cpu->RelationPairSet(e.slot)
+                 .count(gar::graph::PackPair(e.src, e.dst))) {
+          v.subset_ok = false;
+        }
+      }
+      const std::uint32_t p =
+          dg.table().Find(in.graph.RelationName(goal.slot));
+      v.bstar_dg = p == analysis::kInvalidPredicate
+                       ? analysis::kUnreachable
+                       : depths[p];
+    }
     const std::string verdict = VerdictOf(v);
     if (verdict == "CONSISTENT") ++n_consistent;
     else if (verdict == "BUDGET-LIMITED") ++n_budget;
@@ -801,7 +881,8 @@ int CmdVerifyTasks(const VerifyArgs& a) {
       if (v.agent_goal) ++n_derived;
     }
     rep << spec << '\t' << task_args.budget << '\t' << verdict << '\t'
-        << agent_res.chain.size() << '\t' << agent_res.total_cost << "\n";
+        << agent_res.chain.size() << '\t' << agent_res.total_cost << '\t'
+        << agent_wall_ms << "\n";
   }
   std::cout << "[gar_analyze] verify --tasks: " << a.tasks_path << "\n"
             << "  CONSISTENT=" << n_consistent
