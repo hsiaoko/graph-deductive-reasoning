@@ -55,7 +55,7 @@ namespace deduction = gar::engine::deduction;
       << "usage:\n"
          "  gar_analyze rules-stats --rules <root> [--dot F] [--yaml F]\n"
          "  gar_analyze gen-goals --csr <dir> --rules <root> --per-slot N "
-         "--seed S --out goals.tsv [--threads N]\n"
+         "--seed S --out goals.tsv [--threads N] [--max-rounds N] [--max-derivations N] [--max-matches N]\n"
          "  gar_analyze gen-workload --csr <dir> --rules <root> "
          "--num-tasks N --seed S --out tasks.tsv [--budgets 0.5,1,2,4]\n"
          "  gar_analyze chain-cmp --agent-out <dir> --closure-out <dir> "
@@ -166,7 +166,7 @@ struct SampledGoal {
 std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
                                            std::uint32_t per_slot,
                                            std::uint64_t seed,
-                                           std::uint32_t threads) {
+                                           deduction::ChaseConfig chase_cfg) {
   gar_apps::FullDeduceInputs in =
       gar_apps::LoadFullDeduceInputs(io, "gar_analyze");
 
@@ -189,9 +189,7 @@ std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
   const std::uint64_t removed = g_held.RemoveEdgesBatch(by_slot);
   std::cerr << "[gar_analyze] held out " << removed << " edges\n";
 
-  deduction::ChaseConfig chase_cfg;  // defaults; no matches needed
-  chase_cfg.keep_matches = false;
-  chase_cfg.threads = threads;
+  chase_cfg.keep_matches = false;  // matches are never needed here
   deduction::CpuChaseEngine engine(
       g_held, in.attrs.columns.empty() ? nullptr : &in.attrs);
   const auto closure = engine.Run(in.rules, chase_cfg);
@@ -295,12 +293,29 @@ int CmdRulesStats(int argc, char** argv) {
   return 0;
 }
 
+// Additive CLI passthrough for the reachability chase inside gen-goals /
+// gen-workload (no semantic change: when no flag is given the config is
+// exactly the previous default ChaseConfig).
+template <typename NextFn>
+bool ParseChaseCapOption(const std::string& k, NextFn&& next,
+                         deduction::ChaseConfig* cfg) {
+  if (k == "--threads")
+    cfg->threads = static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--max-rounds")
+    cfg->max_rounds = static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--max-derivations") cfg->max_derivations = std::stoull(next());
+  else if (k == "--max-matches")
+    cfg->max_matches_per_rule = std::stoull(next());
+  else return false;
+  return true;
+}
+
 int CmdGenGoals(int argc, char** argv) {
   gar_apps::FullDeduceArgs io;
   std::uint32_t per_slot = 0;
   std::uint64_t seed = 42;
   std::string out;
-  std::uint32_t threads = 0;
+  deduction::ChaseConfig chase_cfg;
   for (int i = 0; i < argc; ++i) {
     const std::string k = argv[i];
     auto next = [&]() { return i + 1 < argc ? argv[++i] : (Usage(), ""); };
@@ -310,15 +325,13 @@ int CmdGenGoals(int argc, char** argv) {
       per_slot = static_cast<std::uint32_t>(std::stoul(next()));
     else if (k == "--seed") seed = std::stoull(next());
     else if (k == "--out") out = next();
-    else if (k == "--threads")
-      threads = static_cast<std::uint32_t>(std::stoul(next()));
-    else Usage();
+    else if (!ParseChaseCapOption(k, next, &chase_cfg)) Usage();
   }
   if (io.csr_dir.empty() || io.rules_root.empty() || per_slot == 0 ||
       out.empty()) {
     Usage();
   }
-  const auto goals = GenReachableGoals(io, per_slot, seed, threads);
+  const auto goals = GenReachableGoals(io, per_slot, seed, chase_cfg);
   WriteGoalsTsv(out, goals);
   std::cerr << "[gar_analyze] wrote " << goals.size() << " goals to " << out
             << "\n";
@@ -331,6 +344,7 @@ int CmdGenWorkload(int argc, char** argv) {
   std::uint64_t seed = 42;
   std::string out;
   std::vector<double> multipliers = {0.5, 1, 2, 4};
+  deduction::ChaseConfig chase_cfg;
   for (int i = 0; i < argc; ++i) {
     const std::string k = argv[i];
     auto next = [&]() { return i + 1 < argc ? argv[++i] : (Usage(), ""); };
@@ -353,7 +367,7 @@ int CmdGenWorkload(int argc, char** argv) {
         if (comma == std::string::npos) break;
         pos = comma + 1;
       }
-    } else {
+    } else if (!ParseChaseCapOption(k, next, &chase_cfg)) {
       Usage();
     }
   }
@@ -376,7 +390,7 @@ int CmdGenWorkload(int argc, char** argv) {
              (n_slots ? n_slots : 1)));
   // NOTE: LoadFullDeduceInputs was already run above for the slot count;
   // GenReachableGoals reloads (loaders are cheap relative to the chase).
-  auto goals = GenReachableGoals(io, per_slot, seed, /*threads=*/0);
+  auto goals = GenReachableGoals(io, per_slot, seed, chase_cfg);
   if (goals.size() > num_tasks) goals.resize(num_tasks);
 
   std::ofstream f(out);
