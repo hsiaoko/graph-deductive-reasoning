@@ -1,0 +1,9 @@
+goal: "/film/actor/film./film/performance/film(/m/015rkw,/m/0fg04)"
+goal_in_cpu_closure: true
+agent_goal_derived: false
+agent_total_cost: 30
+agent_steps: 30
+budget: 30
+bstar_dg: 1
+subset_ok: true
+verdict: BUDGET-LIMITED

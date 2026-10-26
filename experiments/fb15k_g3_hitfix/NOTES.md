@@ -26,3 +26,28 @@ goal 的 embedding"在枚举序中的位置。
 1. graph::PatternMatcher 加 pins 重载（结论槽位常量绑定，默认行为不变）。
 2. 新 BackwardExecutor：从 goal 反向——只对 head==goal 谓词的规则做 pinned
    枚举，候选空间塌缩到"能推出 goal 的 motif"；前提缺边且可派生时递归子目标。
+
+## 2026-10-26 第二轮：BackwardExecutor 落地 + 20 任务复测
+
+修复实现（commit ecaf034 + 后续）：
+- `graph::PatternMatcher::Enumerate` 加 pins 重载（绑定结论槽位常量；默认路径
+  回归逐字节一致）。
+- 新 `BackwardExecutor`（--executor backward）：head 谓词索引 → pinned 枚举
+  （候选空间塌缩到"能推出目标的 motif"）→ 打分排序 → EvalAntecedent 应用；
+  缺边前提变子目标递归（单边/双边开放 + 自由变量协调），深度上限
+  max_subgoal_depth=4。
+
+结果（verify --tasks，shared-holdout，budget=10，cap=8）：
+**18/20 CONSISTENT，0 DIVERGENT**（上一轮全部配置 0/20）。每任务 ~72-185ms
+（对照：同 workload 的共享 chase 一次 227s）。
+
+未命中的 2 个 = 仅有的两个 bstar_round=2 任务：
+- film/actor(/m/015rkw,/m/0fg04)：chase 第 2 轮经 gar_009436 派生；其 pattern 缺
+  nominated_for(/m/015rkw,/m/0fg04)——它自己是 round-2 事实（gar_004814 派生），
+  而 gar_004814 的 pattern 需要 award_nominee(015rkw,x2) ∧ nominated_for(x2,0fg04)
+  两条 round-1 派生边共享自由变量 x2 —— 需要跨派生协调 x2（join 两个各自由
+  规则派生的中间事实），当前递归协调只覆盖"一条缺边"的主干情形。
+- award_nomination/award(/m/016pns,/m/01by1l)：同类形态（award 递归族）。
+
+结论：round-1 任务全部命中（18/18），round-2 任务差在"多条派生中间边的
+自由变量协调"（记录为未来工作：join-coordinated subgoal derivation）。
