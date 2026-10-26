@@ -1,0 +1,5 @@
+# workload verify: experiments/fb15k_g3_ablation/tasks_smoke.tsv
+# goal	budget	verdict	agent_steps	agent_cost	agent_wall_ms
+/location/country/form_of_government(/m/05c74,/m/06cx9)	10	BUDGET-LIMITED	10	10	13544.8
+/tv/tv_program/regular_cast./tv/regular_tv_appearance/actor(/m/0gvsh7l,/m/059m45)	10	BUDGET-LIMITED	10	10	13440
+/award/award_winner/awards_won./award/award_honor/award_winner(/m/015t7v,/m/02fgm7)	10	BUDGET-LIMITED	10	10	13415.5

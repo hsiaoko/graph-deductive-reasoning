@@ -1,0 +1,11 @@
+# src	relation	dst	round	rule
+/m/02p65p	/common/topic/webpage./common/webpage/category	/m/08mbj5d	1	gar_001676
+/m/06_kh	/base/biblioness/bibs_location/state	/m/01n7q	2	gar_068351
+/m/0dwl2	/organization/endowed_organization/endowment./measurement_unit/dated_money_value/currency	/m/09nqf	3	gar_006123
+/m/02vk52z	/business/business_operation/assets./measurement_unit/dated_money_value/currency	/m/09nqf	4	gar_045004
+/m/018wrk	/olympics/olympic_games/sports	/m/01sgl	5	gar_033486
+/m/0q9kd	/award/award_nominee/award_nominations./award/award_nomination/nominated_for	/m/0gxsh4	6	gar_000170
+/m/026t6	/music/performance_role/guest_performances./music/recording_contribution/performance_role	/m/0l14md	7	gar_000846
+/m/01sl1q	/people/person/gender	/m/05zppz	8	gar_017182
+/m/044mz_	/people/person/profession	/m/0d1pc	9	gar_003888
+/m/086k8	/film/film_distributor/films_distributed./film/film_film_distributor_relationship/film	/m/0888c3	10	gar_055938

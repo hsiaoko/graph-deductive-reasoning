@@ -1,0 +1,11 @@
+# src	relation	dst	round	rule
+/m/02nzb8	/sports/sports_position/players./sports/sports_team_roster/position	/m/0dgrmp	1	gar_000038
+/m/02nzb8	/sports/sports_position/players./american_football/football_historical_roster_position/position_s	/m/0dgrmp	2	gar_000039
+/m/02nzb8	/sports/sports_position/players./sports/sports_team_roster/position	/m/02nzb8	3	gar_001156
+/m/02nzb8	/sports/sports_position/players./american_football/football_historical_roster_position/position_s	/m/02nzb8	4	gar_044641
+/m/0cnk2q	/soccer/football_team/current_roster./soccer/football_roster_position/position	/m/02nzb8	5	gar_038012
+/m/02nzb8	/sports/sports_position/players./sports/sports_team_roster/team	/m/01rly6	6	gar_045099
+/m/0cnk2q	/soccer/football_team/current_roster./soccer/football_roster_position/position	/m/02_j1w	7	gar_044480
+/m/02nzb8	/sports/sports_position/players./american_football/football_historical_roster_position/position_s	/m/02_j1w	8	gar_038035
+/m/0cnk2q	/sports/sports_team/roster./american_football/football_roster_position/position	/m/02nzb8	9	gar_044651
+/m/0cnk2q	/american_football/football_team/current_roster./sports/sports_team_roster/position	/m/02nzb8	10	gar_055596
