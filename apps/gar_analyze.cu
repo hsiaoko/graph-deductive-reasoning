@@ -526,6 +526,10 @@ struct VerifyArgs {
   gar_apps::AgentModeArgs agent;
   std::string report = "verify_report.yaml";
   deduction::ChaseConfig chase_cfg;  // caps for the closure cross-check
+  // --shared-holdout: paper's exact workload semantics (§7) — hold out ALL
+  // task goals at once (Γ0 = G \ X) and share one closure across tasks,
+  // instead of the default per-task hold-out (Γ0 = G \ {g}).
+  bool shared_holdout = false;
 };
 
 VerifyArgs ParseVerifyArgs(int argc, char** argv) {
@@ -546,6 +550,7 @@ VerifyArgs ParseVerifyArgs(int argc, char** argv) {
         a.from_dirs.push_back(argv[++i]);
       }
     } else if (k == "--tasks") a.tasks_path = next();
+    else if (k == "--shared-holdout") a.shared_holdout = true;
     else if (k == "--report") a.report = next();
     else if (k == "--csr") a.io.csr_dir = next();
     else if (k == "--rules") a.io.rules_root = next();
@@ -765,10 +770,41 @@ int CmdVerifyTasks(const VerifyArgs& a) {
   std::ofstream rep(a.report);
   rep << "# workload verify: " << a.tasks_path << "\n"
       << "# goal\tbudget\tverdict\tagent_steps\tagent_cost\tagent_wall_ms\n";
-  // Shared-closure state for the no-op hold-out fast path (see loop).
+  // Shared-closure state for the no-op hold-out fast path and for
+  // --shared-holdout (see loop).
   bool shared_closure_ready = false;
   std::optional<gar::graph::TripleGraph> shared_g_cpu, shared_g_gpu;
   std::optional<deduction::ChaseResult> shared_cpu_res, shared_gpu_res;
+  // --shared-holdout: Γ0 = G minus ALL task goal edges (base ones), once.
+  gar::graph::TripleGraph g0_shared = in.graph;
+  if (a.shared_holdout) {
+    std::unordered_map<std::uint32_t,
+                       std::vector<std::pair<std::uint32_t, std::uint32_t>>>
+        by_slot;
+    std::ifstream tf0(a.tasks_path);
+    std::string l0;
+    while (std::getline(tf0, l0)) {
+      if (l0.empty() || l0[0] == '#') continue;
+      std::vector<std::string> cols;
+      std::size_t pos = 0;
+      while (pos <= l0.size()) {
+        const auto tab = l0.find('\t', pos);
+        cols.push_back(l0.substr(
+            pos, tab == std::string::npos ? std::string::npos : tab - pos));
+        if (tab == std::string::npos) break;
+        pos = tab + 1;
+      }
+      if (cols.size() < 4) continue;
+      const agent::Goal gl = gar_apps::ParseGoalSpec(
+          cols[0] + "(" + cols[1] + "," + cols[2] + ")", in.graph);
+      if (gl.args[0] && gl.args[1]) {
+        by_slot[gl.slot].emplace_back(*gl.args[0], *gl.args[1]);
+      }
+    }
+    const std::uint64_t removed = g0_shared.RemoveEdgesBatch(by_slot);
+    std::cerr << "[gar_analyze] shared hold-out: removed " << removed
+              << " goal edges from Γ0\n";
+  }
   // Per task the goal edge is held out and both engines re-run on the
   // held-out graph (paper task semantics: Γ0 = G minus the held-out goal).
   // NOTE: this makes --tasks cost one closure per task — fine on small
@@ -793,28 +829,33 @@ int CmdVerifyTasks(const VerifyArgs& a) {
 
     const agent::Goal goal = gar_apps::ParseGoalSpec(spec, in.graph);
     agent::AgentResult agent_res;
-    // Shared-closure fast path: when the goal edge is not a base edge, the
-    // hold-out is a no-op (RemoveEdgesBatch on an absent edge), so one
-    // closure serves every such task. Base-edge goals (synth-style
-    // workloads) keep the per-task hold-out chase via VerifyOne.
-    const bool goal_is_base =
+    // Hold-out regimes. Default (paper §7 per-task approximation): each
+    // base-edge goal is held out alone, chased per task (VerifyOne); a
+    // non-base goal makes the hold-out a no-op and shares one closure.
+    // --shared-holdout (paper's exact wording: "we held out X triples ...
+    // the rest of the graph as Γ0"): all task goals are held out together
+    // and one closure is shared by the whole workload.
+    bool goal_is_base =
         goal.args[0] && goal.args[1] &&
         in.graph.RelationPairSet(goal.slot)
             .count(gar::graph::PackPair(*goal.args[0], *goal.args[1])) != 0;
+    if (a.shared_holdout) goal_is_base = false;  // handled by g0 below
     double agent_wall_ms = 0.0;
     VerdictInput v;
-    if (goal_is_base) {
+    if (goal_is_base && !a.shared_holdout) {
       v = VerifyOne(a.io, task_args, goal, &in.graph, in.rules, in.rule_ids,
                     attrs, dg, depths, a.gpu, &agent_res, a.chase_cfg);
     } else {
       if (!shared_closure_ready) {
-        shared_g_cpu = in.graph;  // hold-out is a no-op here
+        // Fast path: hold-out is a no-op → Γ0 = G. Shared-holdout path:
+        // Γ0 = G minus all task goals (prepared above).
+        shared_g_cpu = a.shared_holdout ? g0_shared : in.graph;
         deduction::ChaseConfig cfg = a.chase_cfg;
         cfg.keep_matches = false;
         deduction::CpuChaseEngine eng(*shared_g_cpu, attrs);
         shared_cpu_res = eng.Run(in.rules, cfg);
         if (a.gpu) {
-          shared_g_gpu = in.graph;
+          shared_g_gpu = a.shared_holdout ? g0_shared : in.graph;
           deduction::GpuDeduceEngine geng(*shared_g_gpu, attrs);
           shared_gpu_res = geng.Run(in.rules, cfg);
         }
@@ -822,7 +863,8 @@ int CmdVerifyTasks(const VerifyArgs& a) {
       }
       const auto a_t0 = std::chrono::steady_clock::now();
       {
-        gar::graph::TripleGraph g_agent = in.graph;
+        gar::graph::TripleGraph g_agent =
+            a.shared_holdout ? g0_shared : in.graph;
         agent::ReasoningAgent rag =
             gar_apps::MakeReasoningAgent(task_args, &dg, &goal,
                                          &g_agent, &in.rules, &in.rule_ids);
