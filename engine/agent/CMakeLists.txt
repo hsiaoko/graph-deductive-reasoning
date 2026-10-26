@@ -16,6 +16,7 @@ add_library(gar_engine_agent STATIC
     src/branch_bound_executor.cpp
     src/jev_client.cpp
     src/policy.cpp
+    src/backward_executor.cpp
 )
 add_library(gar::engine::agent ALIAS gar_engine_agent)
 

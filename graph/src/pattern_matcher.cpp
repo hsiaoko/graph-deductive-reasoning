@@ -18,6 +18,25 @@ std::uint64_t PatternMatcher::Enumerate(const PatternSpec& p,
                                         std::uint64_t match_cap,
                                         std::vector<std::uint32_t>* out,
                                         bool* capped) const {
+  return Enumerate(p, match_cap, out, capped, {});
+}
+
+namespace {
+
+// nullptr when pattern vertex v is unpinned.
+const std::uint32_t* PinOf(
+    const std::unordered_map<std::uint32_t, std::uint32_t>& pins,
+    std::uint32_t v) {
+  const auto it = pins.find(v);
+  return it == pins.end() ? nullptr : &it->second;
+}
+
+}  // namespace
+
+std::uint64_t PatternMatcher::Enumerate(
+    const PatternSpec& p, std::uint64_t match_cap,
+    std::vector<std::uint32_t>* out, bool* capped,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& pins) const {
   *capped = false;
   const std::uint32_t n = p.num_vertices;
   const std::uint32_t m = static_cast<std::uint32_t>(p.edges.size());
@@ -151,12 +170,40 @@ std::uint64_t PatternMatcher::Enumerate(const PatternSpec& p,
       seed_adj.is_out ? FlipSlot(seed_adj.slot, R) : seed_adj.slot;
   const auto& seed_pairs = g_.RelationPairs(seed_slot);
 
+  // Pin-aware seed scan: pairs are keyed (emb[order[0]], emb[order[1]]). A
+  // pin on order[0] binary-searches the seed slot's sorted pairs; a pin on
+  // order[1] alone switches to the flipped slot's mirrored pairs (sorted by
+  // the same key after the swap).
+  const std::uint32_t* pin0 = PinOf(pins, order[0]);
+  const std::uint32_t* pin1 = PinOf(pins, order[1]);
+  const std::vector<std::uint64_t>* scan = &seed_pairs;
+  bool swapped = false;
+  if (pin0 == nullptr && pin1 != nullptr) {
+    scan = &g_.RelationPairs(FlipSlot(seed_slot, R));
+    swapped = true;
+  }
+  std::size_t scan_lo = 0, scan_hi = scan->size();
+  if (const std::uint32_t* pp = swapped ? pin1 : pin0) {
+    const auto& arr = *scan;
+    scan_lo = static_cast<std::size_t>(
+        std::lower_bound(arr.begin(), arr.end(), PackPair(*pp, 0)) -
+        arr.begin());
+    scan_hi = static_cast<std::size_t>(
+        std::lower_bound(arr.begin(), arr.end(), PackPair(*pp + 1, 0)) -
+        arr.begin());
+  }
+
   std::vector<std::vector<std::uint32_t>> cands(n);
   std::vector<std::size_t> cand_pos(n, 0);
 
-  for (std::uint64_t sp : seed_pairs) {
-    const auto ps = static_cast<std::uint32_t>(sp >> 32);
-    const auto pd = static_cast<std::uint32_t>(sp);
+  for (std::size_t si = scan_lo; si < scan_hi; ++si) {
+    const std::uint64_t sp = (*scan)[si];
+    const auto hi = static_cast<std::uint32_t>(sp >> 32);
+    const auto lo = static_cast<std::uint32_t>(sp);
+    const auto ps = swapped ? lo : hi;
+    const auto pd = swapped ? hi : lo;
+    if (pin0 != nullptr && ps != *pin0) continue;
+    if (pin1 != nullptr && pd != *pin1) continue;
     emb[order[0]] = ps;
     emb[order[1]] = pd;
     // Remaining seed-side edges between order[0] and order[1] (multi-edges).
@@ -187,7 +234,18 @@ std::uint64_t PatternMatcher::Enumerate(const PatternSpec& p,
         continue;
       }
       if (cand_pos[pos] == 0) {
-        candidates(back_edges[pos][0], &cands[pos]);
+        if (const std::uint32_t* pp = PinOf(pins, order[pos])) {
+          // Pinned vertex: the driver edge must actually exist between the
+          // pin and the anchor (the driver is never re-checked by
+          // check_back_edges, so validate it here).
+          const Adj& driver = back_edges[pos][0];
+          const std::uint32_t src = driver.is_out ? *pp : emb[driver.other];
+          const std::uint32_t dst = driver.is_out ? emb[driver.other] : *pp;
+          cands[pos].clear();
+          if (has_edge(src, dst, driver.slot)) cands[pos].push_back(*pp);
+        } else {
+          candidates(back_edges[pos][0], &cands[pos]);
+        }
       }
       bool advanced = false;
       while (cand_pos[pos] < cands[pos].size()) {

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "gar/graph/triple_graph.h"
@@ -43,6 +44,18 @@ class PatternMatcher {
   std::uint64_t Enumerate(const PatternSpec& p, std::uint64_t match_cap,
                           std::vector<std::uint32_t>* out_embeddings,
                           bool* capped) const;
+
+  // Pinned variant: `pins[v] = w` forces emb[v] == w — used by goal-directed
+  // search to bind a rule's head to the goal constants, collapsing the
+  // candidate space to goal-relevant motifs. Enumeration order is unchanged
+  // when pins is empty (the plain overload above is byte-identical behavior;
+  // it forwards here). Pinning a seed-side vertex narrows the seed scan via
+  // binary search on the slot's sorted pairs (or the flipped slot's when the
+  // pinned endpoint is the destination).
+  std::uint64_t Enumerate(
+      const PatternSpec& p, std::uint64_t match_cap,
+      std::vector<std::uint32_t>* out_embeddings, bool* capped,
+      const std::unordered_map<std::uint32_t, std::uint32_t>& pins) const;
 
  private:
   const TripleGraph& g_;

@@ -32,7 +32,7 @@ struct AgentModeArgs {
   std::uint64_t budget = 100;
   std::string policy = "deterministic";   // deterministic|random|hybrid|jev
   std::string scorer = "exact";           // exact|hdc
-  std::string executor = "greedy";        // greedy|bnb
+  std::string executor = "greedy";        // greedy|bnb|backward
   std::uint32_t top_k = 0;                // bnb: 0 = exact (no truncation)
   std::uint32_t hdc_dim = gar::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
@@ -179,6 +179,8 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
   comps.generator = std::make_unique<agent::NaiveMotifGenerator>();
   if (args.executor == "bnb") {
     comps.executor = std::make_unique<agent::BranchBoundExecutor>();
+  } else if (args.executor == "backward") {
+    comps.executor = std::make_unique<agent::BackwardExecutor>();
   } else {
     comps.executor = std::make_unique<agent::GreedyExecutor>();
   }

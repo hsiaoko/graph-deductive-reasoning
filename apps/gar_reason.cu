@@ -96,7 +96,8 @@ Args ParseArgs(int argc, char** argv) {
         (a.agent.policy != "deterministic" && a.agent.policy != "random" &&
          a.agent.policy != "hybrid" && a.agent.policy != "jev") ||
         (a.agent.scorer != "exact" && a.agent.scorer != "hdc") ||
-        (a.agent.executor != "greedy" && a.agent.executor != "bnb")) {
+        (a.agent.executor != "greedy" && a.agent.executor != "bnb" &&
+         a.agent.executor != "backward")) {
       PrintUsage();
       std::exit(2);
     }
