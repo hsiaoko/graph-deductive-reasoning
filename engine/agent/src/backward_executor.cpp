@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <optional>
 #include <unordered_map>
@@ -39,6 +40,13 @@ std::uint64_t TargetKey(const Target& t) {
   return (static_cast<std::uint64_t>(t.slot) << 40) ^
          graph::PackPair(t.src.value_or(UINT32_MAX),
                          t.dst.value_or(UINT32_MAX));
+}
+
+// Trace control: GAR_DEBUG_BACKWARD=1 prints target entry/exit (debugging
+// only; off by default).
+bool DebugBackward() {
+  static const bool on = std::getenv("GAR_DEBUG_BACKWARD") != nullptr;
+  return on;
 }
 
 }  // namespace
@@ -158,18 +166,34 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
   // Returns the (capped) set of (src,dst) pairs now present.
   //   - both sides pinned: present -> {it}; else derive.
   //   - one side open: derive up to kMaxCollected distinct facts.
+  // local_cap bounds the applications charged INSIDE this call (the budget
+  // halves per recursion level): a wandering recursive family (sibling
+  // chains) can't drain the shared budget before the right opening is
+  // tried. Resource allocation only — soundness unaffected.
   std::function<std::vector<std::pair<std::uint32_t, std::uint32_t>>(
-      const Target&, std::uint32_t)>
-      try_target = [&](const Target& t, std::uint32_t depth)
+      const Target&, std::uint32_t, std::uint64_t)>
+      try_target = [&](const Target& t, std::uint32_t depth,
+                       std::uint64_t local_cap)
       -> std::vector<std::pair<std::uint32_t, std::uint32_t>> {
     std::vector<std::pair<std::uint32_t, std::uint32_t>> got;
     if (t.src && t.dst && state->ContainsEdge(t.slot, *t.src, *t.dst)) {
       return {{*t.src, *t.dst}};  // already present: premise holds for free
     }
-    if (spent >= cfg.budget || depth > cfg.max_subgoal_depth) return got;
+    const std::uint64_t local_limit = spent + local_cap;
+    auto out_of_budget = [&]() {
+      return spent >= cfg.budget || spent >= local_limit;
+    };
+    if (out_of_budget() || depth > cfg.max_subgoal_depth) return got;
     if (!active.insert(TargetKey(t)).second) return got;  // cycle
 
     const std::string& pred_name = g.RelationName(t.slot);
+    if (DebugBackward()) {
+      std::fprintf(stderr, "[bwd] try %s(%s,%s) depth=%u spent=%llu\n",
+                   pred_name.c_str(),
+                   t.src ? g.EntityName(*t.src).c_str() : "_",
+                   t.dst ? g.EntityName(*t.dst).c_str() : "_", depth,
+                   static_cast<unsigned long long>(spent));
+    }
     const auto it = head_index.find(pred_name);
     if (it == head_index.end()) {
       active.erase(TargetKey(t));
@@ -212,7 +236,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
       return scored[x].motif.embedding < scored[y].motif.embedding;
     });
     for (const std::size_t oi : ord) {
-      if (spent >= cfg.budget) break;
+      if (out_of_budget()) break;
       if (got.size() >= kMaxCollected) break;
       const Motif& mu = scored[oi].motif;
       if (auto d = apply_motif(mu.rule, mu.embedding.data(),
@@ -229,7 +253,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         const FailureInfo fi = ClassifyFailure(r, m2.embedding.data(),
                                                state->attrs(), g, ctx);
         if (fi.dynamic && fi.fail_idx < r.antecedent.size() &&
-            depth < cfg.max_subgoal_depth && spent < cfg.budget) {
+            depth < cfg.max_subgoal_depth && !out_of_budget()) {
           const gar::Predicate& pred = r.antecedent[fi.fail_idx];
           Target sub;
           if (pred.label >= g.num_relations()) {
@@ -239,7 +263,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
             sub = Target{pred.label, m2.embedding[pred.src],
                          m2.embedding[pred.dst]};
           }
-          if (!try_target(sub, depth + 1).empty()) {
+          if (!try_target(sub, depth + 1, local_cap / 2).empty()) {
             if (auto d = apply_motif(m2.rule, m2.embedding.data(),
                                      static_cast<std::uint32_t>(
                                          m2.embedding.size()))) {
@@ -252,7 +276,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         }
       }
     }
-    if (!got.empty() || depth >= cfg.max_subgoal_depth || spent >= cfg.budget) {
+    if (!got.empty() || depth >= cfg.max_subgoal_depth || out_of_budget()) {
       active.erase(TargetKey(t));
       return got;
     }
@@ -261,8 +285,24 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
     // current graph but derivable). At most two opened edges per rule;
     // two opened edges must share exactly one variable (the free join
     // variable gets candidate values from deriving one side first).
+    // Collect (rule, open-set) attempts for ALL head rules first, then
+    // execute in guidance order: the opened edge closest to the goal first
+    // (d of its base predicate toward the goal — the intermediate cheapest
+    // to derive), then the rule's rel_fam (via the scorer on a dummy
+    // embedding — rel_fam is embedding-independent), then confidence, then
+    // index. Without this the fallback burns the budget on hopeless
+    // openings of early rules (fb15k: prequel-openings before the
+    // person-chain rule the chase actually used).
+    struct OpenAttempt {
+      std::uint32_t rule;
+      gar::EdgeIndex oe1, oe2;
+      std::uint32_t open_d;   // min d(base slot of opened edges)
+      bool derive_first;      // 2-open with one goal-pinned endpoint each
+      double rel_fam;
+      double conf;
+    };
+    std::vector<OpenAttempt> attempts;
     for (const std::uint32_t ri : it->second) {
-      if (!got.empty() || spent >= cfg.budget) break;
       const GARule& r = rules[ri];
       const RuleHead head = ResolveRuleHead(r);
       const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
@@ -280,23 +320,93 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
           pedges.push_back({s, r.pattern.indices[e], r.pattern.edge_labels[e]});
         }
       }
-      // Candidate open sets: single edge, or edge pairs sharing a variable.
+      // Candidate open sets: single edge, or ANY edge pair (the shared
+      // free variable, when one exists, gets the coordinated derivation;
+      // pairs sharing no variable are handled when the remaining
+      // sub-pattern binds everything — the fb15k film goal opens two
+      // NON-adjacent edges: film(x0,x1) and person^-1(x2,x3), with x1/x2
+      // bound by the remaining person(x1,x2) edge).
       std::vector<std::pair<gar::EdgeIndex, gar::EdgeIndex>> open_sets;
       for (gar::EdgeIndex e = 0; e < m_edges; ++e) {
         open_sets.emplace_back(e, gar::EdgeIndex(UINT32_MAX));
       }
       for (gar::EdgeIndex e1 = 0; e1 < m_edges; ++e1) {
         for (gar::EdgeIndex e2 = e1 + 1; e2 < m_edges; ++e2) {
-          const PE& a = pedges[e1];
-          const PE& b = pedges[e2];
-          if (a.s == b.s || a.s == b.d || a.d == b.s || a.d == b.d) {
-            open_sets.emplace_back(e1, e2);
+          open_sets.emplace_back(e1, e2);
+        }
+      }
+      // Rule-level guidance score (rel_fam is embedding-independent).
+      ScoredMotif probe;
+      kit.scorer->Score(r, Motif{ri, std::vector<std::uint32_t>(n, 0)},
+                          sctx, &probe);
+      auto open_d = [&](gar::EdgeIndex oe) {
+        const gar::LabelID l = pedges[oe].slot;
+        const std::uint32_t b =
+            l >= g.num_relations() ? l - g.num_relations() : l;
+        const std::uint32_t pid =
+            ctx.table->Find(g.RelationName(b));
+        return (pid != analysis::kInvalidPredicate &&
+                pid < ctx.distances.size())
+                   ? ctx.distances[pid]
+                   : analysis::kUnreachable;
+      };
+      for (const auto& [oe1, oe2] : open_sets) {
+        std::uint32_t od = open_d(oe1);
+        bool df = false;
+        if (oe2 != gar::EdgeIndex(UINT32_MAX)) {
+          od = std::max(od, open_d(oe2));
+          // derive-first eligible: each opened edge has exactly one
+          // goal-pinned endpoint, and the free endpoints differ.
+          const std::uint32_t pu = head.pu, pv = head.pv;
+          auto one_pinned = [&](const PE& pe) {
+            const bool ps = t.src && (pe.s == pu || pe.s == pv);
+            const bool pd = t.dst && (pe.d == pu || pe.d == pv);
+            return ps != pd;
+          };
+          if (one_pinned(pedges[oe1]) && one_pinned(pedges[oe2])) {
+            df = true;
           }
+        }
+        attempts.push_back(OpenAttempt{ri, oe1, oe2, od, df, probe.rel_fam,
+                                       r.quality.confidence});
+      }
+    }
+    std::sort(attempts.begin(), attempts.end(),
+              [](const OpenAttempt& a, const OpenAttempt& b) {
+                // derive-first-eligible openings first (coordinated
+                // intermediates are the rare winning shape), then by the
+                // opened edges' distance to the goal, then rule quality.
+                if (a.derive_first != b.derive_first) return a.derive_first;
+                if (a.open_d != b.open_d) return a.open_d < b.open_d;
+                if (a.rel_fam != b.rel_fam) return a.rel_fam > b.rel_fam;
+                if (a.conf != b.conf) return a.conf > b.conf;
+                if (a.rule != b.rule) return a.rule < b.rule;
+                if (a.oe1 != b.oe1) return a.oe1 < b.oe1;
+                return a.oe2 < b.oe2;
+              });
+
+    for (const auto& att : attempts) {
+      if (!got.empty() || out_of_budget()) break;
+      const std::uint32_t ri = att.rule;
+      const gar::EdgeIndex oe1 = att.oe1, oe2 = att.oe2;
+      const GARule& r = rules[ri];
+      const RuleHead head = ResolveRuleHead(r);
+      const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+
+      // Flatten pattern edges to (src, dst, slot).
+      struct PE {
+        std::uint32_t s, d;
+        gar::LabelID slot;
+      };
+      std::vector<PE> pedges;
+      for (std::uint32_t s = 0; s < n; ++s) {
+        for (gar::EdgeIndex e = r.pattern.offsets[s];
+             e < r.pattern.offsets[s + 1]; ++e) {
+          pedges.push_back({s, r.pattern.indices[e], r.pattern.edge_labels[e]});
         }
       }
 
-      for (const auto& [oe1, oe2] : open_sets) {
-        if (!got.empty() || spent >= cfg.budget) break;
+      {  // scope of the former open_sets loop body
         const bool two = oe2 != gar::EdgeIndex(UINT32_MAX);
         // Opened slots must be derivable.
         auto derivable_slot = [&](gar::LabelID l) {
@@ -315,6 +425,87 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         std::unordered_map<std::uint32_t, std::uint32_t> full_pins;
         if (t.src) full_pins[head.pu] = *t.src;
         if (t.dst) full_pins[head.pv] = *t.dst;
+
+        // Derive-first 2-open (drives by derivability instead of by base
+        // matches): when each opened edge has exactly one goal-pinned
+        // endpoint and their free endpoints are DIFFERENT variables,
+        // collect derivations of both edges with the free side open
+        // (bounded by kMaxCollected each), then re-enumerate the full
+        // pattern — the remaining edges validate the combination for free.
+        // This is the fb15k film/award task shape: two derived
+        // intermediates sharing no variable, joined by a base edge
+        // (person(x1,x2)) that must not be enumerated over all base pairs.
+        if (two) {
+          const PE& A = pedges[oe1];
+          const PE& B = pedges[oe2];
+          auto one_pinned = [&](const PE& pe, bool& src_pinned) -> bool {
+            const bool ps = full_pins.count(pe.s) != 0;
+            const bool pd = full_pins.count(pe.d) != 0;
+            if (ps == pd) return false;  // both or neither pinned: not this case
+            src_pinned = ps;
+            return true;
+          };
+          bool a_src_pinned = false, b_src_pinned = false;
+          const bool disjoint_free =
+              one_pinned(A, a_src_pinned) && one_pinned(B, b_src_pinned) &&
+              (a_src_pinned ? A.d : A.s) != (b_src_pinned ? B.d : B.s);
+          if (disjoint_free) {
+            auto open_target = [&](const PE& pe, bool src_pinned) {
+              Target tt;
+              tt.slot = pe.slot >= g.num_relations()
+                            ? pe.slot - g.num_relations()
+                            : pe.slot;
+              const std::uint32_t pinned_val =
+                  src_pinned ? full_pins.at(pe.s) : full_pins.at(pe.d);
+              // mind the inverse-slot flip when pinning
+              if (pe.slot >= g.num_relations()) {
+                if (src_pinned) {
+                  tt.dst = pinned_val;  // flipped: pattern src is base dst
+                } else {
+                  tt.src = pinned_val;
+                }
+              } else {
+                if (src_pinned) {
+                  tt.src = pinned_val;
+                } else {
+                  tt.dst = pinned_val;
+                }
+              }
+              return tt;
+            };
+            const auto c1 =
+                try_target(open_target(A, a_src_pinned), depth + 1,
+                           local_cap / 2);
+            const auto c2 =
+                try_target(open_target(B, b_src_pinned), depth + 1,
+                           local_cap / 2);
+            if (!c1.empty() && !c2.empty()) {
+              const auto full = build_spec(r);
+              std::unordered_map<std::uint32_t, std::uint32_t> fpins;
+              if (t.src) fpins[head.pu] = *t.src;
+              if (t.dst) fpins[head.pv] = *t.dst;
+              std::vector<std::uint32_t> embs2;
+              bool capped2 = false;
+              const std::uint64_t n2 = matcher.Enumerate(
+                  full, cfg.match_cap_per_rule, &embs2, &capped2, fpins);
+              for (std::uint64_t k2 = 0; k2 < n2; ++k2) {
+                const std::uint32_t* emb2 = embs2.data() + k2 * n;
+                if (!label_ok(r, emb2)) continue;
+                if (auto d = apply_motif(ri, emb2, n)) {
+                  if ((!t.src || d->src == *t.src) &&
+                      (!t.dst || d->dst == *t.dst)) {
+                    got.emplace_back(d->src, d->dst);
+                  }
+                  break;
+                }
+              }
+            }
+            if (!got.empty()) break;
+            // derive-first failed: fall through to the sub-pattern path
+            // (the opened edges may still be derivable with both endpoints
+            // grounded by the remaining pattern).
+          }
+        }
         for (std::size_t i = 0; i < pedges.size(); ++i) {
           if (i == oe1 || (two && i == oe2)) continue;
           has_edge[pedges[i].s] = 1;
@@ -331,7 +522,49 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
             break;
           }
         }
-        if (!ok_open || new2old.empty()) continue;
+        if (!ok_open) continue;
+        if (new2old.empty()) {
+          // The opened edge was the rule's ONLY edge: nothing to
+          // enumerate; the subgoal is determined by the pins (e.g.
+          // r(x,y) -> q(x,y) with r missing: derive r's fact directly,
+          // then the rule matches trivially). One pin suffices — the
+          // other side stays open and is collected from the derivation.
+          if (full_pins.empty()) continue;  // need at least one endpoint
+          const PE& pe = pedges[oe1];
+          Target t1;
+          t1.slot = pe.slot >= g.num_relations() ? pe.slot - g.num_relations()
+                                                 : pe.slot;
+          const auto ps_it = full_pins.find(pe.s);
+          const auto pd_it = full_pins.find(pe.d);
+          std::optional<std::uint32_t> a, b;
+          if (ps_it != full_pins.end()) a = ps_it->second;
+          if (pd_it != full_pins.end()) b = pd_it->second;
+          if (pe.slot >= g.num_relations()) std::swap(a, b);
+          t1.src = a;
+          t1.dst = b;
+          ++spent;  // the subgoal attempt charges one application
+          if (try_target(t1, depth + 1, local_cap / 2).empty()) continue;
+          const auto full = build_spec(r);
+          std::unordered_map<std::uint32_t, std::uint32_t> fpins;
+          if (t.src) fpins[head.pu] = *t.src;
+          if (t.dst) fpins[head.pv] = *t.dst;
+          std::vector<std::uint32_t> embs2;
+          bool capped2 = false;
+          const std::uint64_t n2 = matcher.Enumerate(
+              full, cfg.match_cap_per_rule, &embs2, &capped2, fpins);
+          for (std::uint64_t k2 = 0; k2 < n2; ++k2) {
+            const std::uint32_t* emb2 = embs2.data() + k2 * n;
+            if (!label_ok(r, emb2)) continue;
+            if (auto d = apply_motif(ri, emb2, n)) {
+              if ((!t.src || d->src == *t.src) &&
+                  (!t.dst || d->dst == *t.dst)) {
+                got.emplace_back(d->src, d->dst);
+              }
+              break;
+            }
+          }
+          continue;
+        }
         graph::PatternSpec sub;
         sub.num_vertices = static_cast<std::uint32_t>(new2old.size());
         for (std::size_t i = 0; i < pedges.size(); ++i) {
@@ -349,7 +582,8 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
             sub, cfg.match_cap_per_rule, &embs, &capped, pins);
         const auto sub_n = static_cast<std::uint32_t>(new2old.size());
 
-        for (std::uint64_t k = 0; k < n_emb && got.empty(); ++k) {
+        for (std::uint64_t k = 0; k < n_emb && got.empty() &&
+             !out_of_budget(); ++k) {
           const std::uint32_t* emb_sub = embs.data() + k * sub_n;
           std::vector<std::uint32_t> emb(n, 0);
           for (std::uint32_t u = 0; u < sub_n; ++u) {
@@ -374,7 +608,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
           Target t1 = ground_target(oe1);
           bool ok = false;
           if (!two) {
-            ok = !try_target(t1, depth + 1).empty();
+            ok = !try_target(t1, depth + 1, local_cap / 2).empty();
           } else {
             // Two opened edges share one variable. The shared variable is
             // free iff unpinned and uncovered by the sub-pattern.
@@ -388,8 +622,8 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                 shared != UINT32_MAX && !full_pins.count(shared) &&
                 !has_edge[shared];
             if (!shared_free) {
-              ok = !try_target(t1, depth + 1).empty() &&
-                   !try_target(ground_target(oe2), depth + 1).empty();
+              ok = !try_target(t1, depth + 1, local_cap / 2).empty() &&
+                   !try_target(ground_target(oe2), depth + 1, local_cap / 2).empty();
             } else {
               // Collect candidate values for the shared variable by
               // deriving the first edge with that side open.
@@ -401,14 +635,14 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
               } else {
                 open1.src = t1.src;  // free dst
               }
-              const auto cands = try_target(open1, depth + 1);
+              const auto cands = try_target(open1, depth + 1, local_cap / 2);
               for (const auto& [fs, fd] : cands) {
                 const std::uint32_t shared_val =
                     share_is_src_of_1 ? fs : fd;
                 Target t2 = ground_target(oe2);
                 if (B.s == shared) t2.src = shared_val;
                 if (B.d == shared) t2.dst = shared_val;
-                if (!try_target(t2, depth + 1).empty()) {
+                if (!try_target(t2, depth + 1, local_cap / 2).empty()) {
                   ok = true;
                   break;
                 }
@@ -439,6 +673,11 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         }
       }
     }
+    if (DebugBackward()) {
+      std::fprintf(stderr, "[bwd] exit %s(%s,%s) -> %zu\n", pred_name.c_str(),
+                   t.src ? g.EntityName(*t.src).c_str() : "_",
+                   t.dst ? g.EntityName(*t.dst).c_str() : "_", got.size());
+    }
     active.erase(TargetKey(t));
     return got;
   };
@@ -451,7 +690,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
     return res;
   }
   const Target top{goal.slot, goal.args[0], goal.args[1]};
-  const auto got = try_target(top, 0);
+  const auto got = try_target(top, 0, cfg.budget);
   if (!got.empty()) {
     res.goal_derived = true;
     res.termination = "goal";

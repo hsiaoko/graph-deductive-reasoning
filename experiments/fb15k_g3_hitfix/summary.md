@@ -35,6 +35,13 @@ cap=8 截断，而能一步推出 goal 的 embedding 在枚举序的第 288~1608
    - 语义红线保持：每次 ApplyDerivation 都是合法 chase 步（EvalAntecedent +
      当前图），派生 ⊆ 闭包。
 
+## 迭代史
+
+- 起点（消融实验）：0/20（所有 greedy/random 配置）。
+- 第一轮（backward executor 初版）：18/20，全部 CONSISTENT，0 DIVERGENT。
+- 第三轮（双开协调 + 排序制导 + 局部预算 + 单边规则子目标化）：18/20 保持
+  （无回归），两个 round-2 任务仍未中——机制障碍与下一步见 NOTES.md 第三轮。
+
 ## 最终对照表（20 任务 workload，verify --tasks --shared-holdout）
 
 | 口径 | 命中 | 说明 |
