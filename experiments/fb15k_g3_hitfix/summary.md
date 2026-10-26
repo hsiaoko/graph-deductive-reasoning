@@ -41,21 +41,25 @@ cap=8 截断，而能一步推出 goal 的 embedding 在枚举序的第 288~1608
 - 第一轮（backward executor 初版）：18/20，全部 CONSISTENT，0 DIVERGENT。
 - 第三轮（双开协调 + 排序制导 + 局部预算 + 单边规则子目标化）：18/20 保持
   （无回归），两个 round-2 任务仍未中——机制障碍与下一步见 NOTES.md 第三轮。
+- 第四轮（双侧派生协调，commit d380d16）：**20/20 全部 CONSISTENT**。
+  候选集并入基图现成值（此前只看"可派生"）、修逆边 pin 侧 bug、
+  剩余子模式边做半连接过滤求交（中间边缺而一级可派生时才计费派生）、
+  尝试按候选证据分层排序、子模式回退的计费递归先过免费预检。
+  详见 NOTES.md 第四轮。
 
 ## 最终对照表（20 任务 workload，verify --tasks --shared-holdout）
 
 | 口径 | 命中 | 说明 |
 |---|---|---|
 | agent greedy（上轮全部配置） | 0/20 | 见 fb15k_g3_ablation |
-| **agent backward（本期）** | **18/20** | 全部 CONSISTENT，0 DIVERGENT；每任务 72-185ms |
+| agent backward（第三轮） | 18/20 | 全部 CONSISTENT，0 DIVERGENT |
+| **agent backward（本期，双侧派生协调）** | **20/20** | 全部 CONSISTENT；budget=10；两 round-2 任务 spent=6 与 2 |
 | 全量 chase（2 轮 100k 截断） | 20/20（可达性 ground truth） | 227s 一次（共享） |
 
-未命中 2 个 = 仅有的两个 bstar_round=2 任务（film/actor 与 award_nomination/
-award）。根因：它们的推导需要两条各自由规则派生的中间边共享自由变量
-（gar_004814 需 award_nominee(015rkw,x2) ∧ nominated_for(x2,0fg04)，x2 要同时
-满足两个派生）——当前实现的自由变量协调只覆盖单缺边主干。budget 30 也不中
-（30 步全是有效但不对口的派生）。未来工作：join-coordinated subgoal
-derivation（两侧各派生候选集再求交）。
+两个 round-2 任务（film/actor 与 award_nomination/award）在第四轮命中：
+机制 = 两条开放边各自取候选（基图现成值优先、一级可派生其次），剩余
+子模式边做半连接过滤求交（中间边缺失但一级可派生时计费派生），组合对
+再全模式校验派生。budget 敏感性：两任务在 budget=3/5/10 下均命中。
 
 ## 耗时对比（命中任务）
 
@@ -69,8 +73,9 @@ derivation（两侧各派生候选集再求交）。
 ## 回归
 
 synth：full 模式对 .baseline 逐字节一致；greedy（5a 用例）与 bnb（5b 用例）
-chain.tsv 逐字节不变；verify --tasks 默认路径（逐任务留出）12/12 不变。
-PatternMatcher pins 重载空 pins 路径与旧实现逐字节一致。
+chain.tsv 逐字节不变；verify --tasks 默认路径（逐任务留出）12/12 不变（bnb 与
+backward 均 12/12 CONSISTENT）。PatternMatcher pins 重载空 pins 路径与旧实现
+逐字节一致。第四轮改动后全部复验通过。
 
 ## 复现
 

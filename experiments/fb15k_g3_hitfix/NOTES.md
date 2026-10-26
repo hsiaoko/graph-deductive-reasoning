@@ -96,3 +96,38 @@ v2 机制全部落地后复测 20 任务：**18/20 保持**（无回归，report
   nominated_for(x1,x2) 覆盖了 x2——走的是"双独立派生"路径，两侧取值碰不上。
   下一步（写入 summary.md 的未来工作）：双开放边在剩余模式覆盖共享变量时
   也要做"候选取值求交"（derive-collect 两侧再按剩余边过滤）。
+
+## 2026-10-26 第四轮：双侧派生协调落地 → 20/20
+
+机制实现（backward_executor.cpp，commit d380d16）：
+1. **候选集口径修正（关键 bug）**：df 预检的 collect_candidate_values 此前把
+   pattern 侧的 pinned 标志直接当 base 侧用——逆边（person^-1 等）pin 错侧；
+   且预检不兼容时把自由端 pin 到未初始化的 v_hit=0（实体 #0 /m/027rn），
+   白烧 6 单位/尝试。现统一 base 取向换算（pin_free/base_pin_src）。
+2. **现成值并入候选**：候选 = Γ 中已存在（OutNeighbors 直读，免费）∪ 一级
+   可派生（pinned 枚举预检，免费），现成值在前。chase 的 award 链 x1 就是
+   基图边——只在"可派生"口径下永远看不到它。
+3. **半连接求交（pair-join）**：候选对 (v1,v2) 经剩余子模式边过滤；中间边
+   缺失但一级可派生（one_level_derives 免费预检）时才计费派生它——错误对
+   零计费。先跑现成值 pass A，不成交才付费 derive-collect（pass B）。
+4. **尝试排序加证据层级**：df 尝试按 tier 排（两侧候选均非空=1；求交可得
+   组合对=0 提升），gar_005450 从第 18 位升到第 0 位，gar_062307 升 tier 0。
+   拒绝条件收窄为"两侧非空且不组合且中间边永不可派生"（否则误杀
+   gar_005450：其中间 person 边本身是 chase 派生事实）。
+5. **子模式回退路径的计费门**：grounded 开放边先过免费一级预检
+   （present || one_level_derives）才允许计费递归——film 任务的
+   film(015rkw,0g56t9t) 型假子目标（基图 person 边枚举出的 grounding）从
+   3 单位/个降为 0。
+6. kMaxPairs=64（原 16 漏掉 vals1 第 14 位的正解 /m/04pk1f）。
+
+结果（verify --tasks --shared-holdout，budget=10，cap=8）：
+**20/20 CONSISTENT，0 DIVERGENT**（reports_backward_v3.tsv）。
+- film 任务：spent=6/10（collect person 3 + 中间边派生 1 + film 定点派生 1 +
+  verify 1）。
+- award 任务：spent=2/10（x1 基图现成 → pass A 直接组合）。
+- budget 敏感性：两任务在 budget=3 与 5 下均命中（film spent=4@b3、5@b5，
+  award spent=2 不变）。注：成功路径 spent 可略超 budget（≤1，一次尝试内
+  多次计费无中间检查点）——沿用既有计费口径，终止语义不变。
+- 回归全绿：synth full 对 .baseline（summary 逐字节 + matches diff -r +
+  closure 排序 md5 d2b83661…）；greedy 5a / bnb 5b chain.tsv 逐字节；
+  verify synth：bnb 12/12、backward 12/12。
