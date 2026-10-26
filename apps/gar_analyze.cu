@@ -524,6 +524,7 @@ struct VerifyArgs {
   gar_apps::FullDeduceArgs io;
   gar_apps::AgentModeArgs agent;
   std::string report = "verify_report.yaml";
+  deduction::ChaseConfig chase_cfg;  // caps for the closure cross-check
 };
 
 VerifyArgs ParseVerifyArgs(int argc, char** argv) {
@@ -606,7 +607,8 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
                        const gar::graph::VertexAttrs* attrs,
                        const analysis::DependencyGraph& dg,
                        const std::vector<std::uint32_t>& depths,
-                       bool with_gpu, agent::AgentResult* agent_out) {
+                       bool with_gpu, agent::AgentResult* agent_out,
+                       const deduction::ChaseConfig& chase_cfg) {
   VerdictInput v;
   v.budget = agent_args.budget;
 
@@ -635,7 +637,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   v.budget_exhausted = agent_out->budget_exhausted;
 
   // cpu closure on a clone
-  deduction::ChaseConfig cfg;
+  deduction::ChaseConfig cfg = chase_cfg;
   cfg.keep_matches = false;
   gar::graph::TripleGraph g_cpu = g0;
   deduction::CpuChaseEngine cpu_engine(g_cpu, attrs);
@@ -695,7 +697,7 @@ int CmdVerifyRun(const VerifyArgs& a) {
       in.attrs.columns.empty() ? nullptr : &in.attrs;
   const VerdictInput v =
       VerifyOne(a.io, a.agent, goal, &in.graph, in.rules, in.rule_ids, attrs, dg, depths,
-                a.gpu, &agent_res);
+                a.gpu, &agent_res, a.chase_cfg);
   const std::string verdict = VerdictOf(v);
   WriteVerifyReport(a.report, ParseTextGoal(a.agent.goal_spec), v, verdict,
                     agent_res.total_cost, agent_res.chain.size());
@@ -787,7 +789,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
     agent::AgentResult agent_res;
     const VerdictInput v =
         VerifyOne(a.io, task_args, goal, &in.graph, in.rules, in.rule_ids, attrs, dg,
-                  depths, a.gpu, &agent_res);
+                  depths, a.gpu, &agent_res, a.chase_cfg);
     const std::string verdict = VerdictOf(v);
     if (verdict == "CONSISTENT") ++n_consistent;
     else if (verdict == "BUDGET-LIMITED") ++n_budget;
