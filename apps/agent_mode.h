@@ -39,6 +39,10 @@ struct AgentModeArgs {
   std::uint32_t max_candidates_per_rule = 256;
   gar::engine::agent::HandcraftedConfig score;
   bool verify_against_closure = false;
+  // Ablation: --no-dg removes dependency-graph guidance (d(.) table all
+  // zeros: no candidate hard-filter, rel_fam neutral, price = w0). The DG
+  // itself is still built (failure classification reads its in-degrees).
+  bool no_dg = false;
   // Jev (LLM decision model) policy knobs; --jev-mock swaps the HTTP client
   // for the network-free MockJevClient (development/regression support).
   gar::engine::agent::JevConfig jev;
@@ -67,6 +71,7 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--nu2") a->score.nu2 = std::stod(next());
   else if (k == "--tau-hdc") a->score.tau_hdc = std::stod(next());
   else if (k == "--no-confidence") a->score.use_confidence = false;
+  else if (k == "--no-dg") a->no_dg = true;
   else if (k == "--verify-against-closure") a->verify_against_closure = true;
   else if (k == "--jev-endpoint") a->jev.endpoint = next();
   else if (k == "--jev-timeout-ms")
@@ -177,7 +182,8 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
   } else {
     comps.executor = std::make_unique<agent::GreedyExecutor>();
   }
-  return agent::ReasoningAgent(std::move(comps), dg, encoder);
+  return agent::ReasoningAgent(std::move(comps), dg, encoder,
+                               !args.no_dg);
 }
 
 // Renders a derived fact as "rel(src,dst)" with entity names.

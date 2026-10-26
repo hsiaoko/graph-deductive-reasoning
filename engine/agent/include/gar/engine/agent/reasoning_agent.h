@@ -33,8 +33,11 @@ class ReasoningAgent {
   };
 
   ReasoningAgent(Components comps, const analysis::DependencyGraph* dg,
-                 hdc::HdcEncoder encoder)
-      : comps_(std::move(comps)), dg_(dg), encoder_(encoder) {}
+                 hdc::HdcEncoder encoder, bool guide_with_dg = true)
+      : comps_(std::move(comps)),
+        dg_(dg),
+        encoder_(encoder),
+        guide_with_dg_(guide_with_dg) {}
 
   // Runs one chain toward `goal`. Throws std::invalid_argument when the
   // goal's relation is not derivable by any rule (no d(.) table exists).
@@ -48,7 +51,16 @@ class ReasoningAgent {
                                   "rule: " +
                                   goal_name);
     }
-    ctx.distances = dg_->DistancesTo(gp);
+    if (guide_with_dg_) {
+      ctx.distances = dg_->DistancesTo(gp);
+    } else {
+      // --no-dg ablation: DG guidance off. An all-zero d(.) table makes
+      // every consequent predicate look goal-adjacent: the generator's
+      // d(p0)<inf hard filter never prunes, rel_fam = gamma^0 = 1 is
+      // neutral, price = w0 + 0. The DG is still built (failure
+      // classification reads its in-degrees); only guidance is removed.
+      ctx.distances.assign(dg_->NumPredicates(), 0);
+    }
 
     WitnessLog witness(encoder_.dim(), &state->graph(), ctx.table);
     FailureRegistry failures;
@@ -62,6 +74,7 @@ class ReasoningAgent {
   Components comps_;
   const analysis::DependencyGraph* dg_;
   hdc::HdcEncoder encoder_;
+  bool guide_with_dg_ = true;
 };
 
 }  // namespace agent
