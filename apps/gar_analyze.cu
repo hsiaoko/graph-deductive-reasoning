@@ -548,7 +548,8 @@ VerifyArgs ParseVerifyArgs(int argc, char** argv) {
     else if (k == "--report") a.report = next();
     else if (k == "--csr") a.io.csr_dir = next();
     else if (k == "--rules") a.io.rules_root = next();
-    else if (!gar_apps::ParseAgentModeOption(k, next, &a.agent)) {
+    else if (ParseChaseCapOption(k, next, &a.chase_cfg)) {
+    } else if (!gar_apps::ParseAgentModeOption(k, next, &a.agent)) {
       std::cerr << "unknown option: " << k << "\n";
       Usage();
     }
