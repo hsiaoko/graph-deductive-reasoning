@@ -1,0 +1,8 @@
+/m/01y8zd	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14
+/m/022jr5	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14
+/m/01y9qr	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14
+/m/0bsnm	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14
+/m/05gm16l	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14
+/m/0jpkw	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14
+/m/0mbwf	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14
+/m/07wkd	/education/university/local_tuition./measurement_unit/dated_money_value/currency	/m/02l6h	gar_000000	gar_017735	14

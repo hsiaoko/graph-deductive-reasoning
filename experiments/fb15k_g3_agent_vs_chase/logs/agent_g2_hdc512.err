@@ -1,0 +1,18 @@
+[gar_reason] |V|=14513 |R|=237 |E|=289650
+[gar_reason] 81683 rules
+[gar_reason] 0 numeric attribute columns
+[gar_reason] goal: /education/university/local_tuition./measurement_unit/dated_money_value/currency(/m/022jr5,/m/02l6h) (slot 128)
+[gar_reason] dependency graph: 236 predicates, 221090 arcs (built in 0.138194s)
+[gar_reason] running: policy=deterministic scorer=hdc executor=greedy budget=10 hdc_dim=512 seed=42
+[gar_reason] step 1: gar_000018 ok=1 cost=1 cum=1 derived=/military/military_combatant/military_conflicts./military/military_combatant_group/combatants(/m/09c7w0,/m/07ssc)
+[gar_reason] step 2: gar_080076 ok=1 cost=1 cum=2 derived=/military/military_combatant/military_conflicts./military/military_combatant_group/combatants(/m/09c7w0,/m/059j2)
+[gar_reason] step 3: gar_061206 ok=1 cost=1 cum=3 derived=/military/military_combatant/military_conflicts./military/military_combatant_group/combatants(/m/09c7w0,/m/09c7w0)
+[gar_reason] step 4: gar_000188 ok=1 cost=1 cum=4 derived=/award/award_category/winners./award/award_honor/award_winner(/m/02qyp19,/m/0l6qt)
+[gar_reason] step 5: gar_000188 ok=1 cost=1 cum=5 derived=/award/award_category/winners./award/award_honor/award_winner(/m/02qyp19,/m/014zcr)
+[gar_reason] step 6: gar_000168 ok=1 cost=1 cum=6 derived=/location/location/adjoin_s./location/adjoining_relationship/adjoins(/m/09c7w0,/m/0b90_r)
+[gar_reason] step 7: gar_000075 ok=1 cost=1 cum=7 derived=/organization/endowed_organization/endowment./measurement_unit/dated_money_value/currency(/m/01j_9c,/m/09nqf)
+[gar_reason] step 8: gar_000154 ok=1 cost=1 cum=8 derived=/base/popstra/celebrity/friendship./base/popstra/friendship/participant(/m/04bdxl,/m/0c6qh)
+[gar_reason] step 9: gar_000052 ok=1 cost=1 cum=9 derived=/film/film/release_date_s./film/film_regional_release_date/film_release_region(/m/04v8x9,/m/07ssc)
+[gar_reason] step 10: gar_000051 ok=1 cost=1 cum=10 derived=/film/film/country(/m/04v8x9,/m/07ssc)
+[gar_reason] done: steps=10 derived=10 cost=10 goal_derived=false termination=budget wall=43.3476s
+wall=61.04s maxrss=434248KB

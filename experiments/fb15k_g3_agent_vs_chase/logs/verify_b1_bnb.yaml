@@ -1,0 +1,9 @@
+goal: "/military/military_combatant/military_conflicts./military/military_combatant_group/combatants(/m/09c7w0,/m/07ssc)"
+goal_in_cpu_closure: true
+agent_goal_derived: true
+agent_total_cost: 1
+agent_steps: 1
+budget: 1
+bstar_dg: 1
+subset_ok: true
+verdict: CONSISTENT

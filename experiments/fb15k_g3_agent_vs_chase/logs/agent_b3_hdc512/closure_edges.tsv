@@ -1,0 +1,11 @@
+# src	relation	dst	round	rule
+/m/0140g4	/award/award_winning_work/awards_won./award/award_honor/honored_for	/m/02ny6g	1	gar_000093
+/m/0140g4	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/02ny6g	2	gar_000092
+/m/0140g4	/award/award_winning_work/awards_won./award/award_honor/honored_for	/m/0140g4	3	gar_005660
+/m/0140g4	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/0140g4	4	gar_080618
+/m/0140g4	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/069q4f	5	gar_070484
+/m/0140g4	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/07b1gq	6	gar_063758
+/m/0140g4	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/0946bb	7	gar_063758
+/m/0140g4	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/01771z	8	gar_063758
+/m/0140g4	/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for	/m/07sgdw	9	gar_028571
+/m/0140g4	/film/film/estimated_budget./measurement_unit/dated_money_value/currency	/m/09nqf	10	gar_063748

@@ -1,0 +1,41 @@
+[gar_reason] |V|=14513 |R|=237 |E|=289650
+[gar_reason] 81683 rules
+[gar_reason] 0 numeric attribute columns
+[gar_reason] goal: /education/university/local_tuition./measurement_unit/dated_money_value/currency(/m/01y8zd,/m/02l6h) (slot 128)
+[gar_reason] dependency graph: 236 predicates, 221090 arcs (built in 0.14663s)
+[gar_reason] running: policy=hybrid scorer=exact executor=bnb budget=2 hdc_dim=8192 seed=42 top_k=0
+[bnb] expanded=32 open=31 best_cost=-1
+[bnb] expanded=64 open=63 best_cost=-1
+[bnb] expanded=96 open=95 best_cost=-1
+[bnb] expanded=128 open=127 best_cost=-1
+[bnb] expanded=160 open=159 best_cost=-1
+[bnb] expanded=192 open=191 best_cost=-1
+[bnb] expanded=224 open=223 best_cost=-1
+[bnb] expanded=256 open=255 best_cost=-1
+[bnb] expanded=288 open=287 best_cost=-1
+[bnb] expanded=320 open=319 best_cost=-1
+[bnb] expanded=352 open=351 best_cost=-1
+Command terminated by signal 9
+	Command being timed: "./build/bin/gar_reason --mode agent --csr /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr --rules /ssd_data/zhuxk/graphs/KG/fb15k-237/rules_g3 --goal /education/university/local_tuition./measurement_unit/dated_money_value/currency(/m/01y8zd,/m/02l6h) --budget 2 --policy hybrid --scorer exact --executor bnb --max-candidates-per-rule 8 --out /tmp/exp/ag_g1_bnb"
+	User time (seconds): 979.04
+	System time (seconds): 10.79
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 16:29.86
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 15205152
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 3928909
+	Voluntary context switches: 1
+	Involuntary context switches: 2221
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 104
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

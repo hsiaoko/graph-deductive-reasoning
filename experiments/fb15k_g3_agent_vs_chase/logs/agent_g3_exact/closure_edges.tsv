@@ -1,0 +1,11 @@
+# src	relation	dst	round	rule
+/m/09c7w0	/military/military_combatant/military_conflicts./military/military_combatant_group/combatants	/m/07ssc	1	gar_000018
+/m/09c7w0	/military/military_combatant/military_conflicts./military/military_combatant_group/combatants	/m/09c7w0	2	gar_004249
+/m/044mz_	/people/person/nationality	/m/07ssc	3	gar_065508
+/m/0184jc	/people/person/nationality	/m/07ssc	4	gar_065508
+/m/044mz_	/people/person/nationality	/m/02w7gg	5	gar_003665
+/m/0184jc	/people/person/nationality	/m/02w7gg	6	gar_003665
+/m/044mz_	/people/person/nationality	/m/0fdys	7	gar_065508
+/m/0134w7	/people/person/places_lived./people/place_lived/location	/m/0fdys	8	gar_065574
+/m/04v8x9	/film/film/runtime./film/film_cut/film_release_region	/m/02w7gg	9	gar_040200
+/m/04v8x9	/film/film/runtime./film/film_cut/film_release_region	/m/02jx1	10	gar_001376

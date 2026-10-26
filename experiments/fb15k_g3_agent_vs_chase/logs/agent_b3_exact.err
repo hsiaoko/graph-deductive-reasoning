@@ -1,0 +1,18 @@
+[gar_reason] |V|=14513 |R|=237 |E|=289650
+[gar_reason] 81683 rules
+[gar_reason] 0 numeric attribute columns
+[gar_reason] goal: /people/person/nationality(/m/044mz_,/m/07ssc) (slot 48)
+[gar_reason] dependency graph: 236 predicates, 221090 arcs (built in 0.146888s)
+[gar_reason] running: policy=deterministic scorer=exact executor=greedy budget=10 hdc_dim=8192 seed=42
+[gar_reason] step 1: gar_000093 ok=1 cost=1 cum=1 derived=/award/award_winning_work/awards_won./award/award_honor/honored_for(/m/0140g4,/m/02ny6g)
+[gar_reason] step 2: gar_000092 ok=1 cost=1 cum=2 derived=/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for(/m/0140g4,/m/02ny6g)
+[gar_reason] step 3: gar_000763 ok=1 cost=1 cum=3 derived=/award/award_nominated_work/award_nominations./award/award_nomination/nominated_for(/m/0140g4,/m/0140g4)
+[gar_reason] step 4: gar_070860 ok=1 cost=1 cum=4 derived=/award/award_winning_work/awards_won./award/award_honor/honored_for(/m/0140g4,/m/0140g4)
+[gar_reason] step 5: gar_067963 ok=1 cost=1 cum=5 derived=/film/film/estimated_budget./measurement_unit/dated_money_value/currency(/m/0140g4,/m/09nqf)
+[gar_reason] step 6: gar_078686 ok=1 cost=1 cum=6 derived=/film/film/language(/m/0140g4,/m/02h40lc)
+[gar_reason] step 7: gar_042137 ok=1 cost=1 cum=7 derived=/award/award_winning_work/awards_won./award/award_honor/honored_for(/m/0140g4,/m/08984j)
+[gar_reason] step 8: gar_072805 ok=1 cost=1 cum=8 derived=/film/film/other_crew./film/film_crew_gig/film_crew_role(/m/0140g4,/m/09zzb8)
+[gar_reason] step 9: gar_072805 ok=1 cost=1 cum=9 derived=/film/film/other_crew./film/film_crew_gig/film_crew_role(/m/0140g4,/m/02r96rf)
+[gar_reason] step 10: gar_042137 ok=1 cost=1 cum=10 derived=/award/award_winning_work/awards_won./award/award_honor/honored_for(/m/0140g4,/m/0cf08)
+[gar_reason] done: steps=10 derived=10 cost=10 goal_derived=false termination=budget wall=13.7695s
+wall=31.86s maxrss=419576KB

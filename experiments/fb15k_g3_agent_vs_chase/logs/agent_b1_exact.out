@@ -1,0 +1,4 @@
+===== gar_reason agent: goal /military/military_combatant/military_conflicts./military/military_combatant_group/combatants(/m/09c7w0,/m/07ssc) =====
+goal_derived: true  steps: 1  derived: 1  total_cost: 1  termination: goal
+  1. gar_000018 OK /military/military_combatant/military_conflicts./military/military_combatant_group/combatants(/m/09c7w0,/m/07ssc)
+     /military/military_combatant/military_conflicts./military/military_combatant_group/combatants^-1(x0,x1) → /military/military_combatant/military_conflicts./military/military_combatant_group/combatants(x0,x1)
