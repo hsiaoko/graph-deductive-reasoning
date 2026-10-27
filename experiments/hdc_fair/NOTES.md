@@ -86,3 +86,14 @@ hit_agree（逐前提 cos≥0.15）：m≥32 即崩（信号 ~1/√m 跌破固�
 - greedy：exact 14.13s/任务（主循环均值）；hdc512 旧实现 43.6s（历史值）；
   hdc512 优化（仅算法，pre-native 二进制）31.5s；hdc512 优化+native **21.06s**
   （=exact 的 1.49×；纯打分开销 30.1s→6.9s，降 4.4×）。
+
+## 2026-10-27 补测：bit-packed + SIMD（用户追问"SIMD 和 bit 计算也没用吗"）
+
+- 机器：Xeon Gold 5320（Ice Lake），AVX2/AVX512F/BW/VL，无 VPOPCNTDQ
+  （向量 popcount 走 512-bit shuffle 查表）。
+- 新工具：bench_bitpacked.cpp（速度）、bench_bitquality.cpp（质量），均在
+  experiments/hdc_fair/ 可复现。
+- 结果详见 bitsimd_summary.md。一句话：D=512/P≥8 时 bit+AVX512 比 exact
+  快 1.6-2.4×，但该维度的 App I 可靠界 m≤22 远低于真实见证束（数十~数百），
+  质量不可用；质量安全的 D=8192 下 bit 路径输 4-8×。二值化相对 int16 不丢
+  排序质量（tie 差异仅 0.91-1.00 逐位一致）。结论维持：不进主线。
