@@ -37,3 +37,14 @@
 
 相似度分带结局一致率 lift 曲线；1-NN 预测准确率 vs 计数表；全部按
 leave-one-goal-out（同 goal 的子目标对/近邻不算）。
+
+## 结果记录（2026-10-27）
+
+- 数据快照：238/300 goal（旧执行器轨迹；两个困难负例 goal 长时 thrash，
+  快照时仍在跑；当前执行器轨迹太薄——定点命中快，119 goal 仅 ~600 实例——
+  仅作旁证）。2652 实例，derivable 正例率 15.3%，realized 2.2%。
+- 解析 bug 记录：goal marker 与 done 行的正则顺序（done 行先被 goal 正则
+  吃掉导致 done_goals 为空）；UTF-8 实体名需 errors=replace。
+- 去恒等对后随机编码高带 lift 仍 +13.7pp → lift 来源 = 同谓词失败一致性，
+  非结构泛化。编码 A 的 schema 中带 lift≈0/负；B 中带 +2.5pp 但 n 小且
+  1-NN 不及随机。判定：门 1 不通过。详见 summary.md。
