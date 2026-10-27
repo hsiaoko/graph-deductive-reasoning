@@ -19,3 +19,12 @@ target_include_directories(gar_hdc PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_compile_features(gar_hdc PUBLIC cxx_std_20)
+
+# Native codegen for the hot int16/popcount loops (Witness/Packed/Hamming
+# auto-vectorize under AVX2): pure integer arithmetic, scoring semantics
+# unchanged. OFF when the binary must run on a different machine than the
+# build host.
+option(GAR_HDC_NATIVE "build gar_hdc with -march=native" ON)
+if(GAR_HDC_NATIVE)
+  target_compile_options(gar_hdc PRIVATE -march=native)
+endif()

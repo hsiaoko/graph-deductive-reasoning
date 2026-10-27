@@ -20,7 +20,7 @@ std::uint64_t Fnv1a64(const std::string& s) {
 
 WitnessLog::WitnessLog(std::uint32_t hdc_dim, const graph::TripleGraph* g,
                        const analysis::PredicateTable* table)
-    : hdc_ev_(hdc_dim), g_(g), table_(table) {}
+    : hdc_ev_(hdc_dim), packed_cache_(hdc_dim), g_(g), table_(table) {}
 
 std::uint64_t FactPredicateSymbol(const Fact& f, const graph::TripleGraph& g,
                                   const analysis::PredicateTable& table) {
@@ -36,6 +36,7 @@ void WitnessLog::WitnessFact(const Fact& f, const hdc::HdcEncoder& enc) {
   const std::uint64_t args[2] = {f.args[0], f.args[1]};
   hdc_ev_.Witness(
       enc.EncodeFact(FactPredicateSymbol(f, *g_, *table_), args, f.arity));
+  packed_dirty_ = true;
   ++count_;
 }
 

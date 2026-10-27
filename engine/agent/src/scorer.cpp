@@ -123,27 +123,41 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
   GroundPremises(rule, mu, ctx.state->graph(), *ctx.predicates, &premises);
   std::vector<char> hits(premises.size());
 
-  // v_mu = bundle of the encoded premise facts.
-  hdc::EvidenceVector v_mu(enc_.dim());
+  // Encode each premise fact ONCE (memoized; identical vectors by
+  // construction) and reuse for both the v_mu bundle and the per-premise
+  // witness-hit probes.
+  std::vector<const hdc::Hypervector*> pvecs;
+  pvecs.reserve(premises.size());
   for (const auto& p : premises) {
-    const std::uint64_t args[2] = {p.args[0], p.args[1]};
-    v_mu.Witness(enc_.EncodeFact(
-        FactPredicateSymbol(p, ctx.state->graph(), *ctx.predicates), args,
-        p.arity));
+    const FactVecKey key{
+        FactPredicateSymbol(p, ctx.state->graph(), *ctx.predicates),
+        p.args[0], p.args[1], p.arity};
+    const auto it = fact_cache_.find(key);
+    if (it != fact_cache_.end()) {
+      pvecs.push_back(&it->second);
+    } else {
+      if (fact_cache_.size() >= (1u << 20)) fact_cache_.clear();
+      const std::uint64_t args[2] = {p.args[0], p.args[1]};
+      pvecs.push_back(&fact_cache_
+                           .emplace(key, enc_.EncodeFact(key.pred, args,
+                                                         key.arity))
+                           .first->second);
+    }
   }
+
   // Fresh chain convention (§4.1.1): E = 0 reads rel_evd = 0.
   if (ctx.witness->Count() == 0 || premises.empty()) {
     out->rel_evd = 0.0;
     for (std::size_t i = 0; i < hits.size(); ++i) hits[i] = 0;
   } else {
-    out->rel_evd = ctx.witness->hdc().Cosine(v_mu.Packed());
+    // v_mu = bundle of the encoded premise facts; PackedHdc is the cached
+    // sign-packed evidence vector (re-packed only on new witness events).
+    const hdc::Hypervector& packed_e = ctx.witness->PackedHdc();
+    hdc::EvidenceVector v_mu(enc_.dim());
+    for (const hdc::Hypervector* v : pvecs) v_mu.Witness(*v);
+    out->rel_evd = hdc::Hypervector::Cosine(packed_e, v_mu.Packed());
     for (std::size_t i = 0; i < premises.size(); ++i) {
-      const auto& p = premises[i];
-      const std::uint64_t args[2] = {p.args[0], p.args[1]};
-      hits[i] = ctx.witness->hdc().Cosine(enc_.EncodeFact(
-                    FactPredicateSymbol(p, ctx.state->graph(),
-                                        *ctx.predicates),
-                    args, p.arity)) >= cfg_.tau_hdc;
+      hits[i] = hdc::Hypervector::Cosine(packed_e, *pvecs[i]) >= cfg_.tau_hdc;
     }
   }
   std::uint32_t n_hits = 0;

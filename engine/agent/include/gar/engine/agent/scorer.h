@@ -17,6 +17,7 @@
 //   admissible = d(p0) < inf and the grounded conclusion not yet in Gamma.
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "gar/analysis/predicate_table.h"
@@ -97,9 +98,31 @@ class HdcScorer final : public Scorer {
              ScoredMotif* out) const override;
 
  private:
+  // Fact-vector memo key: EncodeFact is a pure function of (pred symbol,
+  // args, arity) under a fixed encoder; candidates repeat premise facts
+  // heavily (same predicates, overlapping constants). Equality-compared, so
+  // hash collisions never alias two facts. Capped — clearing only forces
+  // recomputation, never changes a score.
+  struct FactVecKey {
+    std::uint64_t pred, a0, a1;
+    std::uint32_t arity;
+    bool operator==(const FactVecKey& o) const = default;
+  };
+  struct FactVecKeyHash {
+    std::size_t operator()(const FactVecKey& k) const {
+      std::uint64_t h = k.pred;
+      h = (h ^ k.a0) * 0xBF58476D1CE4E5B9ull;
+      h = (h ^ k.a1) * 0x94D049BB133111EBull;
+      h = (h ^ k.arity) * 0xD6E8FEB86659FD93ull;
+      return static_cast<std::size_t>(h ^ (h >> 31));
+    }
+  };
+
   HandcraftedConfig cfg_;
   const CostModel* cost_;
   hdc::HdcEncoder enc_;
+  mutable std::unordered_map<FactVecKey, hdc::Hypervector, FactVecKeyHash>
+      fact_cache_;
 };
 
 }  // namespace agent
