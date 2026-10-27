@@ -35,13 +35,29 @@ using OpenSet =
     std::priority_queue<std::unique_ptr<Branch>,
                         std::vector<std::unique_ptr<Branch>>, BranchCmp>;
 
+// Pure logging for the offline value-function study (experiments/
+// hdc_value): GAR_DEBUG_BNB=1 prints fork/eval/expand/goal events. No
+// search, scoring or derivation semantics are touched.
+bool DebugBnb() {
+  static const bool on = std::getenv("GAR_DEBUG_BNB") != nullptr;
+  return on;
+}
+
 std::unique_ptr<Branch> ForkBranch(const Branch& parent,
                                    std::uint64_t serial) {
   auto g = std::make_unique<graph::TripleGraph>(*parent.graph);
-  return std::make_unique<Branch>(std::move(g), parent.state->attrs(),
-                                  parent.state->rules(), parent.witness,
-                                  parent.failures, parent.cost,
-                                  parent.utility, parent.chain, serial);
+  auto child = std::make_unique<Branch>(std::move(g), parent.state->attrs(),
+                                        parent.state->rules(), parent.witness,
+                                        parent.failures, parent.cost,
+                                        parent.utility, parent.chain, serial);
+  child->parent_serial = parent.serial;
+  if (DebugBnb()) {
+    std::fprintf(stderr, "[bnbl] fork %llu %llu %.0f %.6f %zu\n",
+                 static_cast<unsigned long long>(serial),
+                 static_cast<unsigned long long>(parent.serial), parent.cost,
+                 parent.utility, parent.chain.size());
+  }
+  return child;
 }
 
 // A pushed branch only survives evaluation when some candidate can satisfy
@@ -62,7 +78,13 @@ bool EvaluateBranch(Branch& b, const AgentContext& ctx,
   std::vector<Motif> mus;
   kit.generator->Candidates(*b.state, ctx.distances, *ctx.table,
                             cfg.match_cap_per_rule, b.failures, &mus);
-  if (mus.empty()) return false;
+  if (mus.empty()) {
+    if (DebugBnb()) {
+      std::fprintf(stderr, "[bnbl] discard %llu\n",
+                   static_cast<unsigned long long>(b.serial));
+    }
+    return false;
+  }
   const ScoringContext sctx{&ctx.distances, ctx.table, &b.witness,
                             b.state.get()};
   std::vector<ScoredMotif> scored;
@@ -81,7 +103,13 @@ bool EvaluateBranch(Branch& b, const AgentContext& ctx,
       keep.push_back(i);
     }
   }
-  if (keep.empty()) return false;
+  if (keep.empty()) {
+    if (DebugBnb()) {
+      std::fprintf(stderr, "[bnbl] discard %llu\n",
+                   static_cast<unsigned long long>(b.serial));
+    }
+    return false;
+  }
 
   // Line 6, first half: keep the top-k by the score (k=0 keeps all — the
   // exact mode on which Theorem 5's optimality certificate rests).
@@ -109,6 +137,22 @@ bool EvaluateBranch(Branch& b, const AgentContext& ctx,
   b.priority = b.cost + cached.front().price;  // min price is up front now
   b.scored = std::move(cached);
   b.evaluated = true;
+  if (DebugBnb()) {
+    const ScoredMotif& f0 = b.scored.front();
+    const GARule& fr = b.state->rules()[f0.motif.rule];
+    std::uint32_t dp0 = analysis::kUnreachable;
+    if (fr.consequent) {
+      const std::uint32_t pid =
+          ctx.table->Find(analysis::PredicateIdOf(*fr.consequent, fr));
+      if (pid != analysis::kInvalidPredicate) dp0 = ctx.distances[pid];
+    }
+    std::fprintf(stderr,
+                 "[bnbl] eval %llu %zu %.3f %.4f %.4f %.4f %.4f %.4f %u %llu\n",
+                 static_cast<unsigned long long>(b.serial), b.scored.size(),
+                 f0.price, f0.rel_fam, f0.rel_evd, fr.quality.confidence,
+                 f0.dcost, f0.total, dp0,
+                 static_cast<unsigned long long>(b.witness.Count()));
+  }
   return true;
 }
 
@@ -158,6 +202,9 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
                                        state->rules(), *witness, *failures,
                                        0.0, 0.0, std::vector<AgentStep>{},
                                        next_serial++));
+    if (DebugBnb()) {
+      std::fprintf(stderr, "[bnbl] root 0\n");
+    }
   }
 
   // Anytime tracking: the highest-utility branch ever pushed (ties: lower
@@ -225,6 +272,11 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
     const bool ok = graph::EvalAntecedent(rule.antecedent, emb,
                                           b->state->attrs(),
                                           b->state->graph());
+    if (DebugBnb()) {
+      std::fprintf(stderr, "[bnbl] expand %llu %u %d %.0f\n",
+                   static_cast<unsigned long long>(b->serial), mu.rule,
+                   static_cast<int>(ok), b->cost);
+    }
     std::vector<Fact> premises;
     GroundPremises(rule, mu, b->state->graph(), *ctx.table, &premises);
     const std::size_t n_pattern = rule.pattern.num_edges();
@@ -285,6 +337,11 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
       // Line 11: record the chain and tighten Ĉ. First-found wins ties
       // (strict <), keeping the result deterministic; the goal branch is
       // not pushed further (any extension is dominated).
+      if (DebugBnb()) {
+        std::fprintf(stderr, "[bnbl] goal %llu %.0f\n",
+                     static_cast<unsigned long long>(child->serial),
+                     child->cost);
+      }
       if (child->cost < best_cost) {
         best_cost = child->cost;
         best_chain = child->chain;

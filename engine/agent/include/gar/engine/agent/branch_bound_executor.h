@@ -57,6 +57,7 @@ struct Branch {
   double utility;          // sum of w_q over derived facts (§3.2)
   std::vector<AgentStep> chain;
   std::uint64_t serial;    // deterministic tie-break (push order)
+  std::uint64_t parent_serial = UINT64_MAX;  // logging only (GAR_DEBUG_BNB)
 
   // Deferred best-first evaluation (see header comment).
   bool evaluated = false;
