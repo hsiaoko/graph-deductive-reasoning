@@ -33,3 +33,10 @@
 - 正确性全绿：4 goal 的 best_cost/certified/chain.tsv 与 utility 全同；
   soundness: pass；默认关闭两次逐字节回归。
 - 推理开销 15-21µs/次，可忽略。峰值 RSS 12.7GB（r2c_2）。看门狗零触发。
+
+## synth 小图补测（2026-10-28）
+
+9 goal（5 个链长 2 + 4 个链长 1），LOGO 训练（33-42 节点/模型）。
+A/B：round-1 恒等；round-2 在 ±25% 内抖动（2 胜 2 负 1 平），合计 70→65
+（-7%）。正确性全绿（best_cost/certified/chain 一致、soundness pass、
+默认逐字节）。判定：小图无区分度，机制正确，收益无法体现。
