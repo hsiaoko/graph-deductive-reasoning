@@ -21,3 +21,15 @@
   hdc-value --value-model PATH 时启用；优先级 c + 预测剩余成本，只改
   排序，line-4 过滤/剪枝/证书语义/派生校验不动。
 - 默认关闭，既有行为逐字节一致（synth + athletes bnb chain.tsv 回归）。
+
+## 结果记录（2026-10-28）
+
+- 首次接入只改 EvaluateBranch 的 priority：athletes 仅 2058 vs 2084
+  （-1.2%）。诊断：deferred-evaluation 下新分支 key=0 全部抢先评估，
+  模型 key 只影响已评估子池；且该模型在 athletes 特征上近常数。
+- fork 继承父 key（有前途父分支的孩子先被评估）+ clen 口径修正
+  （训练用 fork 时父链长）后：r2c_2 -93%、r2c_4 -93%、r2c_8 -31%，
+  athletes 仍持平（模型对该 goal 族无区分度，非机制问题）。
+- 正确性全绿：4 goal 的 best_cost/certified/chain.tsv 与 utility 全同；
+  soundness: pass；默认关闭两次逐字节回归。
+- 推理开销 15-21µs/次，可忽略。峰值 RSS 12.7GB（r2c_2）。看门狗零触发。
