@@ -50,11 +50,14 @@ struct ExecConfig {
 
 // The collaborators an executor needs; ReasoningAgent fills it from its
 // injected components.
+class ValueModel;
 struct ExecKit {
   const MotifGenerator* generator;
   const Scorer* scorer;
   Policy* policy;
   const CostModel* cost_model;
+  // Optional bnb branch value model (hdc-value priority, ordering only).
+  const ValueModel* value_model = nullptr;
 };
 
 struct AgentStep {

@@ -23,6 +23,7 @@
 #include "gar/engine/agent/motif_generator.h"
 #include "gar/engine/agent/reasoning_agent.h"
 #include "gar/engine/deduction/cpu_chase_engine.h"
+#include "gar/engine/agent/value_model.h"
 #include "gar/hdc/const.h"
 
 namespace gar_apps {
@@ -47,6 +48,11 @@ struct AgentModeArgs {
   // for the network-free MockJevClient (development/regression support).
   gar::engine::agent::JevConfig jev;
   bool jev_mock = false;
+  // bnb branch value model: --bnb-priority utility|hdc-value plus
+  // --value-model PATH (required when hdc-value). Ordering only; default
+  // utility reproduces the stock best-first behaviour bit-for-bit.
+  std::string bnb_priority = "utility";
+  std::string value_model;
 };
 
 // Parses one agent-mode option; returns false when `k` is not one.
@@ -78,6 +84,8 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->jev.timeout_ms = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--jev-top-k")
     a->jev.top_k = static_cast<std::size_t>(std::stoull(next()));
+  else if (k == "--bnb-priority") a->bnb_priority = next();
+  else if (k == "--value-model") a->value_model = next();
   else if (k == "--jev-sample") a->jev.sample = true;
   else if (k == "--jev-mock") a->jev_mock = true;
   else return false;
@@ -179,6 +187,21 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
   comps.generator = std::make_unique<agent::NaiveMotifGenerator>();
   if (args.executor == "bnb") {
     comps.executor = std::make_unique<agent::BranchBoundExecutor>();
+    if (args.bnb_priority == "hdc-value") {
+      if (args.value_model.empty()) {
+        throw std::invalid_argument(
+            "--bnb-priority hdc-value requires --value-model PATH");
+      }
+      auto vm = std::make_shared<agent::ValueModel>();
+      if (!vm->Load(args.value_model)) {
+        throw std::runtime_error("failed to load value model: " +
+                                 args.value_model);
+      }
+      comps.value_model = std::move(vm);
+    } else if (args.bnb_priority != "utility") {
+      throw std::invalid_argument("unknown --bnb-priority: " +
+                                  args.bnb_priority);
+    }
   } else if (args.executor == "backward") {
     comps.executor = std::make_unique<agent::BackwardExecutor>();
   } else {

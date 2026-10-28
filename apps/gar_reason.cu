@@ -57,6 +57,7 @@ void PrintUsage() {
          "--goal 'rel_name(src,dst)' --budget B [--policy "
          "deterministic|random|hybrid|jev] [--scorer exact|hdc] [--hdc-dim N] "
          "[--executor greedy|bnb] [--top-k N] [--seed N] [--max-candidates-per-rule N] "
+            "[--bnb-priority utility|hdc-value] [--value-model PATH] "
          "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
          "[--tau-hdc F] [--no-confidence] [--out <dir>] "
          "[--verify-against-closure] [--print N]\n"

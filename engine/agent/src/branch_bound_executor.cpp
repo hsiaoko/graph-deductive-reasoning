@@ -7,8 +7,11 @@
 #include <queue>
 #include <utility>
 
+#include <sys/resource.h>
+
 #include "apply_helpers.h"
 #include "gar/graph/predicate_evaluator.h"
+#include "gar/engine/agent/value_model.h"
 
 // BranchBoundExecutor: HybNS (paper Figure 6), line by line. See
 // branch_bound_executor.h for the branch-state design (TripleGraph clone
@@ -135,6 +138,35 @@ bool EvaluateBranch(Branch& b, const AgentContext& ctx,
   cached.reserve(keep.size());
   for (const std::size_t i : keep) cached.push_back(std::move(scored[i]));
   b.priority = b.cost + cached.front().price;  // min price is up front now
+  if (kit.value_model != nullptr) {
+    // hdc-value priority (ordering only): cost + predicted remaining cost.
+    // Feature order mirrors the meta `names` (and the [bnbl] eval log):
+    // ncand minprice relfam relevd conf dcost total dp0 wit.
+    const ScoredMotif& f0 = cached.front();
+    const GARule& fr = b.state->rules()[f0.motif.rule];
+    std::uint32_t dp0 = analysis::kUnreachable;
+    if (fr.consequent) {
+      const std::uint32_t pid =
+          ctx.table->Find(analysis::PredicateIdOf(*fr.consequent, fr));
+      if (pid != analysis::kInvalidPredicate) dp0 = ctx.distances[pid];
+    }
+    // chain_len follows the training convention: the fork-time PARENT
+    // chain length (this branch's own chain minus its last step).
+    const std::array<double, 11> raw = {
+        b.cost,
+        static_cast<double>(b.chain.empty() ? 0 : b.chain.size() - 1),
+        static_cast<double>(cached.size()),
+        f0.price,
+        f0.rel_fam,
+        f0.rel_evd,
+        fr.quality.confidence,
+        f0.dcost,
+        f0.total,
+        static_cast<double>(dp0),
+        static_cast<double>(b.witness.Count())};
+    b.priority = b.cost +
+                 std::max(0.0, kit.value_model->PredictRemaining(raw));
+  }
   b.scored = std::move(cached);
   b.evaluated = true;
   if (DebugBnb()) {
@@ -294,6 +326,9 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
       if (Viable(b->cost + c_mu, cfg.budget, best_cost)) {
         auto charged = ForkBranch(*b, next_serial++);
         charged->cost += c_mu;
+        if (kit.value_model != nullptr) {
+          charged->priority = b->priority;  // inherit the model's key
+        }
         charged->failures.RecordFailure(key, fi.dynamic,
                                         charged->state->version());
         const std::size_t upto =
@@ -320,6 +355,9 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
     // Lines 10-13: success. The success child owns Γ' = Γ ∪ {p0(h)}.
     auto child = ForkBranch(*b, next_serial++);
     child->cost += c_mu;
+    if (kit.value_model != nullptr) {
+      child->priority = b->priority;  // inherit the model's key
+    }
     const graph::DerivedEdge d{emb[head.pu], emb[head.pv], head.slot,
                                mu.rule,
                                static_cast<std::uint32_t>(
@@ -463,6 +501,21 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
                res.goal_derived ? "true" : "false",
                res.goal_derived ? best_cost : -1.0, res.certified_optimal,
                res.certified_no_chain);
+  if (kit.value_model != nullptr) {
+    struct rusage ru;
+    getrusage(RUSAGE_SELF, &ru);
+    std::fprintf(stderr,
+                 "[bnb] value-model: calls=%llu infer_ms=%.1f avg_us=%.2f "
+                 "maxrss_mb=%ld\n",
+                 static_cast<unsigned long long>(
+                     kit.value_model->infer_calls),
+                 kit.value_model->infer_ns / 1e6,
+                 kit.value_model->infer_calls
+                     ? kit.value_model->infer_ns / 1e3 /
+                           static_cast<double>(kit.value_model->infer_calls)
+                     : 0.0,
+                 ru.ru_maxrss / 1024);
+  }
   return res;
 }
 

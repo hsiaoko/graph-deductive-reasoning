@@ -30,6 +30,8 @@ class ReasoningAgent {
     std::unique_ptr<Policy> policy;
     std::unique_ptr<Executor> executor;
     std::unique_ptr<CostModel> cost_model;
+    // Optional bnb branch value model (hdc-value priority, ordering only).
+    std::shared_ptr<ValueModel> value_model;
   };
 
   ReasoningAgent(Components comps, const analysis::DependencyGraph* dg,
@@ -65,7 +67,8 @@ class ReasoningAgent {
     WitnessLog witness(encoder_.dim(), &state->graph(), ctx.table);
     FailureRegistry failures;
     const ExecKit kit{comps_.generator.get(), comps_.scorer.get(),
-                      comps_.policy.get(), comps_.cost_model.get()};
+                      comps_.policy.get(), comps_.cost_model.get(),
+                      comps_.value_model.get()};
     return comps_.executor->Run(goal, state, &witness, &failures, ctx, cfg,
                                 kit);
   }
