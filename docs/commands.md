@@ -153,13 +153,15 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 
 ### 3.2 agent 模式：策略制导演绎
 
-单链朝目标事实演绎（greedy）或带证书的最优链搜索（bnb，Figure 6 HybNS）：
+目标制导反向演绎（backward，主引擎）、单链朝目标事实演绎（greedy）或带证书
+的最优链搜索（bnb，Figure 6 HybNS，可选 HDC 价值模型排序，见 §3.3）：
 
 ```bash
 ./build/bin/gar_reason --mode agent --csr <immutable_csr_dir> --rules <rules_root> \
     --goal 'rel_name(src,dst)' --budget 30 \
     [--policy deterministic|random|hybrid] [--scorer exact|hdc] [--hdc-dim 8192] \
-    [--executor greedy|bnb] [--top-k N] [--seed 42] [--max-candidates-per-rule 256] \
+    [--executor greedy|bnb|backward] [--top-k N] [--seed 42] [--max-candidates-per-rule 256] \
+    [--bnb-priority utility|hdc-value] [--value-model PATH] [--no-dg] \
     [--alpha 1] [--beta 1] [--gamma 0.5] [--nu 1] [--nu2 0.5] [--tau-hdc 0.15] \
     [--no-confidence] [--out <dir>] [--verify-against-closure] [--print 20]
 ```
@@ -170,7 +172,10 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--budget N` | 100 | 单链成本上限（unit cost：一次应用 = 1，成败都计费） |
 | `--policy` | deterministic | argmax / softmax(total/τ)（`--seed` 可复现）/ admissible 硬过滤+argmax / **jev**（LLM 决策模型，§5.3） |
 | `--scorer` | exact | exact（见证前提比例）/ hdc（cos(v_μ,E) 证据向量读数） |
-| `--executor` | greedy | greedy（§5.1 提交式）/ bnb（Figure 6 分支定界） |
+| `--executor` | greedy | backward（目标制导反向演绎，主引擎）/ greedy（§5.1 提交式）/ bnb（Figure 6 分支定界） |
+| `--bnb-priority` | utility | bnb 优先级来源：utility（原公式）/ hdc-value（HDC 价值模型，需 `--value-model`，只改排序，见 §3.3） |
+| `--value-model PATH` | 无 | HDC 价值模型 meta.txt（train_export.py 导出，配合同名 weights.bin） |
+| `--no-dg` | 关 | 关闭 DG 制导（d(·) 全零：不剪枝、rel_fam 中性、price=w₀）；消融用 |
 | `--top-k N` | 0 | bnb 每分支候选截断；0=精确模式（带证书） |
 | `--hdc-dim N` | 8192 | HDC 维度（档位 2 的幂，128…16384） |
 | `--max-candidates-per-rule` | 256 | 每规则每步 motif 枚举上限 |
@@ -208,6 +213,29 @@ utility/expansions）。
   `--top-k` 截断、`--max-candidates-per-rule` 限候选、紧凑 budget（line-4 的
   c+price≤B 剪枝随之生效）。正例：上述 goal 以 `bnb --budget 2` 找到最优
   2 步链（gar_000815 → gar_000063，certified_optimal，2084 展开/195s/12GB）。
+
+### 3.3 HDC 价值模型：bnb 的学习型排序（workflow）
+
+原理与机制详见 `docs/hdc_value_model.md`。三步工作流：
+
+```bash
+# 1) 采集训练轨迹（日志即教材，无需人工标注）
+GAR_DEBUG_BNB=1 ./build/bin/gar_reason --mode agent --executor bnb \
+    --csr <csr> --rules <rules> --goal 'rel(s,d)' --budget 2 \
+    --max-candidates-per-rule 64 --out <dir> > goal.log 2>&1
+
+# 2) 训练并导出模型（LOGO 防泄漏；脚本内需按实际情况配置日志清单）
+python3 experiments/hdc_online/train_export.py   # 需 numpy；产出 meta.txt + weights.bin
+
+# 3) 在线使用（只改展开顺序，bound/剪枝/证书/派生校验不变；默认关闭）
+./build/bin/gar_reason --mode agent --executor bnb \
+    --bnb-priority hdc-value --value-model <meta.txt> \
+    --csr <csr> --rules <rules> --goal 'rel(s,d)' --budget 2 ...
+```
+
+在线 A/B（fb15k，4 个非平凡 goal，LOGO）：展开数 −87.2%、耗时 −86.4%、
+最优成本/证书/chain.tsv 全同；synth 小图机制正确但无区分度。
+出处：`experiments/hdc_online/`。
 
 ## 4. 分析工具链（gar_analyze）
 

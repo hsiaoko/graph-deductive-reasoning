@@ -11,8 +11,10 @@ L4  apps/        kg_loader / match_pattern / mine_predicates / deduce /
                  （+ examples/）
                   │
 L3  engine/      deduction/（DeductionEngine 基类 + CpuChaseEngine +
-                 GpuDeduceEngine）   agent/（ReasoningAgent + Executor +
-                 Scorer/Policy/MotifGenerator 插件）
+                 GpuDeduceEngine）   agent/（ReasoningAgent + Executor
+                 （greedy/bnb/backward）+ Scorer/Policy/MotifGenerator 插件
+                 + ValueModel（HDC 价值模型，bnb 可选排序，见
+                 docs/hdc_value_model.md））
         miner/（ChainMiner / PatternMiner）
         bridge/（MatrixGraph 适配：LoadTripleGraph / LoadVertexAttrs /
                  ToPatternArrays）
@@ -73,7 +75,7 @@ bridge 依赖 graph+core+MatrixGraph）。
                            │              │
         ───────────────────┴──────────────┴───────────────
         共享底座：graph（匹配/求值/合并）+ analysis（d(·) 打分依据）
-        + hdc（证据打分）+ core（规则）
+        + hdc（证据打分 / bnb 价值模型特征）+ core（规则）
         对账：verify = agent 导出 ⊆ deduction 闭包（app 层组合）
 ```
 
