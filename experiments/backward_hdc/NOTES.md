@@ -31,3 +31,30 @@
   之一）；耗时 mean 1.59→3.38s；goal48 3.05s→69.1s。判据①②未过 →
   不可行。分析：样本太薄 + 既有 tier 启发式已很强，模型只在尾部有
   改进空间但噪声伤己。改进方向：失败闸门用法而非全排序。
+
+## Phase 2 预注册（2026-10-29）：backward-bnb（AND-OR 树分支定界）
+
+设计冻结（正确性优先）：
+- 实现 = DFBnB（深度优先分支定界）于 backward 的 pinned 候选空间：
+  OR 节点 = 接地目标（slot,src,dst），候选 = 该谓词规则的 pinned 枚举
+  motif；AND = 前提子目标递归；共享 Γ（事实只增）→ 成本为 DAG 口径
+  （共享子证明第二次免费），证书文字 = "所见候选空间（pinned 枚举 cap 内 +
+  接地子目标递归）内成本最优 DAG 证明"。
+- 下界 = DerivationDepths（谓词最小派生应用数，可低估不高估）；剪枝 =
+  paid + 1 + Σ前提下界 >=  incumbent 时剪（树口径 Σ；DAG 下 Σ 可能高估 →
+  改用 max 保持可采纳——实现里用 Σ 但标注：共享只在已派生事实上归零，
+  未派生前提不共享，Σ 安全；论证写进文档）。
+- open-sided 协调形态（disjoint-free 双开等）不进本期证书空间（排除该
+  尝试类，文档标注覆盖范围）。
+- 默认关闭：`--direction backward --executor bnb` 才走新路径；旧命令
+  逐字节不变。
+
+验证判据（分析前写死）：
+1. 正确性：forward bnb 有 certified_optimal 的 goal 上（athletes、
+   Overall 的 3/9 等）backward-bnb best_cost 必须一致（链可不同）；
+   synth 手造已知最优链 goal 单元验证。
+2. soundness：派生 ⊆ chase 闭包，零真实 DIVERGENT。
+3. 性能：与 forward bnb 对比展开数/wall/内存，更差如实记录。
+4. 回归：旧命令逐字节一致。
+任一不达 → 标 --experimental 并写清覆盖范围；基本正确性不过 → 交付
+诊断不硬撑。
