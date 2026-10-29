@@ -49,3 +49,56 @@ hdc 臂耗时 69.1s vs 3.05s（误排序引发深层无效探索）。
 已有序的好尝试挤下去（goal35/44 丢失、goal48 耗时爆炸）。若未来重启：
 先扩样本（更多 goal/更深任务）或把模型用在"是否值得进入 pass-2"的
 二分类闸门上（不改动既有排序，只在启发式失败时介入）。
+
+---
+
+# Phase 2：backward-bnb（AND-OR 分支定界最优链）结果
+
+实现：`engine/agent/src/backward_bnb_executor.cpp`（DFBnB 于 backward 的
+pinned 候选空间；共享 Γ → DAG 成本口径；下界 = 谓词派生深度，内联
+Dijkstra 计算；剪枝/深限/失败注册/计费沿用既有件）。路由：
+`--direction backward --executor bnb`（原 reserved 报错处打通）。
+证书截断标记：任何候选因"开放端点未定/枚举 cap"被排除时，
+certified_optimal/certified_no_chain 置 false 且 termination 带
+`_space_truncated` 后缀。
+
+## best_cost 一致性（判据 1：全过）
+
+| goal | forward bnb（certified） | backward-bnb | 一致 |
+|---|---|---|---|
+| synth lives_in(p8,t1)（手造 cost-1） | 1 | 1, certified | ✓ |
+| synth lives_in(p0,t1)（手造 cost-2） | 2 | 2, certified | ✓ |
+| athletes(/m/05r4w,/m/09n48) | 2（2084 展开，200s） | 2, certified（**2 展开，0.5s**） | ✓ |
+| Overall 可行 goal 17/19/20 | 1（63/13/33 展开） | 1（40/1/232 展开） | ✓✓✓ |
+
+## soundness（判据 2：过）
+
+verify --run（Overall goal 17，逐任务留出）→ CONSISTENT（派生 ⊆ 闭包）。
+所有派生经 EvalAntecedent 门控 = 合法 chase 步。
+
+## 性能对比（判据 3：符合预期，backward 更便宜）
+
+| 指标 | forward bnb | backward-bnb |
+|---|---|---|
+| athletes 展开数 / wall | 2084 / 200s | **2 / 0.5s** |
+| Overall goal 17/19/20 展开 | 63/13/33 | 40/1/232 |
+| 峰值 RSS（athletes） | ~4GB | ~1.5GB |
+
+（goal 20 展开 232 > forward 33：rules_g3 81k 规则下每目标的候选空间更大；
+总体形态仍是数量级优于 forward。）
+
+## 证书覆盖范围声明（显著标注）
+
+证书 = "所见候选空间（pinned 枚举 cap 内 + 接地子目标递归）内成本最优
+DAG 证明"（共享派生只计一次；下界用树式 Σ 前提 lb，DAG 下仍安全——共享
+只发生在已派生事实、其 lb 贡献为 0）。**不覆盖**：开放端点协调形态
+（disjoint-free 双开等，如 film/award 的 gar_005450 链）——这类 goal 会
+如实报 no_chain 且 certified_no_chain=false + `no_chain_space_truncated`
+终止标记（实测 film 目标：1002 展开后如实失败，不假装有证书）。
+结论：核心搜索正确性验证全过，但因协调形态未入证书空间，本期标
+**experimental**——覆盖范围即上述文字。
+
+## 回归（判据 4：全过）
+
+forward bnb athletes chain 逐字节一致（Phase-2 构建后复验）、verify synth
+逐字节一致、plain backward 逐字节一致、direction 冲突报错行为不变。

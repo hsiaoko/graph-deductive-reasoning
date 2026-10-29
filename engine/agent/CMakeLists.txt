@@ -18,6 +18,7 @@ add_library(gar_engine_agent STATIC
     src/policy.cpp
     src/value_model.cpp
     src/backward_executor.cpp
+    src/backward_bnb_executor.cpp
 )
 add_library(gar::engine::agent ALIAS gar_engine_agent)
 

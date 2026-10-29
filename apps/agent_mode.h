@@ -208,14 +208,11 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
       }
     } else if (args.direction == "backward") {
       if (args.executor == "bnb") {
-        throw std::invalid_argument(
-            "--direction backward --executor bnb is reserved for Phase 2 "
-            "(AND-OR certificates)");
-      }
-      if (args.executor == "backward") {
+        executor = "backward-bnb";  // Phase 2: AND-OR branch-and-bound
+      } else if (args.executor == "backward") {
         executor = "backward";  // full discipline (DFS + backtracking)
       } else {
-        executor = "backward";        // degenerate single-path arm rides
+        executor = "backward";         // degenerate single-path arm rides
         backward_no_backtrack = true;  // the backward executor, OR = first
                                        // choice only, no pass-2 fallback
       }
@@ -240,6 +237,8 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
       throw std::invalid_argument("unknown --bnb-priority: " +
                                   args.bnb_priority);
     }
+  } else if (executor == "backward-bnb") {
+    comps.executor = std::make_unique<agent::BackwardBnBExecutor>();
   } else if (executor == "backward") {
     comps.executor = std::make_unique<agent::BackwardExecutor>();
     comps.backward_no_backtrack = backward_no_backtrack;

@@ -109,8 +109,10 @@ total   = α·(rel_fam + ν·rel_evd + ν₂·conf) − β·dcost
 `--direction backward` 的完整纪律（现有 BackwardExecutor，DFS+回溯）；
 `--direction backward --executor greedy` = 退化单路径消融臂（OR 只试首选、
 无 pass-2 回退）；`--direction forward` 下 greedy/bnb 完全走旧代码路径。
-冲突报错：`forward`+`backward` 互斥；`backward`+`bnb` 报错保留给 Phase 2
-（AND-OR 最优证书，本期不做）。
+冲突报错：`forward`+`backward` 互斥。`--direction backward --executor bnb`
+= Phase 2 的 AND-OR 分支定界最优链（**experimental**：证书覆盖
+pinned+接地子目标空间，开放端点协调形态除外，见
+experiments/backward_hdc/summary.md 的覆盖范围声明）。
 backward 的 OR 候选排序可选 HDC 价值模型（`--backward-priority
 heuristic|hdc-value --value-model PATH`，只改尝试顺序；特征与模型文件
 独立于 bnb 版，见 experiments/backward_hdc/）。

@@ -125,6 +125,18 @@ class BranchBoundExecutor final : public Executor {
 // (bounded by ExecConfig::max_subgoal_depth). The policy is not consulted
 // for ordering — backward chaining is itself the guidance; the scorer
 // (rel_fam / rel_evd / confidence) still ranks the pinned candidates.
+// BackwardBnBExecutor (Phase 2, --direction backward --executor bnb):
+// DFBnB optimal-chain search over the backward AND-OR structure; see
+// backward_bnb_executor.cpp's header comment for the certificate scope
+// (seen candidate space, DAG cost, grounded-subgoal coverage) and the
+// admissible-bound argument.
+class BackwardBnBExecutor final : public Executor {
+ public:
+  AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
+                  FailureRegistry* failures, const AgentContext& ctx,
+                  const ExecConfig& cfg, const ExecKit& kit) override;
+};
+
 class BackwardExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
