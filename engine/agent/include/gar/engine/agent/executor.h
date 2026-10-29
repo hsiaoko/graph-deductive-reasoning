@@ -53,6 +53,12 @@ struct ExecConfig {
   // (default, bit-identical Phase-2 behaviour); true = instance-level
   // (--backward-bnb-lb instance).
   bool backward_bnb_instance_lb = false;
+  // BackwardBnBExecutor candidate enumeration: false = eager (default,
+  // bit-identical); true = lazy rule-order enumeration with an
+  // incumbent-triggered stop (--backward-bnb-enum lazy; certificate-exact:
+  // rules are visited in rule_est ascending order and enumeration stops
+  // when the next rule's est exceeds the incumbent window).
+  bool backward_bnb_lazy_enum = false;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its

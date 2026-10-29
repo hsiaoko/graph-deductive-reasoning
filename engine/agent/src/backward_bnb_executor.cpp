@@ -500,13 +500,8 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
       std::vector<std::pair<Target, std::uint64_t>> missing;  // (target, lb)
     };
     std::vector<Cand> cands;
-    std::unordered_set<std::uint64_t> seen;
-    std::uint64_t rule_i = 0;
-    for (const std::uint32_t ri : rit->second) {
-      if (std::getenv("GAR_DEBUG_BWB") && ((rule_i++ & 7) == 0)) {
-        std::fprintf(stderr, "[bwbnb]   rule %u/%zu ri=%u\n", rule_i,
-                     rit->second.size(), ri);
-      }
+    auto enumerate_rule = [&](std::uint32_t ri, std::vector<Cand>* out) {
+      std::unordered_set<std::uint64_t> seen;
       const GARule& r = rules[ri];
       const RuleHead head = ResolveRuleHead(r);
       const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
@@ -560,7 +555,7 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
                   [](const auto& a, const auto& b) {
                     return a.second < b.second;
                   });
-        cands.push_back(std::move(c));
+        out->push_back(std::move(c));
       };
       // pass A: full pinned match (all pattern edges present in Gamma)
       {
@@ -751,21 +746,16 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           }
         }
       }
-    }
-    std::sort(cands.begin(), cands.end(),
-              [](const Cand& a, const Cand& b) {
-                if (a.est != b.est) return a.est < b.est;
-                return a.rule < b.rule;
-              });
+        };
 
     FactSetPtr best = nullptr;
-    for (const Cand& c : cands) {
+    auto eval_cand = [&](const Cand& c) {
       const std::uint64_t w =
           std::min(cap, best ? best->size() - 1 : cap);
       if (c.maxlb > w) {  // admissible prune (union >= each member proof)
         ++est_prunes;
         if (c.maxlb == kInf) ++inf_prunes;
-        continue;
+        return;
       }
       // AND: search each missing premise (cheapest-lb first), each with a
       // sub-cap leaving room for the remaining premises' lower bounds.
@@ -800,12 +790,12 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
                             pit->second.end());
         }
       }
-      if (!ok) continue;
+      if (!ok) return;
       // premises proven; apply the motif (derives the head fact into Gamma,
       // enriching later candidate spaces)
       const auto d = apply(c.rule, c.emb.data(),
                            static_cast<std::uint32_t>(c.emb.size()));
-      if (!d) continue;  // static antecedent failure: candidate invalid
+      if (!d) return;  // static antecedent failure: candidate invalid
       plan.insert(fact_key(d->slot, d->src, d->dst));
       if (!best || plan.size() < best->size()) {
         AgentStep step;
@@ -816,6 +806,60 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         plan_steps.push_back(std::move(step));
         best = std::make_shared<const FactSet>(std::move(plan));
         best_plan[tk] = std::move(plan_steps);
+      }
+        };
+
+    if (!cfg.backward_bnb_lazy_enum) {
+      for (const std::uint32_t ri : rit->second) enumerate_rule(ri, &cands);
+      std::sort(cands.begin(), cands.end(),
+                [](const Cand& a, const Cand& b) {
+                  if (a.est != b.est) return a.est < b.est;
+                  return a.rule < b.rule;
+                });
+      for (const Cand& c : cands) eval_cand(c);
+    } else {
+      // Lazy enumeration (certificate-exact): rules are visited in ascending
+      // rule_est = 1 + max body-predicate lower bound — a valid lower bound
+      // on every candidate proof size from that rule. Candidates of a rule
+      // are evaluated before the next rule is enumerated; once the incumbent
+      // makes rule_est > w the rest can hold no better proof -> stop WITHOUT
+      // enumerating them (the certificate space is exactly the eager one).
+      std::vector<std::pair<std::uint64_t, std::uint32_t>> order;
+      for (const std::uint32_t ri : rit->second) {
+        const GARule& r = rules[ri];
+        std::uint64_t mx = 0;
+        for (std::uint32_t e = 0; e < r.pattern.num_edges(); ++e) {
+          gar::LabelID l = r.pattern.edge_labels[e];
+          const std::uint32_t b =
+              l >= nrel ? l - nrel : static_cast<std::uint32_t>(l);
+          mx = std::max(mx, lb_of(b));
+        }
+        for (const auto& pred : r.antecedent) {
+          if (pred.kind != gar::PredKind::kEdge) continue;
+          const std::uint32_t b =
+              pred.label >= nrel ? pred.label - nrel : pred.label;
+          mx = std::max(mx, lb_of(b));
+        }
+        order.emplace_back(mx == kInf ? kInf : std::max<std::uint64_t>(1, mx) ,
+                           ri);
+      }
+      std::sort(order.begin(), order.end(),
+                [](const auto& a, const auto& b) {
+                  if (a.first != b.first) return a.first < b.first;
+                  return a.second < b.second;
+                });
+      for (const auto& [rest, ri] : order) {
+        const std::uint64_t w =
+            std::min(cap, best ? best->size() - 1 : cap);
+        if (rest > w) break;  // no candidate from any later rule can win
+        cands.clear();
+        enumerate_rule(ri, &cands);
+        std::sort(cands.begin(), cands.end(),
+                  [](const Cand& a, const Cand& b) {
+                    if (a.est != b.est) return a.est < b.est;
+                    return a.rule < b.rule;
+                  });
+        for (const Cand& c : cands) eval_cand(c);
       }
     }
     if (!best) {

@@ -64,6 +64,7 @@ struct AgentModeArgs {
   // BackwardBnB lower bound flavour (only meaningful with
   // --direction backward --executor bnb).
   std::string backward_bnb_lb = "predicate";  // predicate|instance
+  std::string backward_bnb_enum = "eager";    // eager|lazy
   std::string value_model;
 };
 
@@ -100,6 +101,7 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--bnb-priority") a->bnb_priority = next();
   else if (k == "--backward-priority") a->backward_priority = next();
   else if (k == "--backward-bnb-lb") a->backward_bnb_lb = next();
+  else if (k == "--backward-bnb-enum") a->backward_bnb_enum = next();
   else if (k == "--value-model") a->value_model = next();
   else if (k == "--jev-sample") a->jev.sample = true;
   else if (k == "--jev-mock") a->jev_mock = true;
@@ -217,6 +219,11 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
             args.backward_bnb_lb != "instance") {
           throw std::invalid_argument("unknown --backward-bnb-lb: " +
                                       args.backward_bnb_lb);
+        }
+        if (args.backward_bnb_enum != "eager" &&
+            args.backward_bnb_enum != "lazy") {
+          throw std::invalid_argument("unknown --backward-bnb-enum: " +
+                                      args.backward_bnb_enum);
         }
       } else if (args.executor == "backward") {
         executor = "backward";  // full discipline (DFS + backtracking)
@@ -336,6 +343,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   ec.top_k = args.top_k;
   ec.utility_gamma = args.score.gamma;
   ec.backward_bnb_instance_lb = (args.backward_bnb_lb == "instance");
+  ec.backward_bnb_lazy_enum = (args.backward_bnb_enum == "lazy");
 
   std::cerr << "[gar_reason] running: policy=" << args.policy
             << " scorer=" << args.scorer << " executor=" << args.executor
