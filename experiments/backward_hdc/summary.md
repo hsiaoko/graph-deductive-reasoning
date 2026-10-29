@@ -154,3 +154,63 @@ soundness：派生经 EvalAntecedent 门控，零真实 DIVERGENT（verify --run
 正确性全过、回归全绿、效果中性。**不建议设为默认**：收益在本负载上是
 噪声级，谓词界已够；保留为文档化选项（`--backward-bnb-lb instance`），
 未来若出现"谓词浅而实例深"形态的硬 goal 再启用。
+
+---
+
+# Phase 3 主任务：协调形态入证书空间
+
+## 成本口径修正（过程发现的真实 bug）
+
+synth 手造协调用例暴露 Phase-2 的增量计费缺陷（目标事实已被先前候选派生
+时误报更优成本）。重写为**证明集口径**：proof = 唯一派生事实集合，子证明
+并集去重（共享精确一次）= 真实 DAG 应用数；前提存在性按 Γ0（base 快照）
+判定；证明/失败 memo 按"目标候选空间相关派生计数戳"精确失效。
+修正后 synthc 用例从 cost=2（错）→ cost=3（=手工最优，certified）。
+
+## 协调形态候选（pass C）
+
+复用主引擎机制：两侧候选 = 现成 ∪ 一级可派生（免费预检，按探针空间戳
+缓存）、剩余边半连接（在 Γ 或一级可达集成员测试）、组合对生成全接地
+embedding → 走既有 Cand/递归管线。对数 cap=64（超出记 cap_truncated）。
+下界/剪枝与其他候选同口径（排序 1+Σ，剪枝 1+max）——耦合子目标不相加。
+
+## 验证结果
+
+单元级（synthc 手造，graph+5 规则，tools 在 .work_hdcv/synthc/）：
+goal g(a,d) 必须双侧协调（p(a,x1)、q(d,x2) 均需派生，m(x1,x2) 基图半连接）：
+**best_cost=3 = 手工最优，certified_optimal=true，无截断**；更贵的 G2 替代
+（cost 5）被正确排除。
+
+真实协调 goal（rules_g3，逐任务留出）：
+- award(/m/016pns,/m/01by1l)：**cost=2**（与主引擎 backward 首解 spent=2
+  一致；比 chase 实际使用的 gar_062307 四步链短——bnb 找到的是另一条
+  两步证明：nominated_for(023vrq,011z3g) + award 直推规则），expansions=2，
+  19s；但 shape_truncated=1（部分规则的开放端点候选被排除）→
+  certified_optimal=false，termination=goal_space_truncated（如实）。
+- film(/m/015rkw,/m/0fg04)：**30min 超时未决**。诊断：候选枚举广度爆炸
+  （film 谓词 666 条 head 规则 × pass A/B/C 每规则每目标），瓶颈在枚举
+  而非递归深度；谓词界对锚定谓词（film 有基图边）为 0 无剪枝。卡点是
+  候选枚举可扩展性，非正确性。
+
+## 回归与 soundness（全过）
+
+Phase-2/3 certified 用例 best_cost 全不变；forward bnb / plain backward /
+synth bnb / 退化臂逐字节一致；实例下界开关兼容（两模式复跑一致）。
+派生经 EvalAntecedent 门控，零真实 DIVERGENT。
+
+## 证书覆盖范围（更新）
+
+所见候选空间 = pinned 枚举（cap 内）+ 接地单开边（锚定子模式）+
+双侧协调（≤64 对/规则/开集）内最优 DAG 证明。截断分两旗：
+shape_truncated（开放端点未定/非半连接可接形态）、cap_truncated
+（枚举/对数 cap）。协调形态已入空间；film 级稠密谓词规则集上的
+穷举枚举性能是遗留卡点。
+
+## 性能与空间数据（供下一轮学习排序 workload）
+
+| goal | 展开数 | wall | 协调候选贡献 |
+|---|---|---|---|
+| synthc g(a,d) | 3 | <1s | 1（gar_000003 的 (v1,v2) 对） |
+| award | 2 | 19s | award 谓词 209 预检，est 剪枝 830 |
+| athletes（rules） | 237 | <1s | 0 |
+| film | >超时 | ≥900s | —（未完成） |

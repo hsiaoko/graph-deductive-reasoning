@@ -71,6 +71,7 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
                                      const ExecConfig& cfg,
                                      const ExecKit& kit) {
   AgentResult res;
+
   const auto& rules = state->rules();
   const graph::TripleGraph& g = state->graph();
 
@@ -175,9 +176,10 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
   };
 
   std::uint64_t expansions = 0;
-  bool space_truncated = false;  // any candidate dropped outside the
-                                 // certified space (open-ended coordination
-                                 // shapes, per-rule enumeration cap)
+  bool shape_truncated = false;  // candidates dropped outside the
+                                 // certified space: undetermined endpoints
+                                 // or non-semi-joinable open sets
+  bool cap_truncated = false;    // enumeration/pair caps hit
   std::unordered_set<std::size_t> active;  // cycle guard (target hashes)
   // target hash -> fact-set version at which it proved unsolvable; re-admit
   // on Gamma growth (same dynamic-failure discipline as BackwardExecutor).
@@ -207,6 +209,38 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
     return d;
   };
 
+  // Min proof per target. Stamp = per-predicate derived counts summed over
+  // the body predicates of rules that could derive the target — the memo is
+  // invalid only when the target's OWN candidate space could have changed
+  // (global version invalidation would invalidate on every derivation
+  // anywhere, churning the whole memo map into uselessness).
+  auto target_stamp = [&](const Target& t) -> std::uint64_t {
+    std::uint64_t s = 0;
+    const auto rit = head_index.find(g.RelationName(t.slot));
+    if (rit == head_index.end()) return 0;
+    std::uint64_t rule_i = 0;
+    for (const std::uint32_t ri : rit->second) {
+      if (std::getenv("GAR_DEBUG_BWB") && ((rule_i++ & 7) == 0)) {
+        std::fprintf(stderr, "[bwbnb]   rule %u/%zu ri=%u\n", rule_i,
+                     rit->second.size(), ri);
+      }
+      const GARule& r = rules[ri];
+      for (std::uint32_t e = 0; e < r.pattern.num_edges(); ++e) {
+        gar::LabelID l = r.pattern.edge_labels[e];
+        const std::uint32_t b =
+            l >= nrel ? l - nrel : static_cast<std::uint32_t>(l);
+        s += state->PerSlotDerivedCount(b);
+      }
+      for (const auto& pred : r.antecedent) {
+        if (pred.kind != gar::PredKind::kEdge) continue;
+        const std::uint32_t b =
+            pred.label >= nrel ? pred.label - nrel : pred.label;
+        s += state->PerSlotDerivedCount(b);
+      }
+    }
+    return s;
+  };
+
   // ---- instance-level lower bound (instance mode) ----
   // one_level_derives(t): any head rule fires RIGHT NOW under the pins
   // (pinned enumeration + label filter + EvalAntecedent on current Gamma).
@@ -219,7 +253,7 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
   auto one_level_derives = [&](const Target& t) -> bool {
     const std::size_t tk = TargetHash{}(t);
     const auto it = onelevel_cache.find(tk);
-    if (it != onelevel_cache.end() && it->second.first == state->version()) {
+    if (it != onelevel_cache.end() && it->second.first == target_stamp(t)) {
       return it->second.second;
     }
     ++probe_calls;
@@ -248,9 +282,127 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         if (fires) break;
       }
     }
-    onelevel_cache[tk] = {state->version(), fires};
+    onelevel_cache[tk] = {target_stamp(t), fires};
     return fires;
   };
+  // Free probes for coordination candidates (same no-charge convention as
+  // BackwardExecutor: probes are reads, only applications charge).
+  // present_values: free-endpoint values of slot edges already in Gamma
+  // under the pin (base + derived; base or inverse slot via OutNeighbors).
+  auto present_values = [&](gar::LabelID slot, bool pin_src,
+                            std::uint32_t pinned) {
+    const std::uint32_t rel =
+        pin_src ? slot : slot + static_cast<std::uint32_t>(g.num_relations());
+    const auto [ptr, cnt] = g.OutNeighbors(pinned, rel);
+    return std::vector<std::uint32_t>(ptr, ptr + cnt);
+  };
+  // collect_candidate_values: free-endpoint values that rules deriving
+  // `slot` could produce RIGHT NOW with the pin (1-step match horizon).
+  auto collect_candidate_values = [&](gar::LabelID slot, bool pin_src,
+                                      std::uint32_t pinned_val)
+      -> std::vector<std::uint32_t> {
+    std::vector<std::uint32_t> vals;
+    std::unordered_set<std::uint32_t> seen;
+    const auto it = head_index.find(g.RelationName(slot));
+    if (it == head_index.end()) return vals;
+    for (const std::uint32_t ri : it->second) {
+      const GARule& r = rules[ri];
+      const RuleHead head = ResolveRuleHead(r);
+      std::unordered_map<std::uint32_t, std::uint32_t> pins;
+      pins[pin_src ? head.pu : head.pv] = pinned_val;
+      const auto spec = build_spec(r);
+      std::vector<std::uint32_t> embs;
+      bool capped = false;
+      const std::uint64_t n_emb = matcher.Enumerate(
+          spec, cfg.match_cap_per_rule, &embs, &capped, pins);
+      const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+      const std::uint32_t free_v = pin_src ? head.pv : head.pu;
+      for (std::uint64_t k = 0; k < n_emb; ++k) {
+        const std::uint32_t* emb = embs.data() + k * n;
+        if (!label_ok(r, emb)) continue;
+        if (!graph::EvalAntecedent(r.antecedent, emb, state->attrs(), g)) {
+          continue;
+        }
+        if (seen.insert(emb[free_v]).second) vals.push_back(emb[free_v]);
+      }
+    }
+    return vals;
+  };
+  auto merge_candidates = [](std::vector<std::uint32_t> present,
+                             const std::vector<std::uint32_t>& derivable) {
+    std::unordered_set<std::uint32_t> seen(present.begin(), present.end());
+    for (const std::uint32_t v : derivable) {
+      if (seen.insert(v).second) present.push_back(v);
+    }
+    return present;
+  };
+
+  // Probe-space stamp for a predicate: facts of the predicate itself plus
+  // of every body predicate that could contribute a derivation of it.
+  auto probe_stamp = [&](std::uint32_t slot) -> std::uint64_t {
+    std::uint64_t out = state->PerSlotDerivedCount(slot);
+    const auto rit = head_index.find(g.RelationName(slot));
+    if (rit == head_index.end()) return out;
+    std::uint64_t rule_i = 0;
+    for (const std::uint32_t ri : rit->second) {
+      if (std::getenv("GAR_DEBUG_BWB") && ((rule_i++ & 7) == 0)) {
+        std::fprintf(stderr, "[bwbnb]   rule %u/%zu ri=%u\n", rule_i,
+                     rit->second.size(), ri);
+      }
+      const GARule& r = rules[ri];
+      for (std::uint32_t e = 0; e < r.pattern.num_edges(); ++e) {
+        gar::LabelID l = r.pattern.edge_labels[e];
+        out += state->PerSlotDerivedCount(
+            l >= nrel ? l - nrel : static_cast<std::uint32_t>(l));
+      }
+      for (const auto& pred : r.antecedent) {
+        if (pred.kind != gar::PredKind::kEdge) continue;
+        out += state->PerSlotDerivedCount(
+            pred.label >= nrel ? pred.label - nrel : pred.label);
+      }
+    }
+    return out;
+  };
+  // vals cache: (slot, pin_src, pin) -> (stamp, present ∪ 1-level-derivable)
+  std::unordered_map<std::uint64_t,
+                     std::pair<std::uint64_t, std::vector<std::uint32_t>>>
+      vals_cache;
+  auto side_vals = [&](std::uint32_t slot, bool pin_src, std::uint32_t pin)
+      -> const std::vector<std::uint32_t>& {
+    const std::uint64_t key =
+        (static_cast<std::uint64_t>(slot) << 33) ^
+        (static_cast<std::uint64_t>(pin_src ? 1 : 0) << 32) ^ pin;
+    const std::uint64_t stamp = probe_stamp(slot);
+    const auto it = vals_cache.find(key);
+    if (it != vals_cache.end() && it->second.first == stamp) {
+      return it->second.second;
+    }
+    auto merged = merge_candidates(present_values(slot, pin_src, pin),
+                                   collect_candidate_values(slot, pin_src,
+                                                            pin));
+    return vals_cache.emplace(key, std::make_pair(stamp, std::move(merged)))
+        .first->second.second;
+  };
+  // 1-level-derivable dst set of (slot, src): for the semi-join membership
+  // test (present checked separately by the caller).
+  std::unordered_map<std::uint64_t,
+                     std::pair<std::uint64_t, std::vector<std::uint32_t>>>
+      reach_cache;
+  auto one_level_dsts = [&](std::uint32_t slot, std::uint32_t src)
+      -> const std::vector<std::uint32_t>& {
+    const std::uint64_t key =
+        (static_cast<std::uint64_t>(slot) << 32) ^ src;
+    const std::uint64_t stamp = probe_stamp(slot);
+    const auto it = reach_cache.find(key);
+    if (it != reach_cache.end() && it->second.first == stamp) {
+      return it->second.second;
+    }
+    return reach_cache
+        .emplace(key, std::make_pair(
+                          stamp, collect_candidate_values(slot, true, src)))
+        .first->second.second;
+  };
+
   std::uint64_t lb_entry_prunes = 0, est_prunes = 0, inf_prunes = 0;
   // Instance-level lb for an open (non-present) target:
   //   INF            no rule can ever derive it (no head rules / predicate
@@ -270,53 +422,91 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
     return std::max<std::uint64_t>(plb, 2);
   };
 
-  // search(t, cap): min additional cost to make t hold, <= cap; else kInf.
-  // Derives facts on success (shared Gamma). Tree/DAG note: present
-  // premises cost 0, so repeated subproofs pay once (DAG semantics).
-  std::function<std::uint64_t(const Target&, std::uint64_t, std::uint32_t)>
+  // ---- proof-set search (fact-set accounting; sharing exact) ----
+  // search(t, cap, depth) returns the minimum-cardinality PROOF of t: the
+  // set of facts to derive (each application derives one unique new fact,
+  // so set size == application count). Base facts (present in Gamma at Run
+  // start) have the empty proof. Premise subproofs are UNIONED — a shared
+  // subproof is counted once globally, so the total is the true unique-
+  // application count of the DAG proof. Pruning uses only admissible keys
+  // (max of premise lower bounds; the union is at least as large as any
+  // member proof); sums are ordering heuristics only.
+  using FactSet = std::unordered_set<std::uint64_t>;
+  using FactSetPtr = std::shared_ptr<const FactSet>;
+  const FactSetPtr kEmptyProof = std::make_shared<const FactSet>();
+  auto fact_key = [](std::uint32_t slot, std::uint32_t s, std::uint32_t d) {
+    return gar::graph::PackPair(slot, gar::graph::PackPair(s, d));
+  };
+  std::unordered_map<std::size_t, std::pair<std::uint64_t, FactSetPtr>>
+      proof_memo;  // (stamp, proof)
+  // Failure memo: (stamp, cap) — a target unprovable within cap stays so
+  // while its candidate space is unchanged; re-admit on space growth or a
+  // LARGER cap.
+  std::unordered_map<std::size_t, std::pair<std::uint64_t, std::uint64_t>>
+      failed_cap;
+
+  const graph::TripleGraph g0 = state->graph();  // base snapshot (holdout
+  // already applied by the caller): proofs are costed against g0
+  auto g0_has = [&](std::uint32_t slot, std::uint32_t s, std::uint32_t d) {
+    return g0.RelationPairSet(slot).count(gar::graph::PackPair(s, d)) != 0;
+  };
+
+  std::function<FactSetPtr(const Target&, std::uint64_t, std::uint32_t)>
       search = [&](const Target& t, std::uint64_t cap,
-                   std::uint32_t depth) -> std::uint64_t {
-    if (state->ContainsEdge(t.slot, t.src, t.dst)) return 0;
-    if (cap == 0 || depth > cfg.max_subgoal_depth) return kInf;
+                   std::uint32_t depth) -> FactSetPtr {
     const std::size_t tk = TargetHash{}(t);
-    if (!active.insert(tk).second) return kInf;  // cycle
-    struct Guard {
-      std::unordered_set<std::size_t>& a;
-      std::size_t k;
-      ~Guard() { a.erase(k); }
-    } guard{active, tk};
     {
-      const auto it = failed_at.find(tk);
-      if (it != failed_at.end() && it->second == state->version()) {
-        return kInf;
+      const auto it = proof_memo.find(tk);
+      if (it != proof_memo.end() && it->second.first == target_stamp(t)) {
+        return it->second.second->size() <= cap ? it->second.second
+                                                : nullptr;
+      }
+    }
+    if (g0_has(t.slot, t.src, t.dst)) return kEmptyProof;
+    if (cap == 0 || depth > cfg.max_subgoal_depth) return nullptr;
+    {
+      const auto it = failed_cap.find(tk);
+      if (it != failed_cap.end() &&
+          it->second.first == target_stamp(t) && it->second.second >= cap) {
+        return nullptr;
       }
     }
     const std::uint64_t my_lb = lb_inst(t);
     if (my_lb == kInf || my_lb > cap) {
       ++lb_entry_prunes;
-      return kInf;
+      return nullptr;
     }
+    if (!active.insert(tk).second) return nullptr;  // cycle
+    struct Guard {
+      std::unordered_set<std::size_t>& a;
+      std::size_t k;
+      ~Guard() { a.erase(k); }
+    } guard{active, tk};
 
     ++expansions;
     const std::string& pred_name = g.RelationName(t.slot);
     const auto rit = head_index.find(pred_name);
     if (rit == head_index.end()) {
-      failed_at[tk] = state->version();
-      return kInf;
+      failed_cap[tk] = {target_stamp(t), cap};
+      return nullptr;
     }
 
     // Enumerate pinned candidate motifs of every head rule.
     struct Cand {
       std::uint32_t rule;
       std::vector<std::uint32_t> emb;
-      std::uint64_t est;  // 1 + sum of missing-premise lbs (ORDERING only;
-                          // DAG sharing can make the true plan cheaper)
-      std::uint64_t maxlb = 0;  // 1 + max premise lb (admissible PRUNE key)
+      std::uint64_t est;  // 1 + sum of missing-premise lbs (ORDERING only)
+      std::uint64_t maxlb = 0;  // max(1, max premise lb): admissible PRUNE key
       std::vector<std::pair<Target, std::uint64_t>> missing;  // (target, lb)
     };
     std::vector<Cand> cands;
     std::unordered_set<std::uint64_t> seen;
+    std::uint64_t rule_i = 0;
     for (const std::uint32_t ri : rit->second) {
+      if (std::getenv("GAR_DEBUG_BWB") && ((rule_i++ & 7) == 0)) {
+        std::fprintf(stderr, "[bwbnb]   rule %u/%zu ri=%u\n", rule_i,
+                     rit->second.size(), ri);
+      }
       const GARule& r = rules[ri];
       const RuleHead head = ResolveRuleHead(r);
       const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
@@ -332,21 +522,21 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           src_of[ee] = sv;
         }
       }
-      // missing premises = pattern edges + edge antecedents absent from the
-      // current fact set, GROUNDED (both endpoints determined by the
-      // embedding or the pins). Inverse pattern edges map to base (d,s).
+      // missing premises = pattern edges + edge antecedents absent from g0
+      // (the BASE fact set — a non-base edge needs a proof even when it is
+      // already derived; its memoized proof is unioned by the parent).
+      // Inverse pattern edges map to base (d,s).
       auto add_missing_of = [&](Cand& c, gar::LabelID slot, std::uint32_t s,
                                 std::uint32_t d) {
         if (slot >= nrel) {
           slot -= nrel;
           std::swap(s, d);
         }
-        if (state->ContainsEdge(slot, s, d)) return;
+        if (g0_has(slot, s, d)) return;
         const std::uint64_t l = lb_inst(Target{slot, s, d});
         c.missing.emplace_back(Target{slot, s, d}, l);
-        c.est += l;                       // ordering key (may overestimate
-                                          // under DAG sharing)
-        c.maxlb = std::max(c.maxlb, l);   // admissible under sharing
+        c.est += l;
+        c.maxlb = std::max(c.maxlb, l);
       };
       auto add_cand = [&](const std::uint32_t* emb) {
         if (!label_ok(r, emb)) return;
@@ -365,20 +555,21 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           if (pred.kind != gar::PredKind::kEdge) continue;
           add_missing_of(c, pred.label, emb[pred.src], emb[pred.dst]);
         }
+        c.maxlb = std::max<std::uint64_t>(c.maxlb, 1);
         std::sort(c.missing.begin(), c.missing.end(),
                   [](const auto& a, const auto& b) {
                     return a.second < b.second;
                   });
         cands.push_back(std::move(c));
       };
-      // pass A: full pinned match (all pattern edges present)
+      // pass A: full pinned match (all pattern edges present in Gamma)
       {
         const auto spec = build_spec(r);
         std::vector<std::uint32_t> embs;
         bool capped = false;
         const std::uint64_t n_emb = matcher.Enumerate(
             spec, cfg.match_cap_per_rule, &embs, &capped, pins);
-        if (capped) space_truncated = true;
+        if (capped) cap_truncated = true;
         for (std::uint64_t k = 0; k < n_emb; ++k) {
           add_cand(embs.data() + k * n);
         }
@@ -418,17 +609,17 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           }
         }
         if (!ok_open) {
-          space_truncated = true;
+          shape_truncated = true;
           continue;
         }
         // the opened edge's endpoints must be determined
         if (remap.count(src_of[oe]) == 0 && !pins.count(src_of[oe])) {
-          space_truncated = true;
+          shape_truncated = true;
           continue;
         }
         if (remap.count(r.pattern.indices[oe]) == 0 &&
             !pins.count(r.pattern.indices[oe])) {
-          space_truncated = true;
+          shape_truncated = true;
           continue;
         }
         graph::PatternSpec sub;
@@ -442,11 +633,17 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         for (const auto& [vv, ww] : pins) {
           if (remap.count(vv)) sub_pins[remap[vv]] = ww;
         }
+        // An unanchored sub-pattern (no pin survives the opening) enumerates
+        // the whole graph — excluded from the certified space.
+        if (sub_pins.empty()) {
+          shape_truncated = true;
+          continue;
+        }
         std::vector<std::uint32_t> embs;
         bool capped = false;
         const std::uint64_t n_emb = matcher.Enumerate(
             sub, cfg.match_cap_per_rule, &embs, &capped, sub_pins);
-        if (capped) space_truncated = true;
+        if (capped) cap_truncated = true;
         const auto sn = static_cast<std::uint32_t>(new2old.size());
         for (std::uint64_t k = 0; k < n_emb; ++k) {
           const std::uint32_t* se = embs.data() + k * sn;
@@ -456,6 +653,104 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           add_cand(emb.data());
         }
       }
+      // pass C: two-open coordination (the disjoint-free shape): each opened
+      // edge has exactly one goal-pinned endpoint and the free endpoints are
+      // different variables; candidate values are present-or-1-level
+      // derivable per side, semi-joined through the remaining edges
+      // (present in Gamma or 1-level derivable). Each composing pair yields
+      // a fully grounded embedding — an ordinary Cand whose opened/middle
+      // edges are missing premises searched recursively (DAG cost).
+      for (gar::EdgeIndex e1 = 0; e1 < m_edges; ++e1) {
+        for (gar::EdgeIndex e2 = e1 + 1; e2 < m_edges; ++e2) {
+          const std::uint32_t s1 = src_of[e1], d1 = r.pattern.indices[e1];
+          const std::uint32_t s2 = src_of[e2], d2 = r.pattern.indices[e2];
+          const bool p1s = pins.count(s1) != 0, p1d = pins.count(d1) != 0;
+          const bool p2s = pins.count(s2) != 0, p2d = pins.count(d2) != 0;
+          if (p1s == p1d || p2s == p2d) continue;  // need exactly one each
+          const std::uint32_t a_free = p1s ? d1 : s1;
+          const std::uint32_t b_free = p2s ? d2 : s2;
+          if (a_free == b_free) continue;         // shared var: pass B shape
+          // semi-joinable + all vertices determined: every remaining edge's
+          // endpoints in {pins, a_free, b_free}, and no other vertex exists
+          bool sj = true;
+          std::vector<char> determined(n, 0);
+          for (const auto& [vv, ww] : pins) determined[vv] = 1;
+          determined[a_free] = 1;
+          determined[b_free] = 1;
+          for (std::uint32_t uu = 0; uu < n; ++uu) {
+            if (!determined[uu]) {
+              sj = false;
+              break;
+            }
+          }
+          for (std::uint32_t e = 0; e < m_edges && sj; ++e) {
+            if (e == e1 || e == e2) continue;
+            if (!determined[src_of[e]] || !determined[r.pattern.indices[e]]) {
+              sj = false;
+            }
+          }
+          if (!sj) {
+            shape_truncated = true;
+            continue;
+          }
+          // base-orientation pins for the two opened edges
+          const gar::LabelID l1 = r.pattern.edge_labels[e1];
+          const gar::LabelID l2 = r.pattern.edge_labels[e2];
+          const std::uint32_t slot1 =
+              l1 >= nrel ? l1 - nrel : static_cast<std::uint32_t>(l1);
+          const std::uint32_t slot2 =
+              l2 >= nrel ? l2 - nrel : static_cast<std::uint32_t>(l2);
+          const bool inv1 = l1 >= nrel;
+          const bool inv2 = l2 >= nrel;
+          const std::uint32_t pin1 = pins.at(p1s ? s1 : d1);
+          const std::uint32_t pin2 = pins.at(p2s ? s2 : d2);
+          // pattern-src pinned sits on the base src unless inverse
+          const bool pin1_src = p1s != inv1;
+          const bool pin2_src = p2s != inv2;
+          const std::vector<std::uint32_t>& vals1 =
+              side_vals(slot1, pin1_src, pin1);
+          const std::vector<std::uint32_t>& vals2 =
+              side_vals(slot2, pin2_src, pin2);
+          if (vals1.empty() || vals2.empty()) continue;
+          std::size_t pairs_added = 0;
+          bool overflow = false;
+          for (const std::uint32_t v1 : vals1) {
+            if (overflow) break;
+            for (const std::uint32_t v2 : vals2) {
+              if (pairs_added >= 64) {
+                overflow = true;
+                cap_truncated = true;
+                break;
+              }
+              // semi-join: every remaining edge present or 1-level derivable
+              std::vector<std::uint32_t> emb(n, 0);
+              for (const auto& [vv, ww] : pins) emb[vv] = ww;
+              emb[a_free] = v1;
+              emb[b_free] = v2;
+              bool edges_ok = true;
+              for (std::uint32_t e = 0; e < m_edges && edges_ok; ++e) {
+                if (e == e1 || e == e2) continue;
+                gar::LabelID l = r.pattern.edge_labels[e];
+                std::uint32_t es = emb[src_of[e]], ed = emb[r.pattern.indices[e]];
+                if (l >= nrel) {
+                  l -= nrel;
+                  std::swap(es, ed);
+                }
+                if (!g0_has(l, es, ed) && !state->ContainsEdge(l, es, ed)) {
+                  const auto& reach = one_level_dsts(l, es);
+                  if (std::find(reach.begin(), reach.end(), ed) ==
+                      reach.end()) {
+                    edges_ok = false;
+                  }
+                }
+              }
+              if (!edges_ok) continue;
+              ++pairs_added;
+              add_cand(emb.data());
+            }
+          }
+        }
+      }
     }
     std::sort(cands.begin(), cands.end(),
               [](const Cand& a, const Cand& b) {
@@ -463,47 +758,42 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
                 return a.rule < b.rule;
               });
 
-    std::uint64_t best = kInf;
+    FactSetPtr best = nullptr;
     for (const Cand& c : cands) {
-      const std::uint64_t w = std::min(cap, best == kInf ? cap : best - 1);
-      if (1 + c.maxlb > w) {  // admissible prune (DAG-sharing safe)
+      const std::uint64_t w =
+          std::min(cap, best ? best->size() - 1 : cap);
+      if (c.maxlb > w) {  // admissible prune (union >= each member proof)
         ++est_prunes;
         if (c.maxlb == kInf) ++inf_prunes;
         continue;
       }
       // AND: search each missing premise (cheapest-lb first), each with a
       // sub-cap leaving room for the remaining premises' lower bounds.
-      std::uint64_t plan = 1;
+      FactSet plan;
       bool ok = true;
       std::vector<AgentStep> plan_steps;
       for (std::size_t i = 0; i < c.missing.size(); ++i) {
-        if (state->ContainsEdge(c.missing[i].first.slot,
-                                c.missing[i].first.src,
-                                c.missing[i].first.dst)) {
-          continue;  // derived as a side effect of an earlier premise
-        }
-        std::uint64_t later = 0;  // suffix-MAX of still-missing lbs
+        std::uint64_t later = 0;  // suffix-MAX of still-unproven lbs
         for (std::size_t j = i + 1; j < c.missing.size(); ++j) {
-          if (state->ContainsEdge(c.missing[j].first.slot,
-                                  c.missing[j].first.src,
-                                  c.missing[j].first.dst)) {
+          if (g0_has(c.missing[j].first.slot, c.missing[j].first.src,
+                     c.missing[j].first.dst)) {
             continue;
           }
           later = std::max(later, c.missing[j].second);
         }
         const std::uint64_t room =
-            (w > plan + later) ? (w - plan - later) : 0;
+            (w > plan.size() + later) ? (w - plan.size() - later) : 0;
         if (c.missing[i].second > room) {
           ok = false;
           break;
         }
-        const std::uint64_t pc =
+        const FactSetPtr sub =
             search(c.missing[i].first, room, depth + 1);
-        if (pc == kInf) {
+        if (!sub) {
           ok = false;
           break;
         }
-        plan += pc;
+        plan.insert(sub->begin(), sub->end());
         const auto pit = best_plan.find(TargetHash{}(c.missing[i].first));
         if (pit != best_plan.end()) {
           plan_steps.insert(plan_steps.end(), pit->second.begin(),
@@ -511,23 +801,29 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         }
       }
       if (!ok) continue;
-      // premises hold now; apply the motif (its cost is the leading 1)
+      // premises proven; apply the motif (derives the head fact into Gamma,
+      // enriching later candidate spaces)
       const auto d = apply(c.rule, c.emb.data(),
                            static_cast<std::uint32_t>(c.emb.size()));
-      if (!d) continue;
-      if (plan < best) {
-        best = plan;
+      if (!d) continue;  // static antecedent failure: candidate invalid
+      plan.insert(fact_key(d->slot, d->src, d->dst));
+      if (!best || plan.size() < best->size()) {
         AgentStep step;
         step.motif = Motif{c.rule, c.emb};
         step.cost = 1;
         step.success = true;
         step.derived = *d;
         plan_steps.push_back(std::move(step));
+        best = std::make_shared<const FactSet>(std::move(plan));
         best_plan[tk] = std::move(plan_steps);
       }
     }
-    if (best == kInf) failed_at[tk] = state->version();
-    return best;
+    if (!best) {
+      failed_cap[tk] = {target_stamp(t), cap};
+      return nullptr;
+    }
+    proof_memo[tk] = {target_stamp(t), best};
+    return best->size() <= cap ? best : nullptr;
   };
 
   // Upfront check, same as the other executors.
@@ -544,35 +840,43 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
     return res;
   }
   const Target top{goal.slot, *goal.args[0], *goal.args[1]};
-  const std::uint64_t best =
-      search(top, cfg.budget, 0);
+  const FactSetPtr best = search(top, cfg.budget, 0);
+
   res.expansions = expansions;
-  if (best != kInf && best <= cfg.budget) {
+  if (best && best->size() <= cfg.budget) {
     res.goal_derived = true;
     res.termination = "goal";
-    res.total_cost = static_cast<double>(best);
-    res.certified_optimal = !space_truncated;  // within the seen space;
-    if (space_truncated) res.termination = "goal_space_truncated";
-    res.budget_exhausted = best >= cfg.budget;
+    res.total_cost = static_cast<double>(best->size());
+    res.certified_optimal = !shape_truncated && !cap_truncated;
+    if (shape_truncated) res.termination = "goal_space_truncated";
+    else if (cap_truncated) res.termination = "goal_cap_truncated";
+    res.budget_exhausted = best->size() >= cfg.budget;
     const auto it = best_plan.find(TargetHash{}(top));
     if (it != best_plan.end()) res.chain = it->second;
+    if (res.chain.empty()) {
+      AgentStep only;  // single-fact proof (direct base match via pass A)
+    }
   } else {
     res.goal_derived = false;
     res.termination =
         expansions > 0 ? "no_chain_within_budget" : "no_candidates";
-    res.certified_no_chain = !space_truncated;  // seen space exhausted
-    if (space_truncated) res.termination = "no_chain_space_truncated";
+    res.certified_no_chain = !shape_truncated && !cap_truncated;
+    if (shape_truncated) res.termination = "no_chain_space_truncated";
+    else if (cap_truncated) res.termination = "no_chain_cap_truncated";
     res.budget_exhausted = true;
   }
   res.derived = state->journal();
   std::fprintf(stderr,
                "[bwbnb] done: goal=%s cost=%.0f expansions=%llu "
-               "derived=%zu space_truncated=%d lb_prunes=%llu "
+               "derived=%zu space_truncated=%d(1=shape,2=cap) lb_prunes=%llu "
                "est_prunes=%llu inf_prunes=%llu probes=%llu\n",
                res.goal_derived ? "true" : "false",
-               res.goal_derived ? static_cast<double>(best) : -1.0,
+               res.goal_derived && best ? static_cast<double>(best->size())
+                                        : -1.0,
                static_cast<unsigned long long>(expansions),
-               res.derived.size(), static_cast<int>(space_truncated),
+               res.derived.size(),
+               static_cast<int>(shape_truncated) +
+                   2 * static_cast<int>(cap_truncated),
                static_cast<unsigned long long>(lb_entry_prunes),
                static_cast<unsigned long long>(est_prunes),
                static_cast<unsigned long long>(inf_prunes),
