@@ -77,3 +77,30 @@
   剪枝 est=1+Σ前提下界 在 DAG 共享下可能高估（两个未派生前提共享子证明
   时真实成本 < est）→ 剪枝改用 1+max（保守、可采纳），Σ 仅用于候选
   排序。Phase-2 已验证用例将在修正后复跑确认 best_cost 不变。
+
+## Phase 3 主任务预注册（2026-10-29）：协调形态入证书空间
+
+设计冻结：
+- 协调尝试 = OR 候选新形态（规则 × 开放边对 × 组合对 (v1,v2)），复用主
+  引擎机制：两侧候选 = 现成 ∪ 一级可派生（免费预检）、剩余边半连接过滤
+  （在 Γ 或一级可派生）、组合对生成全接地 emb 后进既有 Cand/递归管线；
+  成本 = DAG 唯一派生计数（与 Phase 2 口径一致）。
+- 保守性：协调候选的下界同其他候选（剪枝 1+max、排序 1+Σ）；耦合子目标
+  不相加。预检不计费（与主引擎约定一致：应用才计费）。
+- 证书口径：pinned cap / derive-collect cap / 对数 cap(64) 内"所见候选
+  空间最优 DAG 证明"；协调形态入空间后不再报 space_truncated（形状截断
+  只剩：开放端点未定的单开边、非半连接可接的 2 开集）；cap 截断如实写
+  cap_truncated。
+- 默认不变 + 实例下界开关兼容。
+
+验证判据（写死）：
+1. synth 手造 2~3 个必须双侧协调的 goal，手工最优成本 → best_cost 一致
+   且 certified（无截断时）。
+2. film(/m/015rkw,/m/0fg04) 与 award(/m/016pns,/m/01by1l) 协调 goal：
+   backward-bnb 给 best_cost+证书（truncated 标记如实），与主引擎首解
+   spent=6/2 对比（更优=更短链，如实记）；cap 自一致（cap8 vs cap64）
+   或 forward bnb 可行时交叉验证。
+3. 回归：Phase-2/3 全部 certified 用例 best_cost 不变；soundness 零真实
+   DIVERGENT；默认路径逐字节。
+4. 性能：协调 goal 的展开数/wall/内存 + "证书空间扩大了多少"（协调候选
+   计数）记录——为下一轮学习排序供 workload。
