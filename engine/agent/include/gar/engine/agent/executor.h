@@ -49,6 +49,10 @@ struct ExecConfig {
   // Degenerate single-path arm (--direction backward --executor greedy):
   // only the top-ranked candidate per target, no open-edge fallback.
   bool no_backtrack = false;
+  // BackwardBnBExecutor lower bound: false = predicate derivation depth
+  // (default, bit-identical Phase-2 behaviour); true = instance-level
+  // (--backward-bnb-lb instance).
+  bool backward_bnb_instance_lb = false;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its

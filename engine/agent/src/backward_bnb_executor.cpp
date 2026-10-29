@@ -207,6 +207,69 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
     return d;
   };
 
+  // ---- instance-level lower bound (instance mode) ----
+  // one_level_derives(t): any head rule fires RIGHT NOW under the pins
+  // (pinned enumeration + label filter + EvalAntecedent on current Gamma).
+  // Gamma is monotone, so "no motif fires now" implies any proof of t needs
+  // >= 2 applications (one to create the match, one to derive t). Memoized
+  // per target at the current fact-set version; recomputed on growth (a
+  // stale "no" would overestimate -> unsafe for pruning).
+  std::unordered_map<std::size_t, std::pair<std::uint64_t, bool>> onelevel_cache;
+  std::uint64_t probe_calls = 0;
+  auto one_level_derives = [&](const Target& t) -> bool {
+    const std::size_t tk = TargetHash{}(t);
+    const auto it = onelevel_cache.find(tk);
+    if (it != onelevel_cache.end() && it->second.first == state->version()) {
+      return it->second.second;
+    }
+    ++probe_calls;
+    bool fires = false;
+    const auto rit = head_index.find(g.RelationName(t.slot));
+    if (rit != head_index.end()) {
+      for (const std::uint32_t ri : rit->second) {
+        const GARule& r = rules[ri];
+        const RuleHead head = ResolveRuleHead(r);
+        std::unordered_map<std::uint32_t, std::uint32_t> pins;
+        pins[head.pu] = t.src;
+        pins[head.pv] = t.dst;
+        const auto spec = build_spec(r);
+        std::vector<std::uint32_t> embs;
+        bool capped = false;
+        const std::uint64_t n_emb = matcher.Enumerate(
+            spec, cfg.match_cap_per_rule, &embs, &capped, pins);
+        const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+        for (std::uint64_t k = 0; k < n_emb && !fires; ++k) {
+          const std::uint32_t* emb = embs.data() + k * n;
+          if (!label_ok(r, emb)) continue;
+          if (graph::EvalAntecedent(r.antecedent, emb, state->attrs(), g)) {
+            fires = true;
+          }
+        }
+        if (fires) break;
+      }
+    }
+    onelevel_cache[tk] = {state->version(), fires};
+    return fires;
+  };
+  std::uint64_t lb_entry_prunes = 0, est_prunes = 0, inf_prunes = 0;
+  // Instance-level lb for an open (non-present) target:
+  //   INF            no rule can ever derive it (no head rules / predicate
+  //                  unreachable from anchors) — safe prune;
+  //   max(pred,2)    no motif fires now (proof needs >= 2 applications,
+  //                  Gamma-monotonicity argument in the header comment);
+  //   max(pred,1)    a motif fires now (tight: >= 1);
+  // predicate mode: the data-blind derivation depth only.
+  auto lb_inst = [&](const Target& t) -> std::uint64_t {
+    const std::uint64_t plb = lb_of(t.slot);
+    if (plb == kInf) return kInf;
+    if (!cfg.backward_bnb_instance_lb) return plb;
+    if (head_index.find(g.RelationName(t.slot)) == head_index.end()) {
+      return kInf;
+    }
+    if (one_level_derives(t)) return std::max<std::uint64_t>(plb, 1);
+    return std::max<std::uint64_t>(plb, 2);
+  };
+
   // search(t, cap): min additional cost to make t hold, <= cap; else kInf.
   // Derives facts on success (shared Gamma). Tree/DAG note: present
   // premises cost 0, so repeated subproofs pay once (DAG semantics).
@@ -228,8 +291,11 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         return kInf;
       }
     }
-    const std::uint64_t my_lb = lb_of(t.slot);
-    if (my_lb == kInf || my_lb > cap) return kInf;
+    const std::uint64_t my_lb = lb_inst(t);
+    if (my_lb == kInf || my_lb > cap) {
+      ++lb_entry_prunes;
+      return kInf;
+    }
 
     ++expansions;
     const std::string& pred_name = g.RelationName(t.slot);
@@ -243,7 +309,9 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
     struct Cand {
       std::uint32_t rule;
       std::vector<std::uint32_t> emb;
-      std::uint64_t est;  // 1 + sum of missing-premise lower bounds
+      std::uint64_t est;  // 1 + sum of missing-premise lbs (ORDERING only;
+                          // DAG sharing can make the true plan cheaper)
+      std::uint64_t maxlb = 0;  // 1 + max premise lb (admissible PRUNE key)
       std::vector<std::pair<Target, std::uint64_t>> missing;  // (target, lb)
     };
     std::vector<Cand> cands;
@@ -274,9 +342,11 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           std::swap(s, d);
         }
         if (state->ContainsEdge(slot, s, d)) return;
-        const std::uint64_t l = lb_of(slot);
+        const std::uint64_t l = lb_inst(Target{slot, s, d});
         c.missing.emplace_back(Target{slot, s, d}, l);
-        c.est += l;
+        c.est += l;                       // ordering key (may overestimate
+                                          // under DAG sharing)
+        c.maxlb = std::max(c.maxlb, l);   // admissible under sharing
       };
       auto add_cand = [&](const std::uint32_t* emb) {
         if (!label_ok(r, emb)) return;
@@ -286,6 +356,7 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         c.rule = ri;
         c.emb.assign(emb, emb + n);
         c.est = 1;
+        c.maxlb = 0;
         for (std::uint32_t e = 0; e < m_edges; ++e) {
           add_missing_of(c, r.pattern.edge_labels[e], emb[src_of[e]],
                          emb[r.pattern.indices[e]]);
@@ -395,16 +466,30 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
     std::uint64_t best = kInf;
     for (const Cand& c : cands) {
       const std::uint64_t w = std::min(cap, best == kInf ? cap : best - 1);
-      if (c.est > w) continue;  // cannot beat the incumbent
+      if (1 + c.maxlb > w) {  // admissible prune (DAG-sharing safe)
+        ++est_prunes;
+        if (c.maxlb == kInf) ++inf_prunes;
+        continue;
+      }
       // AND: search each missing premise (cheapest-lb first), each with a
       // sub-cap leaving room for the remaining premises' lower bounds.
       std::uint64_t plan = 1;
       bool ok = true;
       std::vector<AgentStep> plan_steps;
       for (std::size_t i = 0; i < c.missing.size(); ++i) {
-        std::uint64_t later = 0;
+        if (state->ContainsEdge(c.missing[i].first.slot,
+                                c.missing[i].first.src,
+                                c.missing[i].first.dst)) {
+          continue;  // derived as a side effect of an earlier premise
+        }
+        std::uint64_t later = 0;  // suffix-MAX of still-missing lbs
         for (std::size_t j = i + 1; j < c.missing.size(); ++j) {
-          later += c.missing[j].second;
+          if (state->ContainsEdge(c.missing[j].first.slot,
+                                  c.missing[j].first.src,
+                                  c.missing[j].first.dst)) {
+            continue;
+          }
+          later = std::max(later, c.missing[j].second);
         }
         const std::uint64_t room =
             (w > plan + later) ? (w - plan - later) : 0;
@@ -482,11 +567,16 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
   res.derived = state->journal();
   std::fprintf(stderr,
                "[bwbnb] done: goal=%s cost=%.0f expansions=%llu "
-               "derived=%zu space_truncated=%d\n",
+               "derived=%zu space_truncated=%d lb_prunes=%llu "
+               "est_prunes=%llu inf_prunes=%llu probes=%llu\n",
                res.goal_derived ? "true" : "false",
                res.goal_derived ? static_cast<double>(best) : -1.0,
                static_cast<unsigned long long>(expansions),
-               res.derived.size(), static_cast<int>(space_truncated));
+               res.derived.size(), static_cast<int>(space_truncated),
+               static_cast<unsigned long long>(lb_entry_prunes),
+               static_cast<unsigned long long>(est_prunes),
+               static_cast<unsigned long long>(inf_prunes),
+               static_cast<unsigned long long>(probe_calls));
   return res;
 }
 

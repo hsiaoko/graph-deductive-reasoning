@@ -61,6 +61,9 @@ struct AgentModeArgs {
   // backward attempt ordering: heuristic (default, bit-identical legacy)
   // or hdc-value (needs --value-model PATH).
   std::string backward_priority = "heuristic";
+  // BackwardBnB lower bound flavour (only meaningful with
+  // --direction backward --executor bnb).
+  std::string backward_bnb_lb = "predicate";  // predicate|instance
   std::string value_model;
 };
 
@@ -96,6 +99,7 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->jev.top_k = static_cast<std::size_t>(std::stoull(next()));
   else if (k == "--bnb-priority") a->bnb_priority = next();
   else if (k == "--backward-priority") a->backward_priority = next();
+  else if (k == "--backward-bnb-lb") a->backward_bnb_lb = next();
   else if (k == "--value-model") a->value_model = next();
   else if (k == "--jev-sample") a->jev.sample = true;
   else if (k == "--jev-mock") a->jev_mock = true;
@@ -209,6 +213,11 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
     } else if (args.direction == "backward") {
       if (args.executor == "bnb") {
         executor = "backward-bnb";  // Phase 2: AND-OR branch-and-bound
+        if (args.backward_bnb_lb != "predicate" &&
+            args.backward_bnb_lb != "instance") {
+          throw std::invalid_argument("unknown --backward-bnb-lb: " +
+                                      args.backward_bnb_lb);
+        }
       } else if (args.executor == "backward") {
         executor = "backward";  // full discipline (DFS + backtracking)
       } else {
@@ -326,6 +335,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   ec.match_cap_per_rule = args.max_candidates_per_rule;
   ec.top_k = args.top_k;
   ec.utility_gamma = args.score.gamma;
+  ec.backward_bnb_instance_lb = (args.backward_bnb_lb == "instance");
 
   std::cerr << "[gar_reason] running: policy=" << args.policy
             << " scorer=" << args.scorer << " executor=" << args.executor

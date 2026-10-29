@@ -112,7 +112,9 @@ total   = α·(rel_fam + ν·rel_evd + ν₂·conf) − β·dcost
 冲突报错：`forward`+`backward` 互斥。`--direction backward --executor bnb`
 = Phase 2 的 AND-OR 分支定界最优链（**experimental**：证书覆盖
 pinned+接地子目标空间，开放端点协调形态除外，见
-experiments/backward_hdc/summary.md 的覆盖范围声明）。
+experiments/backward_hdc/summary.md 的覆盖范围声明）。Phase 3 加了可选的
+实例级下界 `--backward-bnb-lb instance`（默认 predicate 不变；论证与 A/B
+见同 summary——本负载上收益中性，不设默认）。
 backward 的 OR 候选排序可选 HDC 价值模型（`--backward-priority
 heuristic|hdc-value --value-model PATH`，只改尝试顺序；特征与模型文件
 独立于 bnb 版，见 experiments/backward_hdc/）。

@@ -102,3 +102,55 @@ DAG 证明"（共享派生只计一次；下界用树式 Σ 前提 lb，DAG 下�
 
 forward bnb athletes chain 逐字节一致（Phase-2 构建后复验）、verify synth
 逐字节一致、plain backward 逐字节一致、direction 冲突报错行为不变。
+
+---
+
+# Phase 3：实例级下界（--backward-bnb-lb instance）
+
+构造（`BackwardBnBExecutor`，cfg.backward_bnb_instance_lb；全部保守）：
+- 在 Γ → 0（精确）；
+- 无 head 规则 / 谓词不可达 → INF（安全剪枝，诊断计数 inf_prunes）；
+- 当前无任何 motif 点火（pinned 枚举 + label + EvalAntecedent 的免费预检，
+  按 Γ 版本缓存）→ max(谓词界, 2)：Γ 单调增长，"现在无全匹配"意味着任何
+  证明须先派生别的事实再派生本目标，≥2 步（文档论证见下）；
+- 当前可一级派生 → max(谓词界, 1)（紧化）；
+- 与谓词派生深度取 max。
+
+**随带的可采纳性修正（比 instance 下界更重要）**：Phase-2 的 incumbent
+剪枝用 est=1+Σ前提下界——DAG 共享下两个未派生前提可能共享子证明，
+真实成本 < est，Σ 剪枝可能误杀最优。本期：剪枝改用 1+max（可采纳），
+前提 sub-cap 的"后续余量"改用后缀 max 且每步重查存在性（side-effect
+派生归零）；Σ 仅用于候选排序。修正后全部 Phase-2 用例复跑，best_cost
+不变（见下表）——原结果未受影响，但论证现在严格。
+
+## 正确性复验（判据 1：全过）
+
+| 用例 | predicate | instance | certified |
+|---|---|---|---|
+| synth cost-1 / cost-2 | 1 / 2 | 1 / 2 | 不变 ✓ |
+| athletes（rules, cap64） | 2（2 展开） | 2（2 展开，62 预检） | 不变 ✓ |
+| Overall goal 17/19/20（g3） | 1/1/1 | 1/1/1 | best_cost 不变；三者
+space_truncated=1（g3 cap8 截断，certified 置 false——如实标注） ✓ |
+| film 协调形态目标 | 1002 展开如实失败 | 同 | 仍不报证书 ✓ |
+
+soundness：派生经 EvalAntecedent 门控，零真实 DIVERGENT（verify --run
+在 Phase-2 已覆盖，本期语义未动派生路径）。
+
+## 效果 A/B（判据 2）
+
+| 用例 | 展开 pred→inst | 预检数 | wall pred→inst |
+|---|---|---|---|
+| synth cost-2 | 3 → 2（est 5→6，inf 0→3） | 2 | 同（ms 级） |
+| athletes | 2 → 2（est 88→118） | 62 | 0.5s → 0.5s |
+| Overall 3 goal | 40/1/232 → 40/1/232 | 少量 | 同 |
+| r2c_8 | 1 → 1（inf 0→7） | 1 | 24.5ms → 24.8ms |
+
+结论：**剪枝确实更紧（inf/est 剪枝计数上升），但本工作负载的展开数几乎
+不变**——谓词界已经剪掉了同批分支；实例界只在"谓词便宜但该实例当前不可
+派生"的形态（synth 手造例）上小胜。预检成本低（µs~ms 级，被版本缓存）。
+
+## 判定与建议
+
+正确性全过、回归全绿、效果中性。**不建议设为默认**：收益在本负载上是
+噪声级，谓词界已够；保留为文档化选项（`--backward-bnb-lb instance`），
+未来若出现"谓词浅而实例深"形态的硬 goal 再启用。
