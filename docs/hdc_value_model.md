@@ -36,14 +36,33 @@ GAR_DEBUG_BNB=1 ./build/bin/gar_reason --mode agent --executor bnb \
 
 ### 2.2 特征与 HDC 编码
 
-- **11 个状态特征**（全部来自既有精确模块）：
-  `cost, clen, ncand, minprice, relfam, relevd, conf, dcost, total, dp0, wit`。
-- **分箱**：连续值离散化（cap=7 档，scale=2.0）。
-- **随机向量编码**：每个 (特征, 档位) 分配一个 D=4096 维随机双极向量
-  （int8）；再构造 4 组**合取特征**（cost×dp0、ncand×dcost、conf×total、
-  cost×clen），使模型能表达"距离近但见证少"这类组合规律——这是它优于
-  纯线性工程特征的关键。
-- **bundle 成分支指纹 → ridge（λ=1.0）回归剩余成本**。
+**HDC 特征表**（11 个状态特征，全部来自既有精确模块；除 cost/clen/wit
+为分支级外，其余取 line-6 重排后**最优候选 motif** 的 scorer 分量，
+见 `branch_bound_executor.cpp` 的 eval 日志与 ValueModel 调用处）：
+
+| # | 特征 | 含义 |
+|---|---|---|
+| 0 | `cost` | 分支已花成本（unit cost 累计） |
+| 1 | `clen` | 父分支推导链长度（本分支链长 −1，与训练口径一致） |
+| 2 | `ncand` | line-6 截断后的候选 motif 数 |
+| 3 | `minprice` | 最优候选的 price（= w₀ + d(p₀)） |
+| 4 | `relfam` | 最优候选的 DG 距离相关性 γ^{Σd} |
+| 5 | `relevd` | 最优候选的见证证据（已见证前提/总前提） |
+| 6 | `conf` | 最优候选规则的挖掘置信度 |
+| 7 | `dcost` | 最优候选的成本惩罚项 |
+| 8 | `total` | 最优候选的原 scorer 总分 |
+| 9 | `dp0` | 最优候选结论谓词到 goal 的 DG 距离 d(p₀) |
+| 10 | `wit` | 分支见证日志的事实总数 |
+
+- **分箱**：`bin = min(7, floor(|x| × 2))`，即 **0~7 共 8 档**。
+- **随机向量分配**：每个 (特征, 档位) 分配一个 D=4096 维随机双极向量
+  （int8）——共 11×8 = 88 个，加 1 个 bias 向量 = **89 个**，全部定种子
+  生成，训练与在线一致。
+- **合取特征（4 组，bind 逐维相乘）**：`cost×dp0`、`ncand×dcost`、
+  `conf×total`、`cost×clen`，使模型能表达"距离近但见证少"这类组合
+  规律——这是它优于纯线性工程特征的关键。
+- **bundle 成一条 4096 维分支指纹**（11 个特征向量 + 4 个合取项 +
+  bias 全部逐维相加，无拼接）→ **ridge（λ=1.0）回归剩余成本**。
 - **导出**：`meta.txt`（编码参数 + 89 个 int8 随机向量）+
   `weights.bin`（4097 个 float64：4096 维权重 + 偏置）。
   训练脚本：`experiments/hdc_online/train_export.py`（需 numpy；
