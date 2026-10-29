@@ -27,3 +27,15 @@ chase hit = goal ∈ 截断闭包。加速比 = chase 端到端时间 / agent �
 - 硬控制：soundness（agent 派生 ⊆ 闭包，零 DIVERGENT）、看门狗
   （MemAvailable<100GB kill）、chase 串行、bnb 4 路并发上限、timeout 1800s、
   seed 固定。
+
+## 运行日志（2026-10-29）
+
+- backward（rules_g3）：44 CONSISTENT / 4 BUDGET-LIMITED / 2 DIVERGENT / 0
+  INFEASIBLE。chase 共享闭包：round1 10.5+4.5s，round2 112.9+71.6s。
+- 2 个 DIVERGENT = 同一谓词 places_lived/location：agent 派生成功但截断
+  闭包（100k matches/2 轮）未含 → 深挖（1M matches 逐任务留出）验证中。
+- greedy（rules_g3）：0/49（与消融实验地板效应一致）。
+- 内存事故：div 深挖（1M matches ≈ 110GB）与 bnb 4 路并发叠加曾冲到
+  440GB 已用——看门狗熔断全部 gar_analyze；后改：深挖串行、bnb 臂在
+  无 chase 并发时 4 路。看门狗阈值调至 MemAvailable<110GB 且覆盖
+  gar_reason+gar_analyze 两二进制。
