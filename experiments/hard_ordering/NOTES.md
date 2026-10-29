@@ -24,3 +24,13 @@
 - B 层追加工程对照臂：惰性枚举（按规则级下界 est_rule 升序、按需枚举、
   est_rule >  incumbent 即停——证书精确，因为 est_rule 是该规则任何候选
   成本的下界）——区分"学习排序收益"与"少枚举收益"。
+
+## 结果记录（2026-10-29）
+
+- A 层：hdc-value 排序在硬 goal 上 3→1（丢 film/award），goal48/49 耗时
+  爆炸 8-21×；训练 248 尝试仅 2 正例。判学习排序不可行。
+- B 层：惰性枚举（规则级下界升序 + incumbent 停止）证书精确、默认 eager
+  逐字节；film 未救活（首目标枚举广度是瓶颈）；award 可解依赖 instance
+  下界（谓词模式 >120s 未决 vs 实例 21s/2 展开）。
+- 回归：synthc/synth/athletes certified 不变；forward bnb / plain
+  backward 逐字节一致。

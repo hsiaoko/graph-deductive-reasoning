@@ -8,8 +8,8 @@ import sys, re, os
 import numpy as np
 
 W = "/home/zhuxk/project/graph/GARAgent/.work_hdcv"
-TRACE = f"{W}/bwd_traces.log"
-OUT = f"{W}/models_bwd"
+TRACE = sys.argv[1] if len(sys.argv) > 1 else f"{W}/bwd_traces.log"
+OUT = sys.argv[2] if len(sys.argv) > 2 else f"{W}/models_bwd"
 D, LAM = 4096, 1.0
 NAMES = ["open_d", "df", "tier", "relfam", "conf", "nrules", "vals1",
          "vals2", "depth", "spent", "remaining"]
