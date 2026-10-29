@@ -34,6 +34,12 @@ struct AgentModeArgs {
   std::string policy = "deterministic";   // deterministic|random|hybrid|jev
   std::string scorer = "exact";           // exact|hdc
   std::string executor = "greedy";        // greedy|bnb|backward
+  // Reasoning direction switch (architecture decoupling; unset = legacy
+  // --executor behaviour, bit-identical). forward: greedy|bnb only.
+  // backward: backward executor = full discipline; backward+greedy =
+  // degenerate single-path arm (first OR choice only, no backtracking);
+  // backward+bnb = reserved for Phase 2 (error).
+  std::string direction;                  // ""|forward|backward
   std::uint32_t top_k = 0;                // bnb: 0 = exact (no truncation)
   std::uint32_t hdc_dim = gar::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
@@ -52,6 +58,9 @@ struct AgentModeArgs {
   // --value-model PATH (required when hdc-value). Ordering only; default
   // utility reproduces the stock best-first behaviour bit-for-bit.
   std::string bnb_priority = "utility";
+  // backward attempt ordering: heuristic (default, bit-identical legacy)
+  // or hdc-value (needs --value-model PATH).
+  std::string backward_priority = "heuristic";
   std::string value_model;
 };
 
@@ -64,6 +73,7 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--policy") a->policy = next();
   else if (k == "--scorer") a->scorer = next();
   else if (k == "--executor") a->executor = next();
+  else if (k == "--direction") a->direction = next();
   else if (k == "--top-k")
     a->top_k = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--hdc-dim") a->hdc_dim = static_cast<std::uint32_t>(std::stoul(next()));
@@ -85,6 +95,7 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--jev-top-k")
     a->jev.top_k = static_cast<std::size_t>(std::stoull(next()));
   else if (k == "--bnb-priority") a->bnb_priority = next();
+  else if (k == "--backward-priority") a->backward_priority = next();
   else if (k == "--value-model") a->value_model = next();
   else if (k == "--jev-sample") a->jev.sample = true;
   else if (k == "--jev-mock") a->jev_mock = true;
@@ -185,7 +196,34 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
     comps.policy = std::make_unique<agent::DeterministicPolicy>();
   }
   comps.generator = std::make_unique<agent::NaiveMotifGenerator>();
-  if (args.executor == "bnb") {
+  // --direction resolution (unset = legacy --executor behaviour).
+  std::string executor = args.executor;
+  bool backward_no_backtrack = false;
+  if (!args.direction.empty()) {
+    if (args.direction == "forward") {
+      if (args.executor == "backward") {
+        throw std::invalid_argument(
+            "--direction forward and --executor backward are mutually "
+            "exclusive");
+      }
+    } else if (args.direction == "backward") {
+      if (args.executor == "bnb") {
+        throw std::invalid_argument(
+            "--direction backward --executor bnb is reserved for Phase 2 "
+            "(AND-OR certificates)");
+      }
+      if (args.executor == "backward") {
+        executor = "backward";  // full discipline (DFS + backtracking)
+      } else {
+        executor = "backward";        // degenerate single-path arm rides
+        backward_no_backtrack = true;  // the backward executor, OR = first
+                                       // choice only, no pass-2 fallback
+      }
+    } else {
+      throw std::invalid_argument("unknown --direction: " + args.direction);
+    }
+  }
+  if (executor == "bnb") {
     comps.executor = std::make_unique<agent::BranchBoundExecutor>();
     if (args.bnb_priority == "hdc-value") {
       if (args.value_model.empty()) {
@@ -202,8 +240,24 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
       throw std::invalid_argument("unknown --bnb-priority: " +
                                   args.bnb_priority);
     }
-  } else if (args.executor == "backward") {
+  } else if (executor == "backward") {
     comps.executor = std::make_unique<agent::BackwardExecutor>();
+    comps.backward_no_backtrack = backward_no_backtrack;
+    if (args.backward_priority == "hdc-value") {
+      if (args.value_model.empty()) {
+        throw std::invalid_argument(
+            "--backward-priority hdc-value requires --value-model PATH");
+      }
+      auto vm = std::make_shared<agent::ValueModel>();
+      if (!vm->Load(args.value_model)) {
+        throw std::runtime_error("failed to load value model: " +
+                                 args.value_model);
+      }
+      comps.value_model = std::move(vm);
+    } else if (args.backward_priority != "heuristic") {
+      throw std::invalid_argument("unknown --backward-priority: " +
+                                  args.backward_priority);
+    }
   } else {
     comps.executor = std::make_unique<agent::GreedyExecutor>();
   }

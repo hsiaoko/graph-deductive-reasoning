@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "apply_helpers.h"
+#include "gar/engine/agent/value_model.h"
 #include "gar/graph/pattern_matcher.h"
 #include "gar/graph/predicate_evaluator.h"
 
@@ -342,9 +343,15 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
     if (DebugBackward()) {
       std::fprintf(stderr, "[bwd]   pass1 mus=%zu\n", mus.size());
     }
+    bool first_cand = true;
     for (const std::size_t oi : ord) {
       if (out_of_budget()) break;
       if (got.size() >= kMaxCollected) break;
+      // Degenerate single-path arm (cfg.no_backtrack, --direction backward
+      // --executor greedy): try only the top-ranked candidate per target,
+      // no open-edge fallback below.
+      if (cfg.no_backtrack && !first_cand) break;
+      first_cand = false;
       const Motif& mu = scored[oi].motif;
       if (auto d = apply_motif(mu.rule, mu.embedding.data(),
                                static_cast<std::uint32_t>(
@@ -383,7 +390,8 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         }
       }
     }
-    if (!got.empty() || depth >= cfg.max_subgoal_depth || out_of_budget()) {
+    if (!got.empty() || depth >= cfg.max_subgoal_depth || out_of_budget() ||
+        cfg.no_backtrack) {
       active.erase(TargetKey(t));
       return got;
     }
@@ -409,6 +417,9 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                               // 1-level candidates, 2 one side, 3 neither
       double rel_fam;
       double conf;
+      // side candidate-set sizes from the tier probe (0 for non-df) — the
+      // value-model feature vector's vals1/vals2
+      std::uint32_t vals1_n = 0, vals2_n = 0;
     };
     // Cache for the derive-first ordering probes (valid within this call's
     // collection phase; ordering only, never a soundness input).
@@ -482,6 +493,22 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                 pid < ctx.distances.size())
                    ? ctx.distances[pid]
                    : analysis::kUnreachable;
+      };
+      // Side candidate-set size under the goal pin (tier-probe cache) — a
+      // value-model feature; 0 when the edge is not one-pinned.
+      auto va_size_hint = [&](const PE& pe) -> std::size_t {
+        const bool ps = (t.src && pe.s == head.pu) ||
+                        (t.dst && pe.s == head.pv);
+        const bool pd = (t.src && pe.d == head.pu) ||
+                        (t.dst && pe.d == head.pv);
+        if (ps == pd) return 0;
+        const bool inv = pe.slot >= g.num_relations();
+        const gar::LabelID base =
+            inv ? pe.slot - g.num_relations() : pe.slot;
+        const std::uint32_t pinned =
+            ps ? (pe.s == head.pu ? *t.src : *t.dst)
+               : (pe.d == head.pu ? *t.src : *t.dst);
+        return tier_vals(base, inv ? !ps : ps, pinned).size();
       };
       for (const auto& [oe1, oe2] : open_sets) {
         std::uint32_t od = open_d(oe1);
@@ -600,7 +627,13 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         }
         attempts.push_back(OpenAttempt{ri, oe1, oe2, od, df, tier,
                                        probe.rel_fam,
-                                       r.quality.confidence});
+                                       r.quality.confidence,
+                                       df ? static_cast<std::uint32_t>(
+                                                va_size_hint(pedges[oe1]))
+                                          : 0u,
+                                       df ? static_cast<std::uint32_t>(
+                                                va_size_hint(pedges[oe2]))
+                                          : 0u});
       }
     }
     std::sort(attempts.begin(), attempts.end(),
@@ -619,6 +652,42 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                 if (a.oe1 != b.oe1) return a.oe1 < b.oe1;
                 return a.oe2 < b.oe2;
               });
+    // Optional HDC value-model re-ordering of the OR candidates
+    // (--backward-priority hdc-value): predicted failure probability asc,
+    // then the heuristic tuple for determinism. ONLY the attempt order
+    // changes; pinned matching, semi-join intersection, accounting and
+    // derivation validation are untouched. Default (no model) reproduces
+    // the heuristic order bit-for-bit.
+    if (kit.value_model != nullptr && !attempts.empty()) {
+      const double remaining =
+          cfg.budget > spent ? static_cast<double>(cfg.budget - spent) : 0.0;
+      std::vector<std::pair<double, std::size_t>> keyed(attempts.size());
+      for (std::size_t ai = 0; ai < attempts.size(); ++ai) {
+        const OpenAttempt& a = attempts[ai];
+        const std::array<double, 11> raw = {
+            static_cast<double>(a.open_d),
+            a.derive_first ? 1.0 : 0.0,
+            static_cast<double>(a.tier),
+            a.rel_fam,
+            a.conf,
+            static_cast<double>(it->second.size()),
+            static_cast<double>(a.vals1_n),
+            static_cast<double>(a.vals2_n),
+            static_cast<double>(depth),
+            static_cast<double>(spent),
+            remaining};
+        keyed[ai] = {kit.value_model->PredictRemaining(raw), ai};
+      }
+      std::sort(keyed.begin(), keyed.end(),
+                [](const auto& x, const auto& y) {
+                  return x.first != y.first ? x.first < y.first
+                                            : x.second < y.second;
+                });
+      std::vector<OpenAttempt> reordered;
+      reordered.reserve(attempts.size());
+      for (const auto& [p, ai] : keyed) reordered.push_back(attempts[ai]);
+      attempts = std::move(reordered);
+    }
 
     if (DebugBackward()) {
       std::size_t pos = 0;
@@ -633,8 +702,41 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         if (pos > 40) break;
       }
     }
+    // Outcome-per-attempt logging (GAR_DEBUG_BACKWARD): each executed
+    // attempt's result is printed at the next iteration's start (and the
+    // last one after the loop) — `continue` paths inside an attempt are
+    // still charged to it, which is the intended semantics.
+    const OpenAttempt* prev_att = nullptr;
+    std::uint64_t prev_spent = 0;
+    std::size_t prev_got = 0;
+    auto log_att_result = [&]() {
+      if (prev_att == nullptr) return;
+      std::fprintf(stderr,
+                   "[bwd]   att-result rule=%u oe=(%u,%u) df=%d tier=%u "
+                   "open_d=%u relfam=%.3f conf=%.3f nrules=%zu vals1=%u "
+                   "vals2=%u spent=%llu remain=%llu succ=%d dspent=%llu "
+                   "depth=%u\n",
+                   prev_att->rule, prev_att->oe1,
+                   prev_att->oe2 == gar::EdgeIndex(UINT32_MAX)
+                       ? 999u
+                       : prev_att->oe2,
+                   static_cast<int>(prev_att->derive_first), prev_att->tier,
+                   prev_att->open_d, prev_att->rel_fam, prev_att->conf,
+                   it->second.size(), prev_att->vals1_n, prev_att->vals2_n,
+                   static_cast<unsigned long long>(prev_spent),
+                   static_cast<unsigned long long>(
+                       cfg.budget > prev_spent ? cfg.budget - prev_spent : 0),
+                   static_cast<int>(got.size() > prev_got),
+                   static_cast<unsigned long long>(spent - prev_spent),
+                   depth);
+    };
     for (const auto& att : attempts) {
+      if (DebugBackward()) log_att_result();
+      prev_att = nullptr;
       if (!got.empty() || out_of_budget()) break;
+      prev_att = &att;
+      prev_spent = spent;
+      prev_got = got.size();
       const std::uint32_t ri = att.rule;
       const gar::EdgeIndex oe1 = att.oe1, oe2 = att.oe2;
       const GARule& r = rules[ri];
@@ -1165,6 +1267,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
         }
       }
     }
+    if (DebugBackward()) log_att_result();  // the last executed attempt
     if (DebugBackward()) {
       std::fprintf(stderr, "[bwd] exit %s(%s,%s) -> %zu\n", pred_name.c_str(),
                    t.src ? g.EntityName(*t.src).c_str() : "_",

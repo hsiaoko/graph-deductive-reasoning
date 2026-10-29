@@ -102,6 +102,19 @@ total   = α·(rel_fam + ν·rel_evd + ν₂·conf) − β·dcost
 `gar_analyze verify` 拿结果和全量 chase 闭包对账：agent 派生 ⊆ chase
 闭包、hold-out 下 goal 一致，判 CONSISTENT / BUDGET-LIMITED / DIVERGENT。
 
+## 5.1 推理方向开关（--direction）
+
+执行器按方向解耦：`--direction forward|backward`（不设 = 旧行为，
+`--executor` 为准、逐字节不变）。映射：`--executor backward` ≡
+`--direction backward` 的完整纪律（现有 BackwardExecutor，DFS+回溯）；
+`--direction backward --executor greedy` = 退化单路径消融臂（OR 只试首选、
+无 pass-2 回退）；`--direction forward` 下 greedy/bnb 完全走旧代码路径。
+冲突报错：`forward`+`backward` 互斥；`backward`+`bnb` 报错保留给 Phase 2
+（AND-OR 最优证书，本期不做）。
+backward 的 OR 候选排序可选 HDC 价值模型（`--backward-priority
+heuristic|hdc-value --value-model PATH`，只改尝试顺序；特征与模型文件
+独立于 bnb 版，见 experiments/backward_hdc/）。
+
 ## 6. HDC 在流程里的位置
 
 - **rel_evd 的 HDC 版**：仍是可选 scorer（`--scorer hdc`），实验证明

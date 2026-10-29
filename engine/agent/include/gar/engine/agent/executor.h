@@ -46,6 +46,9 @@ struct ExecConfig {
   // BackwardExecutor: bound on subgoal recursion depth (a goal needing a
   // round-k chase derivation nests at most ~k deep).
   std::uint32_t max_subgoal_depth = 4;
+  // Degenerate single-path arm (--direction backward --executor greedy):
+  // only the top-ranked candidate per target, no open-edge fallback.
+  bool no_backtrack = false;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its

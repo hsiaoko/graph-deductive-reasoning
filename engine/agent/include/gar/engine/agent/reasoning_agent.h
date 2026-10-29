@@ -32,6 +32,8 @@ class ReasoningAgent {
     std::unique_ptr<CostModel> cost_model;
     // Optional bnb branch value model (hdc-value priority, ordering only).
     std::shared_ptr<ValueModel> value_model;
+    // --direction backward --executor greedy arm: single-path backward.
+    bool backward_no_backtrack = false;
   };
 
   ReasoningAgent(Components comps, const analysis::DependencyGraph* dg,
@@ -69,7 +71,9 @@ class ReasoningAgent {
     const ExecKit kit{comps_.generator.get(), comps_.scorer.get(),
                       comps_.policy.get(), comps_.cost_model.get(),
                       comps_.value_model.get()};
-    return comps_.executor->Run(goal, state, &witness, &failures, ctx, cfg,
+    ExecConfig cfg2 = cfg;
+    cfg2.no_backtrack = comps_.backward_no_backtrack;
+    return comps_.executor->Run(goal, state, &witness, &failures, ctx, cfg2,
                                 kit);
   }
 
