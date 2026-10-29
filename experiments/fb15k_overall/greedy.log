@@ -1,0 +1,10 @@
+[gar_analyze] |V|=14513 |R|=237 |E|=289650
+[gar_analyze] 81683 rules
+[gar_analyze] 0 numeric attribute columns
+[gar_analyze] shared hold-out: removed 50 goal edges from Γ0
+[chase] round 1: enumerate 10.6s, merge 4.9s, +1487210 facts
+[chase] round 2: enumerate 116.1s, merge 70.7s, +22006964 facts
+[gar_analyze] verify --tasks: /home/zhuxk/project/graph/GARAgent/.work_hdcv/tasks50.tsv
+  CONSISTENT=0 BUDGET-LIMITED=49 DIVERGENT=0 INFEASIBLE=1
+  success rate (derived/feasible): 0/49
+[gar_analyze] report written to experiments/fb15k_overall/greedy.tsv
