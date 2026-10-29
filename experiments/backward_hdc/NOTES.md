@@ -58,3 +58,22 @@
 4. 回归：旧命令逐字节一致。
 任一不达 → 标 --experimental 并写清覆盖范围；基本正确性不过 → 交付
 诊断不硬撑。
+
+## Phase 3 预注册（2026-10-29）：实例级下界 --backward-bnb-lb
+
+判据（分析前写死）：
+1. 正确性：全部既有 certified 用例 best_cost 与 certified 标记不变
+   （synth cost-1/2、athletes=2、Overall goal 17/19/20）；协调形态仍如实
+   不报证书；soundness 零真实 DIVERGENT。
+2. 效果：predicate vs instance 的展开数/wall/剪枝计数 A/B；预检成本抵消
+   收益则如实报告。
+3. 回归：默认 predicate 逐字节；forward 全套不动。
+
+实现冻结：
+- 组件：在 Γ→0；无任何 head 规则→INF（安全剪枝+诊断计数）；当前无全
+  匹配 motif→≥2（Γ 单调增长论证）；当前可一级派生→≥1 紧化；与谓词深度
+  取 max。每目标按 Γ 版本缓存（版本变则重算，防高估）。
+- **随带修正 Phase-2 剪枝的可采纳性论证**（写文档显著位置）：incumbent
+  剪枝 est=1+Σ前提下界 在 DAG 共享下可能高估（两个未派生前提共享子证明
+  时真实成本 < est）→ 剪枝改用 1+max（保守、可采纳），Σ 仅用于候选
+  排序。Phase-2 已验证用例将在修正后复跑确认 best_cost 不变。
