@@ -65,8 +65,9 @@ rand_s7 各 51.4%（6–8s）**——score 序把搜索锁进一个高失败率�
   小层 0/1 两极（journal 只有 0–6 条）。
 
 **soundness**：所有派生经 EvalAntecedent 门控（合法 chase 步）；
-profession 的 904 条 beyond-GT 为 GT 10M 截断所致（30M 高帽闭包核
-验见下）；全程零真实越界。
+profession 的 904 条 beyond-GT 经 **30M 高帽闭包核验 0 越界**
+（26 轮 29.67M 事实，387s/13.6GB；且 30M 闭包的 profession 答案集
+与 agent fixpoint 集合完全一致——双向验证）；全程零真实越界。
 
 ## 最终结论：全种子 backward vs forward 的边界
 
