@@ -1,0 +1,16 @@
+goal	group	tier	ans_found	ans_size	completeness	wall_s	cost
+award(_,/m/02flpq)	G1	small	1	2	0.50	0.16	8
+countries_spoken_in(_,/m/08809)	G1	small	1	7	0.14	35.20	10
+award_winner(_,/m/01h5f8)	G1	small	3	9	0.33	0.10	8
+award_winner(_,/m/01wk7ql)	G1	small	1	1	1.00	1.90	2
+participating_countries(_,/m/0dlhg)	G1	medium	0	43	0.00	102.20	10
+honored_for(_,/m/07nxvj)	G1	medium	1	61	0.02	7.00	11
+award_winner(_,/m/02r3zy)	G1	medium	6	50	0.12	0.65	8
+profession(_,/m/03lgtv)	G1	large	6	2034	0.00	0.67	8
+location(_,/m/0nvt9)	G1	large	2	1789	0.00	0.18	8
+language(_,/m/04306rv)	G1	large	4	2040	0.00	1.71	8
+contains(_,_)	G2	high(fanin=_)	0	-	-	0.110	-
+film_release_region(_,_)	G2	high(fanin=_)	2	-	-	0.150	-
+position(_,_)	G2	mid(fanin=_)	2	-	-	0.060	-
+languages_spoken(_,_)	G2	low(fanin=_)	2	-	-	0.070	-
+film_art_direction_by(_,_)	G2	low(fanin=_)	1	-	-	0.040	-
