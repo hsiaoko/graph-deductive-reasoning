@@ -32,7 +32,7 @@ struct AgentModeArgs {
   std::string goal_spec;  // "rel_name(src,dst)"; '_' = open argument
   std::uint64_t budget = 100;
   std::string policy = "deterministic";   // deterministic|random|hybrid|jev
-  std::string scorer = "exact";           // exact|hdc
+  std::string scorer = "exact";           // exact|hdc|null
   std::string executor = "greedy";        // greedy|bnb|backward
   // Reasoning direction switch (architecture decoupling; unset = legacy
   // --executor behaviour, bit-identical). forward: greedy|bnb only.
@@ -176,10 +176,15 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
   if (args.scorer == "exact") {
     comps.scorer = std::make_unique<agent::ExactScorer>(args.score,
                                                         comps.cost_model.get());
-  } else {
+  } else if (args.scorer == "null") {
+    comps.scorer = std::make_unique<agent::NullScorer>();
+  } else if (args.scorer == "hdc") {
     comps.scorer = std::make_unique<agent::HdcScorer>(args.score,
                                                       comps.cost_model.get(),
                                                       encoder);
+  } else {
+    throw std::invalid_argument("unknown --scorer: " + args.scorer +
+                                " (exact|hdc|null)");
   }
   if (args.policy == "jev") {
     if (goal == nullptr || graph == nullptr || rules == nullptr) {

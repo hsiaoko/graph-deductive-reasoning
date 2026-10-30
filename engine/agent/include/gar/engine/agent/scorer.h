@@ -88,6 +88,20 @@ class ExactScorer final : public Scorer {
   const CostModel* cost_;
 };
 
+// NullScorer: scoring ablation ("--scorer null"). Keeps the symbolic
+// admissibility check (d(p0) < inf and conclusion not yet in Gamma — the
+// agent's termination/correctness guard) but emits no guidance: rel_fam /
+// rel_evd / rel / dcost / total / price are all zero. Greedy policies then
+// degenerate to candidate-enumeration order (score ties break to lower
+// index), and branch-and-bound degenerates to uniform-cost search.
+class NullScorer final : public Scorer {
+ public:
+  NullScorer() = default;
+
+  void Score(const GARule& rule, const Motif& mu, const ScoringContext& ctx,
+             ScoredMotif* out) const override;
+};
+
 class HdcScorer final : public Scorer {
  public:
   HdcScorer(HandcraftedConfig cfg, const CostModel* cost_model,

@@ -90,6 +90,17 @@ double Total(const HandcraftedConfig& cfg, double confidence,
 
 }  // namespace
 
+void NullScorer::Score(const GARule& rule, const Motif& mu,
+                       const ScoringContext& ctx, ScoredMotif* out) const {
+  out->motif = mu;
+  const std::uint32_t dp0 = HeadDistance(rule, ctx);
+  const RuleHead head = ResolveRuleHead(rule);
+  out->admissible =
+      head.valid && dp0 != analysis::kUnreachable &&
+      !ctx.state->ContainsEdge(head.slot, mu.embedding[head.pu],
+                               mu.embedding[head.pv]);
+}
+
 void ExactScorer::Score(const GARule& rule, const Motif& mu,
                         const ScoringContext& ctx, ScoredMotif* out) const {
   out->motif = mu;
