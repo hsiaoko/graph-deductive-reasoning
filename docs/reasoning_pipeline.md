@@ -138,3 +138,11 @@ heuristic|hdc-value --value-model PATH`，只改尝试顺序；特征与模型�
   两个硬 goal 各 −93%；最优成本 / certified / chain.tsv 全部一致，
   soundness pass；模型推理 15~21µs/次，可忽略。
   出处：`experiments/hdc_online/`（commit `1f5a0f6` / `66fb175`）。
+
+## 7. 方向选择的场景分析
+
+backward 并非所有场景的最优解：开放变元 goal、批量 goal/全闭包物化、
+探索性推理、hub 常量、深层递归闭包各有 forward 的合法位置；混合路线
+（Magic Sets 式：backward 筛规则 + forward 求值）为后续方向。
+详见 `docs/direction/README.md`（场景分析）与
+`docs/direction/open_goal_experiment.md`（开放变元 goal 实验预注册）。
