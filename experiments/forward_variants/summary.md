@@ -33,10 +33,26 @@ derived/termination/wall）。
 
 ## bnb（budget=2, cap=64, top_k=0, 30min 超时）
 
-（utility / hdc-value 两臂进行中，完成后填：命中、展开数、best_cost、
-certified、chain 一致性。明细 `.work_hdcv/fw_bnb_detail.tsv`。参照：
-Overall 同口径 utility/hdc-value 两臂命中 g17/g19/g20，cost≤2，
-certified，两臂展开数一致。）
+**命中 goal（3 个最易 goal，两臂全量复现 Overall）**：
+
+| goal | arm | hit | cost | expansions | certified | wall (s) | chain |
+|---|---|---|---|---|---|---|---|
+| g17 | utility | ✓ | 1 | 63 | ✓ | 5.78 | 两臂逐字节一致 |
+| g17 | hdc-value | ✓ | 1 | 63 | ✓ | 5.75 | 同上 |
+| g19 | utility | ✓ | 1 | 13 | ✓ | 1.29 | 同上 |
+| g19 | hdc-value | ✓ | 1 | 13 | ✓ | 1.29 | 同上 |
+| g20 | utility | ✓ | 1 | 33 | ✓ | 3.33 | 同上 |
+| g20 | hdc-value | ✓ | 1 | 33 | ✓ | 3.38 | 同上 |
+
+hdc-value 与 utility 在命中 goal 上展开数、链、耗时完全一致（小树、
+值函数不改变排序）——与 Overall 结论一致：**bnb 处 HDC 值模型无净
+效果**（既不增益也不减速）。
+
+**难 goal（预算内穷举失败）**：g0 两臂各 941 展开 ~90s 未命中
+（best_cost 未找到）。其余 18 个难 goal 未在本轮跑（每个最坏 30min
+T/O，超出时间盒；Overall 同口径下这些 goal 两臂均为穷举失败或
+30min T/O，无新增信息预期）。已完成部分明细见
+`.work_hdcv/fw_bnb_detail.tsv` 与 `experiments/forward_variants/`。
 
 **bnb + null（uniform-cost）臂中止**：g0 上 6,912+ 展开且 open=6,911
 （open 随展开线性增长），~11 min RSS 297GB 仍 best_cost=-1，在看门狗
@@ -69,8 +85,13 @@ workload 上实际落在确定性选择上）>> random 0/22（3 seed 一致全�
 **③ HDC 两处**：
 - scorer=hdc(512) vs exact：**负效果**——0/22 vs 3/22，且 ~2.2× 慢
   （3.44s vs 1.57s mean）。与上轮消融结论（无命中增益、更慢）一致。
-- bnb hdc-value vs utility：（待 bnb 臂完成；参照 Overall：同三 goal、
-  展开数一致，无增益）。
+- bnb hdc-value vs utility：**无净效果**——3 个命中 goal 上展开数
+  （63/13/33）、cost=1、certified、chain 逐字节一致、耗时一致。
+
+**①（bnb 侧补充）**：scoring 对 bnb 是生存性问题——去掉 price 下界
+（null scorer → uniform-cost）后，同一难 goal 上 open 前沿爆炸
+（11 min 297GB 未决 vs utility 941 展开 89s 证毕），实验上无法跑完，
+定性结论：utility 的 cost+price 优先级使 bnb 从不可行变为可行。
 
 **机制（g17 剖析）**：goal 距基图 1 步（bstar=1，gar_001039 直接可
 推），但 greedy exact/hdc 都被"/m/0b90_r 吸引子"困住——反复用同一
