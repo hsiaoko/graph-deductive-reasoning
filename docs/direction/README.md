@@ -21,10 +21,10 @@
 
 | # | 场景 | 选择 | 理由 |
 |---|---|---|---|
-| 1 | 开放 goal：`award(x,B)` / `award(x,y)` | forward 或混合 | 无常量可 pin，backward 剪枝失效；本质是关系外延求值 |
+| 1 | 开放 goal：`award(x,B)` / `award(x,y)` | 小答案集 backward / 中大答案集 forward | 实测（open_goals）：答案集 <10 时 backward 仍更快（0.1–1.9s 内全解）；中/大答案集（43–2000+）backward 只给前缀（完备率 0–12%），forward 一次闭包是全外延唯一可行路径 |
 | 2 | 批量 goal / 全闭包物化 | forward chase | 摊销优势：199.5s/50 goal = 4.5s/goal，goal 越多越划算；下游 ML/挖掘 support 需要全量派生 |
 | 3 | 探索性推理（异常检测、知识发现、规则挖掘） | forward | 没有 goal 可反向 |
-| 4 | hub 常量 goal（超级枢纽实体） | forward 更有韧性 | pin 的选择性剪枝失效，backward 优势缩水（论文 limitation 候选） |
+| 4 | hub 常量 goal（超级枢纽实体） | **backward（grounded 时反为优势）** | 实测（open_goals G3）：hub（deg 4482–5476）spent=1/~40ms 一击即中，非 hub 对照贵 27–620× 且可 MISS——hub 目标边多在基图或一步可达。hub 不是 grounded goal 的 limitation；潜在风险在 hub 作开放中间变量（未覆盖） |
 | 5 | 深层递归闭包（传递闭包、可达性） | forward / 混合 | 半朴素求值每事实只推一次全体复用；backward 递归树爆炸（film profile：递归子目标搜索 99.5%） |
 | 6 | 单个/少量接地 goal | **backward（主线）** | goal pinning 使候选空间塌缩；20/50 规模 92% 命中、中位 0.25s |
 
@@ -45,6 +45,11 @@ backward 分析 goal → 筛出 goal 相关规则子集 + 可 pin 的常量约�
 
 这条路线同时覆盖 case 1/2/5，是把两个方向从"对立"变成"组合"的
 关键工程候选。
+
+**实测注记（open_goals）**：仅做"DG 反向可达规则过滤"的简易混合原型
+**退化**——深度 1 的反向可达子集仍含 88.4% 规则（chase 218s vs 纯
+forward 215s，无收益）。Magic-Sets 式的**常量约束改写**（而非单纯
+规则过滤）需要另行立项，不能指望 DG 剪枝单独奏效。
 
 ## 4. 实例级瓶颈的实证记录（防止重复踩坑）
 
