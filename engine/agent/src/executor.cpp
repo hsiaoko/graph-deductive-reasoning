@@ -1,5 +1,7 @@
 #include "gar/engine/agent/executor.h"
 
+#include <chrono>
+
 #include "apply_helpers.h"
 #include "gar/graph/predicate_evaluator.h"
 
@@ -26,8 +28,21 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
   ScoringContext sctx{&ctx.distances, ctx.table, witness, state};
   double spent = 0.0;
   res.termination = "budget";
+  const bool full_enum =
+      cfg.forward_full_enum && (!goal.args[0] || !goal.args[1]);
+  const auto t0 = std::chrono::steady_clock::now();
+  auto wall_exceeded = [&]() {
+    return cfg.wall_limit_sec > 0.0 &&
+           std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                         t0)
+                   .count() >= cfg.wall_limit_sec;
+  };
 
   while (spent < static_cast<double>(cfg.budget)) {
+    if (wall_exceeded()) {
+      res.termination = "timeout";
+      break;
+    }
     std::vector<Motif> mus;
     kit.generator->Candidates(*state, ctx.distances, *ctx.table,
                               cfg.match_cap_per_rule, *failures, &mus);
@@ -89,14 +104,18 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
       }
       witness->WitnessFact(MakeEdgeFact(d.slot, d.src, d.dst), ctx.encoder);
       if (GoalSatisfied(goal, d)) {
-        spent += step.cost;
-        res.chain.push_back(std::move(step));
-        res.total_cost = spent;
         res.goal_derived = true;
-        res.termination = "goal";
-        kit.policy->OnApplication(res.chain.back().motif, true,
-                                  res.chain.back().cost);
-        break;
+        if (!full_enum) {
+          spent += step.cost;
+          res.chain.push_back(std::move(step));
+          res.total_cost = spent;
+          res.termination = "goal";
+          kit.policy->OnApplication(res.chain.back().motif, true,
+                                    res.chain.back().cost);
+          break;
+        }
+        // full-enum: record the answer but keep stepping toward fixpoint
+        // (the shared tail below charges and journals the step).
       }
     } else {
       // Classify the blocking precondition (shared helper, chase
@@ -121,6 +140,9 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
     res.total_cost = spent;
     kit.policy->OnApplication(mu, step.success, step.cost);
     res.chain.push_back(std::move(step));
+  }
+  if (full_enum && res.termination == "no_candidates" && res.goal_derived) {
+    res.termination = "full_enum_fixpoint";
   }
   res.budget_exhausted = spent >= static_cast<double>(cfg.budget) &&
                          res.termination != "goal";

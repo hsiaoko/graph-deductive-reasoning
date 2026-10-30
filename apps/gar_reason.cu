@@ -59,7 +59,7 @@ void PrintUsage() {
          "[--executor greedy|bnb] [--top-k N] [--seed N] [--max-candidates-per-rule N] "
             "[--bnb-priority utility|hdc-value] [--value-model PATH] "
             "[--backward-order score|random|hybrid] [--open-collect-cap N] "
-            "[--backward-full-enum] "
+            "[--backward-full-enum] [--forward-full-enum] [--wall-limit S] "
          "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
          "[--tau-hdc F] [--no-confidence] [--out <dir>] "
          "[--verify-against-closure] [--print N]\n"

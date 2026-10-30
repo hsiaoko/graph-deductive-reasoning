@@ -179,6 +179,8 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--backward-order` | score | BackwardExecutor 候选排序：score（打分序，默认逐字节不变）/ random（`--seed` 洗牌，打分不参与排序）/ hybrid（top-8 打分窗口内洗牌，其余按分） |
 | `--open-collect-cap` | 8 | 开放变元 target 单次收集答案数上限；求全外延时调大 |
 | `--backward-full-enum` | 关 | 开放变元 goal 全外延模式：pass1/pass2 扫描循环至 journal 不动点（已知结论跳过、失败备忘录随图增长重准入）；默认关 = 旧行为逐字节不变 |
+| `--forward-full-enum` | 关 | greedy 对开放变元 goal 的全外延模式：不在首个答案处停，继续步进至候选耗尽（fixpoint）/budget/墙钟；默认关 = 旧行为逐字节不变 |
+| `--wall-limit S` | 0（关） | 执行器内墙钟上限（秒）：到时干净终止（termination=timeout）并照常写出部分结果；外部 kill 会丢数据 |
 | `--bnb-priority` | utility | bnb 优先级来源：utility（原公式）/ hdc-value（HDC 价值模型，需 `--value-model`，只改排序，见 §3.3） |
 | `--value-model PATH` | 无 | HDC 价值模型 meta.txt（train_export.py 导出，配合同名 weights.bin） |
 | `--no-dg` | 关 | 关闭 DG 制导（d(·) 全零：不剪枝、rel_fam 中性、price=w₀）；消融用 |

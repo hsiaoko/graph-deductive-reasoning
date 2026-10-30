@@ -73,6 +73,10 @@ struct AgentModeArgs {
   std::string backward_order = "score";
   // Full-extension mode for open-sided backward goals (loop to fixpoint).
   bool backward_full_enum = false;
+  // Greedy analogue for open-sided goals; --wall-limit gives a clean
+  // in-process stop (partial results still written) at N seconds.
+  bool forward_full_enum = false;
+  double wall_limit_sec = 0.0;
   std::string value_model;
 };
 
@@ -113,6 +117,8 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--backward-bnb-lb") a->backward_bnb_lb = next();
   else if (k == "--backward-bnb-enum") a->backward_bnb_enum = next();
   else if (k == "--backward-full-enum") a->backward_full_enum = true;
+  else if (k == "--forward-full-enum") a->forward_full_enum = true;
+  else if (k == "--wall-limit") a->wall_limit_sec = std::stod(next());
   else if (k == "--backward-order") {
     a->backward_order = next();
     if (a->backward_order != "score" && a->backward_order != "random" &&
@@ -372,6 +378,8 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   ec.backward_bnb_lazy_enum = (args.backward_bnb_enum == "lazy");
   ec.backward_order = args.backward_order;
   ec.backward_full_enum = args.backward_full_enum;
+  ec.forward_full_enum = args.forward_full_enum;
+  ec.wall_limit_sec = args.wall_limit_sec;
   ec.seed = args.seed;
 
   std::cerr << "[gar_reason] running: policy=" << args.policy

@@ -12,6 +12,7 @@
 #include "gar/engine/agent/executor.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -108,6 +109,13 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
 
   const ScoringContext sctx{&ctx.distances, ctx.table, witness, state};
   std::uint64_t spent = 0;
+  const auto wall_t0 = std::chrono::steady_clock::now();
+  auto wall_exceeded = [&]() {
+    return cfg.wall_limit_sec > 0.0 &&
+           std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                         wall_t0)
+                   .count() >= cfg.wall_limit_sec;
+  };
   const std::size_t kMaxCollected = cfg.open_collect_cap;
   std::unordered_set<std::uint64_t> active;  // recursion cycle guard
   // Target-level failure memo: a target that yields nothing at the current
@@ -299,7 +307,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
     }
     const std::uint64_t local_limit = spent + local_cap;
     auto out_of_budget = [&]() {
-      return spent >= cfg.budget || spent >= local_limit;
+      return spent >= cfg.budget || spent >= local_limit || wall_exceeded();
     };
     if (out_of_budget() || depth > cfg.max_subgoal_depth) return got;
     if (!active.insert(TargetKey(t)).second) return got;  // cycle
@@ -1342,10 +1350,15 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
           got.push_back(p);
         }
       }
-      if (state->journal().size() == j0 || spent >= cfg.budget) break;
+      if (state->journal().size() == j0 || spent >= cfg.budget ||
+          wall_exceeded()) {
+        break;
+      }
     }
     res.goal_derived = !got.empty();
-    res.termination = spent >= cfg.budget ? "budget" : "full_enum_fixpoint";
+    res.termination = wall_exceeded()   ? "timeout"
+                      : spent >= cfg.budget ? "budget"
+                                            : "full_enum_fixpoint";
   } else {
     got = try_target(top, 0, cfg.budget);
     if (!got.empty()) {

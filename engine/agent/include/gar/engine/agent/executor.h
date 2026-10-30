@@ -78,6 +78,17 @@ struct ExecConfig {
   // the graph are skipped (they would burn budget on re-derivations and
   // starve the open-edge fallback). Default off (bit-identical).
   bool backward_full_enum = false;
+  // GreedyExecutor analogue (--forward-full-enum): for open-sided goals,
+  // do not stop at the first goal fact; keep stepping until the candidate
+  // pool is exhausted (fixpoint), the budget, or the wall limit. Default
+  // off (bit-identical).
+  bool forward_full_enum = false;
+  // Wall-clock limit in seconds (0 = off). Checked inside the executor
+  // loops so a wall-limited run still terminates cleanly (termination
+  // "timeout") and writes its partial chain/journal — an external kill
+  // would lose them. Applies to the greedy loop and the backward
+  // full-enum loop.
+  double wall_limit_sec = 0.0;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its
