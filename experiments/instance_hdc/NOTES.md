@@ -23,3 +23,13 @@ vs 精确度数 vs 随机采样（32/128 邻居，无偏+CI）。指标：相对
 
 估计器用于枚举规划（先枚举估计产出高的一侧），默认关闭加 flag，测
 film/协调 goal 的 wall/展开数/命中变化，best_cost 与证书口径不变。
+
+## Step 1 结果记录（2026-10-30）
+
+- 计时插桩：backward_bnb_executor.cpp 的 enumA/enumB/coord/premise/apply
+  只读计数 + 每 64 展开 tick 输出 + done 行分解（保留在代码中，开销可忽略）。
+- film（谓词模式默认）：coord=0ms、apply=0ms、enum≈5ms/展开，其余全为
+  递归子目标（嵌套 premise）→ 判据不达（join 不占主导、扇出不达 70%）→
+  判死，不进 Step 2。
+- award（实例模式）：实例 lb 预检是主要成本（~17s/209 次）但剪掉 830 个
+  候选 → 21s 可解（cost=2）。预检性价比已接近边界。
