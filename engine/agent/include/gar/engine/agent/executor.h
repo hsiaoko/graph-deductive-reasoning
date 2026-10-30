@@ -63,6 +63,21 @@ struct ExecConfig {
   // BackwardExecutor; 8 = legacy default (bit-identical). Raise via
   // --open-collect-cap for full-answer workloads.
   std::uint32_t open_collect_cap = 8;
+  // BackwardExecutor candidate ordering (--backward-order): "score" =
+  // scorer-ranked, deterministic tie-breaks (default, bit-identical);
+  // "random" = seeded full shuffle (scorer ignored for ordering);
+  // "hybrid" = seeded shuffle inside the top-8 score window, score order
+  // beyond it. The seed travels here because ExecConfig is what the
+  // executor sees.
+  std::string backward_order = "score";
+  std::uint64_t seed = 42;
+  // Full-extension mode for open-sided goals (--backward-full-enum): loop
+  // pass1/pass2 scans at the top target until the journal stops growing
+  // (fixpoint) or the budget is exhausted, instead of returning after the
+  // first productive scan. Pass-1 candidates whose conclusion is already in
+  // the graph are skipped (they would burn budget on re-derivations and
+  // starve the open-edge fallback). Default off (bit-identical).
+  bool backward_full_enum = false;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its

@@ -162,6 +162,7 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
     [--policy deterministic|random|hybrid] [--scorer exact|hdc|null] [--hdc-dim 8192] \
     [--executor greedy|bnb|backward] [--direction forward|backward] [--top-k N] [--seed 42] [--max-candidates-per-rule 256] \
     [--bnb-priority utility|hdc-value] [--backward-priority heuristic|hdc-value] [--value-model PATH] [--no-dg] \
+    [--backward-order score|random|hybrid] [--open-collect-cap N] \
     [--alpha 1] [--beta 1] [--gamma 0.5] [--nu 1] [--nu2 0.5] [--tau-hdc 0.15] \
     [--no-confidence] [--out <dir>] [--verify-against-closure] [--print 20]
 ```
@@ -175,6 +176,9 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--executor` | greedy | backward（目标制导反向演绎，主引擎）/ greedy（§5.1 提交式）/ bnb（Figure 6 分支定界） |
 | `--direction` | 不设 | 推理方向开关：不设 = 旧行为（`--executor` 为准，逐字节不变）；`forward` 下 `--executor backward` 互斥报错；`backward` = 反向纪律（`--executor backward` 为完整 DFS+回溯，`--executor greedy` 为退化单路径消融臂——首选即终选、不回溯；`--executor bnb` 报错，留待 Phase 2 的 AND-OR 证书） |
 | `--backward-priority` | heuristic | backward 的 OR 候选（规则尝试）排序：heuristic（tier/open_d/rel_fam/conf，旧行为）/ hdc-value（HDC 价值模型预测失败率，只改排序，需 `--value-model`） |
+| `--backward-order` | score | BackwardExecutor 候选排序：score（打分序，默认逐字节不变）/ random（`--seed` 洗牌，打分不参与排序）/ hybrid（top-8 打分窗口内洗牌，其余按分） |
+| `--open-collect-cap` | 8 | 开放变元 target 单次收集答案数上限；求全外延时调大 |
+| `--backward-full-enum` | 关 | 开放变元 goal 全外延模式：pass1/pass2 扫描循环至 journal 不动点（已知结论跳过、失败备忘录随图增长重准入）；默认关 = 旧行为逐字节不变 |
 | `--bnb-priority` | utility | bnb 优先级来源：utility（原公式）/ hdc-value（HDC 价值模型，需 `--value-model`，只改排序，见 §3.3） |
 | `--value-model PATH` | 无 | HDC 价值模型 meta.txt（train_export.py 导出，配合同名 weights.bin） |
 | `--no-dg` | 关 | 关闭 DG 制导（d(·) 全零：不剪枝、rel_fam 中性、price=w₀）；消融用 |

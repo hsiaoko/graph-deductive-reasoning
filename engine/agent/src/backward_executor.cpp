@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <functional>
 #include <optional>
+#include <random>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -48,6 +49,24 @@ std::uint64_t TargetKey(const Target& t) {
 bool DebugBackward() {
   static const bool on = std::getenv("GAR_DEBUG_BACKWARD") != nullptr;
   return on;
+}
+
+// --backward-order: apply the configured ordering to an index sequence that
+// is already score-sorted. score = keep as is (default); random = seeded
+// full shuffle; hybrid = seeded shuffle of the top-8 window only. The RNG
+// is re-seeded per call site from (seed, salt) so the shuffle is
+// deterministic per run regardless of ordering code paths taken.
+template <typename Index>
+void ApplyBackwardOrder(const ExecConfig& cfg, std::uint64_t salt,
+                        std::vector<Index>* ord) {
+  if (cfg.backward_order == "score" || ord->size() < 2) return;
+  std::mt19937 rng(cfg.seed ^ (salt * 0x9E3779B97F4A7C15ull));
+  if (cfg.backward_order == "random") {
+    std::shuffle(ord->begin(), ord->end(), rng);
+  } else {  // hybrid: shuffle the top-8 window, keep the tail score-sorted
+    const std::size_t w = std::min<std::size_t>(8, ord->size());
+    std::shuffle(ord->begin(), ord->begin() + w, rng);
+  }
 }
 
 }  // namespace
@@ -340,6 +359,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
       }
       return scored[x].motif.embedding < scored[y].motif.embedding;
     });
+    ApplyBackwardOrder(cfg, TargetKey(t) ^ (depth + 1), &ord);
     if (DebugBackward()) {
       std::fprintf(stderr, "[bwd]   pass1 mus=%zu\n", mus.size());
     }
@@ -353,6 +373,17 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
       if (cfg.no_backtrack && !first_cand) break;
       first_cand = false;
       const Motif& mu = scored[oi].motif;
+      if (cfg.backward_full_enum) {
+        // Skip conclusions already in the graph: re-deriving them burns
+        // budget and (worse) keeps `got` non-empty forever, which would
+        // starve the open-edge fallback across outer-loop rounds.
+        const GARule& fr = rules[mu.rule];
+        const RuleHead fh = ResolveRuleHead(fr);
+        if (fh.valid && state->ContainsEdge(fh.slot, mu.embedding[fh.pu],
+                                            mu.embedding[fh.pv])) {
+          continue;
+        }
+      }
       if (auto d = apply_motif(mu.rule, mu.embedding.data(),
                                static_cast<std::uint32_t>(
                                    mu.embedding.size()))) {
@@ -652,6 +683,17 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
                 if (a.oe1 != b.oe1) return a.oe1 < b.oe1;
                 return a.oe2 < b.oe2;
               });
+    {
+      std::vector<std::uint32_t> aord(attempts.size());
+      for (std::uint32_t ai = 0; ai < aord.size(); ++ai) aord[ai] = ai;
+      ApplyBackwardOrder(cfg, TargetKey(t) ^ (depth + 2), &aord);
+      if (cfg.backward_order != "score") {
+        std::vector<OpenAttempt> tmp;
+        tmp.reserve(attempts.size());
+        for (const std::uint32_t ai : aord) tmp.push_back(attempts[ai]);
+        attempts = std::move(tmp);
+      }
+    }
     // Optional HDC value-model re-ordering of the OR candidates
     // (--backward-priority hdc-value): predicted failure probability asc,
     // then the heuristic tuple for determinism. ONLY the attempt order
@@ -1286,13 +1328,33 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
     return res;
   }
   const Target top{goal.slot, goal.args[0], goal.args[1]};
-  const auto got = try_target(top, 0, cfg.budget);
-  if (!got.empty()) {
-    res.goal_derived = true;
-    res.termination = "goal";
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> got;
+  if (cfg.backward_full_enum && (!goal.args[0] || !goal.args[1])) {
+    // Full-extension loop: each round is one try_target scan (pass 1, with
+    // the open-edge fallback when pass 1 finds nothing new). Between rounds
+    // the graph has grown, re-admitting memoized failures and enabling
+    // fresh matches; stop at the journal fixpoint or on budget.
+    std::unordered_set<std::uint64_t> seen;
+    for (;;) {
+      const std::size_t j0 = state->journal().size();
+      for (auto& p : try_target(top, 0, cfg.budget)) {
+        if (seen.insert(graph::PackPair(p.first, p.second)).second) {
+          got.push_back(p);
+        }
+      }
+      if (state->journal().size() == j0 || spent >= cfg.budget) break;
+    }
+    res.goal_derived = !got.empty();
+    res.termination = spent >= cfg.budget ? "budget" : "full_enum_fixpoint";
   } else {
-    res.termination =
-        spent >= cfg.budget ? "budget" : "no_candidates";
+    got = try_target(top, 0, cfg.budget);
+    if (!got.empty()) {
+      res.goal_derived = true;
+      res.termination = "goal";
+    } else {
+      res.termination =
+          spent >= cfg.budget ? "budget" : "no_candidates";
+    }
   }
   res.total_cost = static_cast<double>(spent);
   res.budget_exhausted = spent >= cfg.budget && !res.goal_derived;

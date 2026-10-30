@@ -67,6 +67,12 @@ struct AgentModeArgs {
   // --direction backward --executor bnb).
   std::string backward_bnb_lb = "predicate";  // predicate|instance
   std::string backward_bnb_enum = "eager";    // eager|lazy
+  // BackwardExecutor candidate ordering (policy analogue for backward):
+  // score (default, bit-identical) | random (seeded shuffle) | hybrid
+  // (seeded shuffle inside the top-8 score window).
+  std::string backward_order = "score";
+  // Full-extension mode for open-sided backward goals (loop to fixpoint).
+  bool backward_full_enum = false;
   std::string value_model;
 };
 
@@ -106,6 +112,16 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--backward-priority") a->backward_priority = next();
   else if (k == "--backward-bnb-lb") a->backward_bnb_lb = next();
   else if (k == "--backward-bnb-enum") a->backward_bnb_enum = next();
+  else if (k == "--backward-full-enum") a->backward_full_enum = true;
+  else if (k == "--backward-order") {
+    a->backward_order = next();
+    if (a->backward_order != "score" && a->backward_order != "random" &&
+        a->backward_order != "hybrid") {
+      throw std::invalid_argument("unknown --backward-order: " +
+                                  a->backward_order +
+                                  " (score|random|hybrid)");
+    }
+  }
   else if (k == "--value-model") a->value_model = next();
   else if (k == "--jev-sample") a->jev.sample = true;
   else if (k == "--jev-mock") a->jev_mock = true;
@@ -354,6 +370,9 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   ec.utility_gamma = args.score.gamma;
   ec.backward_bnb_instance_lb = (args.backward_bnb_lb == "instance");
   ec.backward_bnb_lazy_enum = (args.backward_bnb_enum == "lazy");
+  ec.backward_order = args.backward_order;
+  ec.backward_full_enum = args.backward_full_enum;
+  ec.seed = args.seed;
 
   std::cerr << "[gar_reason] running: policy=" << args.policy
             << " scorer=" << args.scorer << " executor=" << args.executor
