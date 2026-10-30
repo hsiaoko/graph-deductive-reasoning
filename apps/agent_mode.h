@@ -44,6 +44,8 @@ struct AgentModeArgs {
   std::uint32_t hdc_dim = gar::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
   std::uint32_t max_candidates_per_rule = 256;
+  // BackwardExecutor open-target collect cap (default 8 = legacy).
+  std::uint32_t open_collect_cap = 8;
   gar::engine::agent::HandcraftedConfig score;
   bool verify_against_closure = false;
   // Ablation: --no-dg removes dependency-graph guidance (d(.) table all
@@ -82,6 +84,8 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->top_k = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--hdc-dim") a->hdc_dim = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--seed") a->seed = std::stoull(next());
+  else if (k == "--open-collect-cap")
+    a->open_collect_cap = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--max-candidates-per-rule")
     a->max_candidates_per_rule = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--alpha") a->score.alpha = std::stod(next());
@@ -340,6 +344,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   agent::ExecConfig ec;
   ec.budget = args.budget;
   ec.match_cap_per_rule = args.max_candidates_per_rule;
+  ec.open_collect_cap = args.open_collect_cap;
   ec.top_k = args.top_k;
   ec.utility_gamma = args.score.gamma;
   ec.backward_bnb_instance_lb = (args.backward_bnb_lb == "instance");

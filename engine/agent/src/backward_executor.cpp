@@ -89,7 +89,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
 
   const ScoringContext sctx{&ctx.distances, ctx.table, witness, state};
   std::uint64_t spent = 0;
-  constexpr std::size_t kMaxCollected = 8;  // distinct facts per open target
+  const std::size_t kMaxCollected = cfg.open_collect_cap;
   std::unordered_set<std::uint64_t> active;  // recursion cycle guard
   // Target-level failure memo: a target that yields nothing at the current
   // fact-set version is not retried from other parents (the repeated
@@ -264,7 +264,7 @@ AgentResult BackwardExecutor::Run(const Goal& goal, AgentState* state,
   // TryTarget: make facts matching `t` hold (derive them if derivable).
   // Returns the (capped) set of (src,dst) pairs now present.
   //   - both sides pinned: present -> {it}; else derive.
-  //   - one side open: derive up to kMaxCollected distinct facts.
+  //   - one side open: derive up to cfg.open_collect_cap distinct facts.
   // local_cap bounds the applications charged INSIDE this call (the budget
   // halves per recursion level): a wandering recursive family (sibling
   // chains) can't drain the shared budget before the right opening is

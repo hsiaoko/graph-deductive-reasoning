@@ -59,6 +59,10 @@ struct ExecConfig {
   // rules are visited in rule_est ascending order and enumeration stops
   // when the next rule's est exceeds the incumbent window).
   bool backward_bnb_lazy_enum = false;
+  // Max distinct facts collected per open-sided (variable) target in
+  // BackwardExecutor; 8 = legacy default (bit-identical). Raise via
+  // --open-collect-cap for full-answer workloads.
+  std::uint32_t open_collect_cap = 8;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its

@@ -403,6 +403,13 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         .first->second.second;
   };
 
+  // Pure timing instrumentation (read-only; semantics untouched).
+  std::uint64_t enumA_ns = 0, enumB_ns = 0, coord_ns = 0, premise_ns = 0,
+              apply_ns = 0;
+  auto now_ns = []() {
+    return std::chrono::duration<double, std::nano>(
+               std::chrono::steady_clock::now().time_since_epoch()).count();
+  };
   std::uint64_t lb_entry_prunes = 0, est_prunes = 0, inf_prunes = 0;
   // Instance-level lb for an open (non-present) target:
   //   INF            no rule can ever derive it (no head rules / predicate
@@ -484,6 +491,14 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
     } guard{active, tk};
 
     ++expansions;
+    if ((expansions & 63) == 0) {
+      std::fprintf(stderr,
+                   "[bwbnb] tick expansions=%llu enumA_ms=%.0f enumB_ms=%.0f "
+                   "coord_ms=%.0f premise_ms=%.0f apply_ms=%.0f\n",
+                   static_cast<unsigned long long>(expansions),
+                   enumA_ns / 1e6, enumB_ns / 1e6, coord_ns / 1e6,
+                   premise_ns / 1e6, apply_ns / 1e6);
+    }
     const std::string& pred_name = g.RelationName(t.slot);
     const auto rit = head_index.find(pred_name);
     if (rit == head_index.end()) {
@@ -559,6 +574,7 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
       };
       // pass A: full pinned match (all pattern edges present in Gamma)
       {
+        const double ta = now_ns();
         const auto spec = build_spec(r);
         std::vector<std::uint32_t> embs;
         bool capped = false;
@@ -568,11 +584,13 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
         for (std::uint64_t k = 0; k < n_emb; ++k) {
           add_cand(embs.data() + k * n);
         }
+        enumA_ns += static_cast<std::uint64_t>(now_ns() - ta);
       }
       // pass B: single opened edge — enumerate the sub-pattern without it
       // (only vertices still covered by remaining edges or pinned are
       // determined; an undetermined endpoint of the opened edge makes the
       // candidate open-ended, out of this certificate's scope — skipped).
+      const double tb = now_ns();
       for (gar::EdgeIndex oe = 0; oe < m_edges; ++oe) {
         if (m_edges == 1) {
           // single-edge rule: both head endpoints pinned determine the
@@ -648,6 +666,7 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           add_cand(emb.data());
         }
       }
+      enumB_ns += static_cast<std::uint64_t>(now_ns() - tb);
       // pass C: two-open coordination (the disjoint-free shape): each opened
       // edge has exactly one goal-pinned endpoint and the free endpoints are
       // different variables; candidate values are present-or-1-level
@@ -655,6 +674,7 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
       // (present in Gamma or 1-level derivable). Each composing pair yields
       // a fully grounded embedding — an ordinary Cand whose opened/middle
       // edges are missing premises searched recursively (DAG cost).
+      const double tc = now_ns();
       for (gar::EdgeIndex e1 = 0; e1 < m_edges; ++e1) {
         for (gar::EdgeIndex e2 = e1 + 1; e2 < m_edges; ++e2) {
           const std::uint32_t s1 = src_of[e1], d1 = r.pattern.indices[e1];
@@ -777,8 +797,10 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
           ok = false;
           break;
         }
+        const double tp = now_ns();
         const FactSetPtr sub =
             search(c.missing[i].first, room, depth + 1);
+        premise_ns += static_cast<std::uint64_t>(now_ns() - tp);
         if (!sub) {
           ok = false;
           break;
@@ -793,8 +815,10 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
       if (!ok) return;
       // premises proven; apply the motif (derives the head fact into Gamma,
       // enriching later candidate spaces)
+      const double tap = now_ns();
       const auto d = apply(c.rule, c.emb.data(),
                            static_cast<std::uint32_t>(c.emb.size()));
+      apply_ns += static_cast<std::uint64_t>(now_ns() - tap);
       if (!d) return;  // static antecedent failure: candidate invalid
       plan.insert(fact_key(d->slot, d->src, d->dst));
       if (!best || plan.size() < best->size()) {
@@ -913,7 +937,9 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
   std::fprintf(stderr,
                "[bwbnb] done: goal=%s cost=%.0f expansions=%llu "
                "derived=%zu space_truncated=%d(1=shape,2=cap) lb_prunes=%llu "
-               "est_prunes=%llu inf_prunes=%llu probes=%llu\n",
+               "est_prunes=%llu inf_prunes=%llu probes=%llu "
+               "enumA_ms=%.0f enumB_ms=%.0f coord_ms=%.0f premise_ms=%.0f "
+               "apply_ms=%.0f\n",
                res.goal_derived ? "true" : "false",
                res.goal_derived && best ? static_cast<double>(best->size())
                                         : -1.0,
@@ -924,7 +950,9 @@ AgentResult BackwardBnBExecutor::Run(const Goal& goal, AgentState* state,
                static_cast<unsigned long long>(lb_entry_prunes),
                static_cast<unsigned long long>(est_prunes),
                static_cast<unsigned long long>(inf_prunes),
-               static_cast<unsigned long long>(probe_calls));
+               static_cast<unsigned long long>(probe_calls),
+               enumA_ns / 1e6, enumB_ns / 1e6, coord_ns / 1e6,
+               premise_ns / 1e6);
   return res;
 }
 
