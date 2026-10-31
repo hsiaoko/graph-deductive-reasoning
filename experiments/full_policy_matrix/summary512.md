@@ -13,8 +13,10 @@ summary）完成。3 个 timeout run（recall@1800s，见下）——超时即�
   depth=64（无 run 触及）、HDC512、hdc-seed=42、random seeds {7,13,42}、
   det/hyb 计时 3 次 median。
 - soundness：**全部 110 run（含 3 个 timeout run）派生 ⊆ GT512
-  fixpoint 闭包，零越界**；precision 全 1.000；无 run 报 cap（
-  fwd_capped_enums 全 0 于 fixpoint 终止处记录）与 depth 截断。
+  fixpoint 闭包，零越界**；precision 全 1.000；depth=64 未触及。
+  **cap 如实记录**：g5 forward deterministic/hybrid 有 delta 枚举触顶
+  （null 各 26 次、exact/HDC 各 10 次），其余已检查 run 为 0；这些 run
+  对完整 GT 的 goal recall 仍为 100%，但不能据此声称整个候选空间无截断。
 - timeout（1800s 墙钟，recall@1800s）：**g5 fwd_hdc_rand_s7 =
   0.663/0.580、s13 = 0.679/0.600、s42 = 0.686/0.608**（all/drecall，
   derived 34,374–36,281）。其余 107 run 全部 fixpoint 终止。
@@ -66,8 +68,10 @@ recall@1800s 计入——预注册口径）
 1. **方向边界随 GT 规模反转被定量坐实**：backward 在 {g1,g2,g3} 保持
    1.000 且派生缩减率 0.997（只推答案所需，macro wall 1.4s）；但 g5
    覆盖率随 GT 增大而坍塌——256 档 0.974/0.955（GT 5,527）→ 512 档
-   **0.470/0.338**（GT 11,464，7 臂逐数一致、非 depth 截断）。**大答
-   案集上 backward 结构性失效，forward 增量引擎在全部规模下完备。**
+   **0.470/0.338**（GT 11,464，7 臂逐数一致、非 depth 截断）。在本实验
+   全部非退化 goal 上，forward 对完整 GT 的答案 recall 均为 100%；g5 的
+   部分 deterministic/hybrid run 有 delta cap 记录，因此这是实测答案完备，
+   不是对整个候选空间的无截断证明。
 2. **policy 只分化搜索成本不分化 recall**（唯一例外见 3）：forward
    random 的 g5 wall 比 det 慢 24×（exact：1114.9s vs 46.6s）至 34×
    （null：339.0s vs 10.1s），最终 fixpoint 与 recall 逐数一致。
