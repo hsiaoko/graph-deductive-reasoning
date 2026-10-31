@@ -173,7 +173,7 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--budget N` | 100 | 单链成本上限（unit cost：一次应用 = 1，成败都计费） |
 | `--policy` | deterministic | argmax / softmax(total/τ)（`--seed` 可复现）/ admissible 硬过滤+argmax / **jev**（LLM 决策模型，§5.3） |
 | `--scorer` | exact | exact（见证前提比例）/ hdc（cos(v_μ,E) 证据向量读数）/ null（消融：无打分，仅保留符号 admissible 过滤，greedy 退化为候选枚举序，bnb 退化为 uniform-cost） |
-| `--executor` | greedy | backward（目标制导反向演绎，主引擎）/ greedy（§5.1 提交式）/ bnb（Figure 6 分支定界） |
+| `--executor` | greedy | backward（目标制导反向演绎，主引擎）/ greedy（增量 forward：policy 前置选规则 + 候选 cache + delta 匹配，§5.1）/ bnb（Figure 6 分支定界） |
 | `--direction` | 不设 | 推理方向开关：不设 = 旧行为（`--executor` 为准，逐字节不变）；`forward` 下 `--executor backward` 互斥报错；`backward` = 反向纪律（`--executor backward` 为完整 DFS+回溯，`--executor greedy` 为退化单路径消融臂——首选即终选、不回溯；`--executor bnb` 报错，留待 Phase 2 的 AND-OR 证书） |
 | `--backward-priority` | heuristic | backward 的 OR 候选（规则尝试）排序：heuristic（tier/open_d/rel_fam/conf，旧行为）/ hdc-value（HDC 价值模型预测失败率，只改排序，需 `--value-model`） |
 | `--backward-order` | score | BackwardExecutor 候选排序：score（打分序，默认逐字节不变）/ random（`--seed` 洗牌，打分不参与排序）/ hybrid（top-8 打分窗口内洗牌，其余按分） |
@@ -203,7 +203,26 @@ summary.yaml 的 `control_overhead{calls, wall_ms, fallbacks}` 记录。HTTP
 输出（`--out`）：`chain.tsv`（每步 rule/embedding/成败/成本/导出事实）、
 `closure_edges.tsv`（与 full 同布局）、`summary.yaml`（goal/derived/成本/
 终止原因/达成 + bnb 的 certified_optimal/certified_no_chain/anytime_fallback/
-utility/expansions）。
+utility/expansions + greedy 的 fwd_* 增量引擎计数：`fwd_rule_selections`
+（policy 规则选择次数）、`fwd_rules_initialized`（首次全量枚举规则数）、
+`fwd_delta_enums`（delta 枚举次数）、`fwd_embeddings_generated`（枚举产出
+embedding 总数）、`fwd_candidates_reused`（cache 复用候选数）、
+`fwd_capped_enums`（触及 match cap 的枚举次数 = 截断明示）、
+`fwd_match_wall_ms`/`fwd_apply_wall_ms`/`fwd_score_wall_ms`（分项耗时））。
+
+**greedy = 增量 forward 引擎**（2026-10-31 起替换了旧的"每步全规则重
+枚举"naive 实现，后者已删除、无回退开关；历史实验
+（experiments/forward_variants、open_full 的 full_matrix fwd_* 行）是
+该已移除实现的结果，仅作基线）：两阶段 policy——先按规则级静态分
+（rel_fam/conf/price，无需 embedding）选规则，只匹配选中的规则；候选
+cache 持久化（首次全量、后续按新事实 delta 增量匹配，pin 住新事实两端
+点枚举含该边的 embedding 并去重合并）；goal 常量只 pin 直接产生 goal
+关系的规则头（不做多跳 Magic Sets）。终止语义：`no_candidates` = 全部
+可达规则已初始化且 cache 在当前 fact version 耗尽（cap 截断空间内的
+fixpoint，截断由 fwd_capped_enums 明示，不声称完备）；`timeout` =
+--wall-limit 到期（部分结果照常落盘）。开发校验：
+`GAR_VERIFY_INCREMENTAL=1` 时每次 delta 合并后对该规则全量重枚举比对
+（不一致即 abort，仅小图/小预算使用）。
 
 **证书语义**：bnb `--top-k 0`（默认）为精确模式——搜索穷尽时
 `certified_optimal=true`（Theorem 5）或 `certified_no_chain=true`（预算不足

@@ -68,7 +68,7 @@
 │       ├── include/gar/engine/agent/
 │       │   ├── reasoning_agent.h     # ReasoningAgent：composition root
 │       │   ├── executor.h            # Executor 基类 + GreedyExecutor + BranchBoundExecutor（HybNS 分支定界）
-│       │   ├── motif_generator.h     # NaiveMotifGenerator（d(p₀)<∞ 硬过滤前置）
+│       │   ├── motif_generator.h     # EnumerateAllCandidates（bnb 专用全候选枚举辅助；d(p₀)<∞ 硬过滤前置）
 │       │   ├── scorer.h              # ExactScorer / HdcScorer（rel_fam/rel_evd/dcost/price）
 │       │   ├── policy.h              # Deterministic / Randomized / HybridNeuroSymbolic
 │       │   ├── state.h               # AgentState（Γ 只增 + version 计数）

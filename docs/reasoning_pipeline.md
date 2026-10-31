@@ -65,8 +65,17 @@ total   = α·(rel_fam + ν·rel_evd + ν₂·conf) − β·dcost
 
 ## 3. Executor 决定"搜索的走法"（三种，可替换）
 
-- **greedy**：沿单条路径走，每轮选分最高的，不回头。快但会被 decoy 带偏。
+- **greedy（增量 forward）**：两阶段 policy——先在规则级用静态分
+  （rel_fam/conf/price，无需 embedding）选一条规则，只匹配它；候选
+  cache 持久化，首次全量枚举、之后按新事实做 delta 匹配（pin 新事实
+  端点、去重合并），派生后只更新引用该 slot 的规则。每步仍只提交一
+  个候选（§5.1 提交式语义不变），但消除了旧的"每步全规则重枚举"
+  （naive 实现已删除；2026-10 前的 greedy 实验数字属该历史实现）。
+  开放变元 goal 可开 `--forward-full-enum` 求 fixpoint 外延（截断由
+  fwd_capped_enums 明示，不声称完备）。
 - **bnb**：保留整棵分支树 + 界限剪枝，能证明最优链。慢、吃内存。
+  （其每分支的全候选展开用 EnumerateAllCandidates——这是证书语义
+  所需，与 greedy 的增量路径无关。）
 - **backward（主引擎）**：不建前向树，从 goal 反向分解。
 
 ## 4. Backward 的实际算法流程（主引擎）
@@ -108,7 +117,7 @@ total   = α·(rel_fam + ν·rel_evd + ν₂·conf) − β·dcost
 `--executor` 为准、逐字节不变）。映射：`--executor backward` ≡
 `--direction backward` 的完整纪律（现有 BackwardExecutor，DFS+回溯）；
 `--direction backward --executor greedy` = 退化单路径消融臂（OR 只试首选、
-无 pass-2 回退）；`--direction forward` 下 greedy/bnb 完全走旧代码路径。
+无 pass-2 回退）；`--direction forward` 下 greedy = 增量引擎、bnb 照旧。
 冲突报错：`forward`+`backward` 互斥。`--direction backward --executor bnb`
 = Phase 2 的 AND-OR 分支定界最优链（**experimental**：证书覆盖
 pinned+接地子目标空间，开放端点协调形态除外，见

@@ -12,7 +12,8 @@ L4  apps/        kg_loader / match_pattern / mine_predicates / deduce /
                   │
 L3  engine/      deduction/（DeductionEngine 基类 + CpuChaseEngine +
                  GpuDeduceEngine）   agent/（ReasoningAgent + Executor
-                 （greedy/bnb/backward）+ Scorer/Policy/MotifGenerator 插件
+                 （greedy=增量 forward：policy 前置规则选择 + 持久候选
+                 cache + delta 匹配 / bnb / backward）+ Scorer/Policy 插件
                  + ValueModel（HDC 价值模型，bnb 可选排序，见
                  docs/hdc_value_model.md））
         miner/（ChainMiner / PatternMiner）
