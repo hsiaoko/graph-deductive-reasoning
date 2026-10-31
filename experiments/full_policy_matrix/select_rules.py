@@ -5,7 +5,11 @@ Reads every rule dir's rule.yaml + csr_edge_labels.bin under RULES_ROOT,
 builds the predicate DG (body label -> consequent label), and emits
 manifest.tsv + a rules64/ symlink directory.
 
-Usage: select_rules.py <rules_root> <out_dir>
+Usage: select_rules.py <rules_root> <out_dir> [N=64]
+
+N is the loop bound of the pre-registered deterministic algorithm; because
+selection order does not depend on N, the first M entries of the N-list are
+exactly the N-list of a smaller M (prefix nesting, verified by the caller).
 """
 import os, re, struct, sys
 from collections import defaultdict
@@ -40,7 +44,7 @@ def parse_rule(d):
     rid = re.search(r'id:\s*(\S+)', y).group(1)
     return rid, head, body, conf, supp
 
-def main(root, out):
+def main(root, out, n_max=64):
     rules = []
     for d in sorted(os.listdir(root)):
         if d.startswith('gar_'):
@@ -81,10 +85,10 @@ def main(root, out):
         reach = reaches(g)
         pools.append(sorted([r for r in rules if r[1] in reach and r[0] not in S], key=key))
     idx = [0]*5
-    while len(L) < 64:
+    while len(L) < n_max:
         progressed = False
         for k in range(5):
-            if len(L) >= 64: break
+            if len(L) >= n_max: break
             while idx[k] < len(pools[k]) and pools[k][idx[k]][0] in S:
                 idx[k] += 1
             if idx[k] < len(pools[k]):
@@ -93,9 +97,9 @@ def main(root, out):
                 progressed = True
         if not progressed: break
     os.makedirs(out, exist_ok=True)
-    rdir = os.path.join(out, 'rules64')
+    rdir = os.path.join(out, f'rules{n_max}')
     os.makedirs(rdir, exist_ok=True)
-    with open(os.path.join(out, 'manifest.tsv'), 'w') as f:
+    with open(os.path.join(out, f'manifest{n_max}.tsv'), 'w') as f:
         f.write('order\trule_id\thead\tselected_reason\tconfidence\tsupport\n')
         for i, r in enumerate(L):
             f.write(f'{i+1}\t{r[0]}\t{r[1]}\t{reason[r[0]]}\t{r[3]}\t{r[4]}\n')
@@ -103,11 +107,12 @@ def main(root, out):
             if not os.path.exists(link):
                 os.symlink(os.path.join(root, r[0]), link)
     print(f'selected {len(L)} rules -> {rdir}; head picks = {sum(1 for r in L if reason[r[0]].startswith("head"))}')
-    # head coverage check per goal
+    # head coverage check per goal (64 and 32 prefixes, and N)
     for k, g in enumerate(GOALS, 1):
         n = sum(1 for r in L if r[1] == g)
+        n64 = sum(1 for r in L[:64] if r[1] == g)
         n32 = sum(1 for r in L[:32] if r[1] == g)
-        print(f'goal{k}: direct-heads in 64={n}, in first-32={n32}')
+        print(f'goal{k}: direct-heads in {n_max}={n}, first-64={n64}, first-32={n32}')
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 64)
