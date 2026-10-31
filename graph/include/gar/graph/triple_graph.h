@@ -101,14 +101,24 @@ class TripleGraph {
 
   // All out-edges of v across every slot, as parallel (dst, slot) slices
   // sorted by dst — one binary search finds the slots between v and any w.
+  // The unified adjacency is LAZY: single-edge AddEdges (the agent's
+  // per-derivation path) only updates the per-slot pair arrays/hashes and
+  // defers the rebuild to the first unified-adjacency read, so every read
+  // here always sees the latest edges. AddEdgesBatch (the chase's per-round
+  // bulk merge) rebuilds eagerly, exactly once per round as before.
+  // Mutation-while-reading was never supported and stays unsupported:
+  // writers run outside parallel read sections in every caller.
   [[nodiscard]] std::pair<std::size_t, std::size_t> OutEdgeRange(
       std::uint32_t v) const {
+    EnsureOutAdjacency();
     return {all_out_offsets_[v], all_out_offsets_[v + 1]};
   }
   [[nodiscard]] const std::uint32_t* OutEdgeDsts() const {
+    EnsureOutAdjacency();
     return all_out_dsts_.data();
   }
   [[nodiscard]] const std::uint32_t* OutEdgeSlots() const {
+    EnsureOutAdjacency();
     return all_out_slots_.data();
   }
 
@@ -131,9 +141,11 @@ class TripleGraph {
 
   // Adds edges (src, dst) to relation slot `slot`, mirroring each into the
   // inverse slot when the graph was built with inverses. Existing edges are
-  // skipped; the unified out-adjacency is rebuilt when anything changed.
-  // Returns the number of genuinely new edges. Used by the chase (logical
-  // closure): derived facts become matchable in subsequent rounds.
+  // skipped. The per-slot pair arrays and hash sets are updated immediately;
+  // the unified out-adjacency is only marked dirty and rebuilt lazily on the
+  // next unified-adjacency read (OutEdgeRange/OutEdgeDsts/OutEdgeSlots/
+  // CountHeads) — per-derivation full-graph rebuilds were the agent's
+  // dominant index cost. Returns the number of genuinely new edges.
   std::uint64_t AddEdges(
       std::uint32_t slot,
       const std::vector<std::pair<std::uint32_t, std::uint32_t>>& edges);
@@ -193,6 +205,21 @@ class TripleGraph {
 
   // Rebuilds all_out_* from rel_pairs_ (after bulk edge insertion).
   void RebuildOutAdjacency();
+  // Shared merge core of AddEdges/AddEdgesBatch: updates rel_pairs_ and
+  // rel_pair_sets_ (both slots' mirrors), returns the new-edge count.
+  // Does NOT touch the unified out-adjacency (caller's contract).
+  std::uint64_t MergeEdges(
+      const std::unordered_map<
+          std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
+          by_slot);
+  // Lazily rebuilds the unified out-adjacency when a single-slot AddEdges
+  // marked it dirty. Called by every unified-adjacency accessor.
+  void EnsureOutAdjacency() const {
+    if (out_dirty_) {
+      const_cast<TripleGraph*>(this)->RebuildOutAdjacency();
+      out_dirty_ = false;
+    }
+  }
 
   std::uint32_t num_entities_ = 0;
   std::uint32_t num_relations_ = 0;  // base relations, excluding inverses
@@ -206,9 +233,12 @@ class TripleGraph {
   std::vector<std::unordered_set<std::uint64_t>> rel_pair_sets_;
 
   // Unified out-adjacency across all slots, sorted by dst per vertex.
+  // Lazily rebuilt: `out_dirty_` is set by single-slot AddEdges and cleared
+  // by EnsureOutAdjacency/RebuildOutAdjacency.
   std::vector<std::uint32_t> all_out_offsets_;  // n+1
   std::vector<std::uint32_t> all_out_dsts_;
   std::vector<std::uint32_t> all_out_slots_;
+  mutable bool out_dirty_ = false;
 
   // Optional vertex labels (size == num_entities when loaded).
   std::vector<std::uint32_t> vertex_labels_;

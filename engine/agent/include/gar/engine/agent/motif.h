@@ -41,6 +41,19 @@ struct ScoredMotif {
   std::uint32_t premises_witnessed = 0;
 };
 
+// Rule-level static score (embedding-independent), the policy-first half
+// of the incremental greedy: the policy picks a RULE before any matching
+// happens, so the rule score may only use terms that do not need an
+// embedding — rel_fam, confidence, and the completion price. rel_evd and
+// dcost stay motif-level (computed after matching, inside the rule).
+struct ScoredRule {
+  std::uint32_t rule = 0;
+  double rel_fam = 0.0;   // gamma^{sum_q d(q)} over distinct predicates
+  double confidence = 0.0;
+  double price = 0.0;     // w0 + d(p0) (§3.4)
+  double priority = 0.0;  // alpha*(rel_fam + nu2*conf) — the ordering key
+};
+
 // Rule head resolution, identical to the chase (cpu_chase_engine.cpp): the
 // slot comes from the consequent's edge label; the grounded endpoints are
 // the consequent's (src, dst), overridden by `pivot` when it has size 2.

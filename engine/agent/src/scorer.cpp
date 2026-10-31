@@ -88,6 +88,22 @@ double Total(const HandcraftedConfig& cfg, double confidence,
   return cfg.alpha * sm->rel - cfg.beta * sm->dcost;
 }
 
+// Rule-level static score (ScoredRule): rel_fam + confidence + price, with
+// priority = alpha * (rel_fam + nu2 * conf) — the embedding-independent
+// part of the handcrafted score. Shared by ExactScorer and HdcScorer (HDC
+// evidence is embedding-level only).
+void FillScoredRule(const HandcraftedConfig& cfg, const CostModel& cost,
+                    const GARule& rule, const ScoringContext& ctx,
+                    ScoredRule* out) {
+  out->rel_fam = RelFam(rule, ctx, cfg.gamma);
+  out->confidence = cfg.use_confidence ? rule.quality.confidence : 0.0;
+  const std::uint32_t dp0 = HeadDistance(rule, ctx);
+  out->price = dp0 == analysis::kUnreachable
+                   ? std::numeric_limits<double>::infinity()
+                   : cost.RuleLowerBound(rule) + dp0;
+  out->priority = cfg.alpha * (out->rel_fam + cfg.nu2 * out->confidence);
+}
+
 }  // namespace
 
 void NullScorer::Score(const GARule& rule, const Motif& mu,
@@ -99,6 +115,16 @@ void NullScorer::Score(const GARule& rule, const Motif& mu,
       head.valid && dp0 != analysis::kUnreachable &&
       !ctx.state->ContainsEdge(head.slot, mu.embedding[head.pu],
                                mu.embedding[head.pv]);
+}
+
+void ExactScorer::ScoreRule(const GARule& rule, const ScoringContext& ctx,
+                            ScoredRule* out) const {
+  FillScoredRule(cfg_, *cost_, rule, ctx, out);
+}
+
+void HdcScorer::ScoreRule(const GARule& rule, const ScoringContext& ctx,
+                          ScoredRule* out) const {
+  FillScoredRule(cfg_, *cost_, rule, ctx, out);
 }
 
 void ExactScorer::Score(const GARule& rule, const Motif& mu,

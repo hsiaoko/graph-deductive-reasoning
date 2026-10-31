@@ -41,8 +41,13 @@ std::uint64_t FactPredicateSymbol(const Fact& f, const graph::TripleGraph& g,
 
 class WitnessLog {
  public:
+  // `use_hdc` gates the HDC evidence accumulation: ExactScorer/NullScorer
+  // never read the evidence vector, so maintaining the 8192-dim bundle for
+  // them is pure cost. The exact set is always maintained (ExactScorer's
+  // witnessed-premise share and failure accounting read it). HdcScorer
+  // passes true and gets bit-identical HDC numerics.
   WitnessLog(std::uint32_t hdc_dim, const graph::TripleGraph* g,
-             const analysis::PredicateTable* table);
+             const analysis::PredicateTable* table, bool use_hdc = true);
 
   void WitnessFact(const Fact& f, const hdc::HdcEncoder& enc);
 
@@ -71,6 +76,7 @@ class WitnessLog {
   std::uint64_t count_ = 0;
   const graph::TripleGraph* g_;
   const analysis::PredicateTable* table_;
+  bool use_hdc_ = true;
 };
 
 }  // namespace agent

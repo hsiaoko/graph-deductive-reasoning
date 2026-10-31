@@ -15,7 +15,6 @@
 #include "gar/engine/agent/failure_registry.h"
 #include "gar/engine/agent/goal.h"
 #include "gar/engine/agent/motif.h"
-#include "gar/engine/agent/motif_generator.h"
 #include "gar/engine/agent/policy.h"
 #include "gar/engine/agent/scorer.h"
 #include "gar/engine/agent/state.h"
@@ -95,7 +94,6 @@ struct ExecConfig {
 // injected components.
 class ValueModel;
 struct ExecKit {
-  const MotifGenerator* generator;
   const Scorer* scorer;
   Policy* policy;
   const CostModel* cost_model;
@@ -118,12 +116,30 @@ struct AgentResult {
   bool goal_derived = false;
   bool budget_exhausted = false;
   std::string termination;  // "goal" | "no_candidates" | "budget" |
-                            // "goal_already_in_graph" | "anytime_fallback"
+                            // "goal_already_in_graph" | "anytime_fallback" |
+                            // "timeout" | "full_enum_fixpoint"
   // Branch-and-bound certificates (greedy leaves all of these false):
   bool certified_optimal = false;    // top_k==0 and search exhausted (Thm 5)
   bool certified_no_chain = false;   // top_k==0, no chain fits the budget
   bool anytime_fallback = false;     // returned chain is the line-14 fallback
   std::uint64_t expansions = 0;      // branches actually expanded (bnb)
+
+  // Incremental-greedy instrumentation (only set by GreedyExecutor):
+  // rule selections by the policy, first-time full enumerations, delta
+  // enumerations, raw embeddings generated, candidates served from cache,
+  // capped enumerations, and the match/apply/score wall-clock split.
+  struct ForwardStats {
+    std::uint64_t rule_selections = 0;
+    std::uint64_t rules_initialized = 0;
+    std::uint64_t delta_enums = 0;
+    std::uint64_t embeddings_generated = 0;
+    std::uint64_t candidates_reused = 0;
+    std::uint64_t capped_enums = 0;
+    double match_wall_ms = 0.0;
+    double apply_wall_ms = 0.0;
+    double score_wall_ms = 0.0;
+  };
+  std::optional<ForwardStats> fwd_stats;
 };
 
 class Executor {

@@ -20,7 +20,6 @@
 #include "full_deduce_cli.h"  // FullDeduceArgs + loaders + closure_output.h
 #include "gar/analysis/dependency_graph.h"
 #include "gar/engine/agent/executor.h"
-#include "gar/engine/agent/motif_generator.h"
 #include "gar/engine/agent/reasoning_agent.h"
 #include "gar/engine/deduction/cpu_chase_engine.h"
 #include "gar/engine/agent/value_model.h"
@@ -232,7 +231,6 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
   } else {
     comps.policy = std::make_unique<agent::DeterministicPolicy>();
   }
-  comps.generator = std::make_unique<agent::NaiveMotifGenerator>();
   // --direction resolution (unset = legacy --executor behaviour).
   std::string executor = args.executor;
   bool backward_no_backtrack = false;
@@ -408,6 +406,18 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << " derived=" << res.derived.size() << " cost=" << res.total_cost
             << " goal_derived=" << (res.goal_derived ? "true" : "false")
             << " termination=" << res.termination << " wall=" << wall << "s\n";
+  if (res.fwd_stats) {
+    std::cerr << "[gar_reason] forward-incremental: rule_selections="
+              << res.fwd_stats->rule_selections
+              << " rules_initialized=" << res.fwd_stats->rules_initialized
+              << " delta_enums=" << res.fwd_stats->delta_enums
+              << " embeddings=" << res.fwd_stats->embeddings_generated
+              << " reused=" << res.fwd_stats->candidates_reused
+              << " capped=" << res.fwd_stats->capped_enums
+              << " match_ms=" << res.fwd_stats->match_wall_ms
+              << " apply_ms=" << res.fwd_stats->apply_wall_ms
+              << " score_ms=" << res.fwd_stats->score_wall_ms << "\n";
+  }
 
   // ---- optional soundness cross-check against the full closure (L4
   // composition: the agent library itself never sees engine::deduction) ----
@@ -484,6 +494,21 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << (res.certified_no_chain ? "true" : "false") << "\n"
       << "anytime_fallback: " << (res.anytime_fallback ? "true" : "false")
       << "\n";
+    if (res.fwd_stats) {
+      // Incremental-greedy instrumentation (flat fields).
+      f << "fwd_rule_selections: " << res.fwd_stats->rule_selections << "\n"
+        << "fwd_rules_initialized: " << res.fwd_stats->rules_initialized
+        << "\n"
+        << "fwd_delta_enums: " << res.fwd_stats->delta_enums << "\n"
+        << "fwd_embeddings_generated: " << res.fwd_stats->embeddings_generated
+        << "\n"
+        << "fwd_candidates_reused: " << res.fwd_stats->candidates_reused
+        << "\n"
+        << "fwd_capped_enums: " << res.fwd_stats->capped_enums << "\n"
+        << "fwd_match_wall_ms: " << res.fwd_stats->match_wall_ms << "\n"
+        << "fwd_apply_wall_ms: " << res.fwd_stats->apply_wall_ms << "\n"
+        << "fwd_score_wall_ms: " << res.fwd_stats->score_wall_ms << "\n";
+    }
     if (jev != nullptr) {
       // §5.3: decision-model calls are control overhead — wall-clock, not
       // charged to the budget.

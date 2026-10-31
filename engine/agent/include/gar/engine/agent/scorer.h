@@ -73,6 +73,16 @@ class Scorer {
       Score(rules[mu.rule], mu, ctx, &out->back());
     }
   }
+  // Rule-level static score (see ScoredRule): the incremental greedy's
+  // policy-first selection ranks rules before any matching. Exact and HDC
+  // share the same symbolic static terms (the HDC readout is
+  // embedding-level evidence only); the null scorer emits zero guidance.
+  // out->rule is NOT set (the caller knows the index).
+  virtual void ScoreRule(const GARule& rule, const ScoringContext& ctx,
+                         ScoredRule* out) const = 0;
+  // Whether the scorer reads the witness's HDC evidence vector (only the
+  // HDC scorer does; exact/null skip the 8192-dim bundle maintenance).
+  virtual bool NeedsHdcWitness() const { return false; }
 };
 
 class ExactScorer final : public Scorer {
@@ -82,6 +92,9 @@ class ExactScorer final : public Scorer {
 
   void Score(const GARule& rule, const Motif& mu, const ScoringContext& ctx,
              ScoredMotif* out) const override;
+
+  void ScoreRule(const GARule& rule, const ScoringContext& ctx,
+                 ScoredRule* out) const override;
 
  private:
   HandcraftedConfig cfg_;
@@ -100,6 +113,13 @@ class NullScorer final : public Scorer {
 
   void Score(const GARule& rule, const Motif& mu, const ScoringContext& ctx,
              ScoredMotif* out) const override;
+
+  void ScoreRule(const GARule& rule, const ScoringContext& ctx,
+                 ScoredRule* out) const override {
+    (void)rule;
+    (void)ctx;
+    (void)out;  // all zeros: rule order falls back to rule index
+  }
 };
 
 class HdcScorer final : public Scorer {
@@ -110,6 +130,11 @@ class HdcScorer final : public Scorer {
 
   void Score(const GARule& rule, const Motif& mu, const ScoringContext& ctx,
              ScoredMotif* out) const override;
+
+  void ScoreRule(const GARule& rule, const ScoringContext& ctx,
+                 ScoredRule* out) const override;
+
+  bool NeedsHdcWitness() const override { return true; }
 
  private:
   // Fact-vector memo key: EncodeFact is a pure function of (pred symbol,

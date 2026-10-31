@@ -32,6 +32,22 @@ class Policy {
   // then terminates with "no_candidates").
   [[nodiscard]] virtual std::optional<std::size_t> Select(
       const std::vector<ScoredMotif>& cands) = 0;
+  // Rule-level selection (incremental greedy, policy-first): picks an
+  // index into `rules`, or nullopt to decline. Default: argmax of the
+  // static priority, ties to the lower index — the deterministic order.
+  // The symbolic reachability constraint is applied BEFORE this call (the
+  // caller only passes DG-reachable rules), so the hybrid policy shares
+  // this default; JevPolicy keeps the deterministic fallback at rule
+  // level (the Jev protocol stays motif-level).
+  [[nodiscard]] virtual std::optional<std::size_t> SelectRule(
+      const std::vector<ScoredRule>& rules) {
+    if (rules.empty()) return std::nullopt;
+    std::size_t best = 0;
+    for (std::size_t i = 1; i < rules.size(); ++i) {
+      if (rules[i].priority > rules[best].priority) best = i;
+    }
+    return best;
+  }
   virtual void OnApplication(const Motif& mu, bool success, double cost) {
     (void)mu;
     (void)success;
@@ -81,6 +97,28 @@ class RandomizedPolicy final : public Policy {
       if (pick < acc) return i;
     }
     return cands.size() - 1;
+  }
+
+  // Rule level: softmax over the static priority with the same tau/stream.
+  std::optional<std::size_t> SelectRule(
+      const std::vector<ScoredRule>& rules) override {
+    if (rules.empty()) return std::nullopt;
+    double mx = rules[0].priority;
+    for (const auto& r : rules) mx = std::max(mx, r.priority);
+    std::vector<double> w(rules.size());
+    double sum = 0.0;
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+      w[i] = std::exp((rules[i].priority - mx) / tau_);
+      sum += w[i];
+    }
+    std::uniform_real_distribution<double> u(0.0, sum);
+    const double pick = u(rng_);
+    double acc = 0.0;
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+      acc += w[i];
+      if (pick < acc) return i;
+    }
+    return rules.size() - 1;
   }
 
  private:

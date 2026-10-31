@@ -112,17 +112,12 @@ std::uint64_t PatternMatcher::Enumerate(
     if (back_edges[i].empty()) return 0;
   }
 
-  // has_edge(src, dst, slot) via the unified out-adjacency (sorted by dst).
+  // has_edge(src, dst, slot): O(1) point query on the slot's hash set
+  // (always current — updated synchronously by AddEdges/AddEdgesBatch,
+  // unlike the lazily rebuilt unified adjacency).
   auto has_edge = [&](std::uint32_t src, std::uint32_t dst,
                       std::uint32_t slot) {
-    const auto [b, e] = g_.OutEdgeRange(src);
-    const std::uint32_t* dsts = g_.OutEdgeDsts();
-    const std::uint32_t* slots = g_.OutEdgeSlots();
-    auto lo = std::lower_bound(dsts + b, dsts + e, dst);
-    for (auto it = lo; it != dsts + e && *it == dst; ++it) {
-      if (slots[it - dsts] == slot) return true;
-    }
-    return false;
+    return g_.RelationPairSet(slot).count(PackPair(src, dst)) != 0;
   };
 
   std::vector<std::uint32_t> emb(n, 0);

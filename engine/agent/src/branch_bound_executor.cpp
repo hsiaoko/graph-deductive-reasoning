@@ -10,6 +10,7 @@
 #include <sys/resource.h>
 
 #include "apply_helpers.h"
+#include "gar/engine/agent/motif_generator.h"
 #include "gar/graph/predicate_evaluator.h"
 #include "gar/engine/agent/value_model.h"
 
@@ -79,8 +80,8 @@ bool EvaluateBranch(Branch& b, const AgentContext& ctx,
                     const ExecConfig& cfg, const ExecKit& kit,
                     double best_cost) {
   std::vector<Motif> mus;
-  kit.generator->Candidates(*b.state, ctx.distances, *ctx.table,
-                            cfg.match_cap_per_rule, b.failures, &mus);
+  EnumerateAllCandidates(*b.state, ctx.distances, *ctx.table,
+                         cfg.match_cap_per_rule, b.failures, &mus);
   if (mus.empty()) {
     if (DebugBnb()) {
       std::fprintf(stderr, "[bnbl] discard %llu\n",

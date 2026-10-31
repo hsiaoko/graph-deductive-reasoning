@@ -17,13 +17,8 @@ namespace {
 
 bool HasEdge(const TripleGraph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
-  const auto [b, e] = g.OutEdgeRange(s);
-  const std::uint32_t* dsts = g.OutEdgeDsts();
-  auto lo = std::lower_bound(dsts + b, dsts + e, d);
-  for (auto it = lo; it != dsts + e && *it == d; ++it) {
-    if (g.OutEdgeSlots()[it - dsts] == slot) return true;
-  }
-  return false;
+  // O(1) hash point query; always reflects the latest edges.
+  return g.RelationPairSet(slot).count(PackPair(s, d)) != 0;
 }
 
 }  // namespace

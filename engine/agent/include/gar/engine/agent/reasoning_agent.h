@@ -2,7 +2,7 @@
 
 // ReasoningAgent: policy-guided deduction (paper §3-§5). This is the
 // COMPOSITION ROOT of the agent engine: it owns the injected pluggable
-// components (generator / scorer / policy / executor / cost model), holds
+// components (scorer / policy / executor / cost model), holds
 // the dependency graph of the rule set, and per Run computes the goal's
 // d(.) table and wires the chain-level witness + failure registry.
 //
@@ -25,7 +25,6 @@ namespace agent {
 class ReasoningAgent {
  public:
   struct Components {
-    std::unique_ptr<MotifGenerator> generator;
     std::unique_ptr<Scorer> scorer;
     std::unique_ptr<Policy> policy;
     std::unique_ptr<Executor> executor;
@@ -66,11 +65,11 @@ class ReasoningAgent {
       ctx.distances.assign(dg_->NumPredicates(), 0);
     }
 
-    WitnessLog witness(encoder_.dim(), &state->graph(), ctx.table);
+    WitnessLog witness(encoder_.dim(), &state->graph(), ctx.table,
+                       comps_.scorer->NeedsHdcWitness());
     FailureRegistry failures;
-    const ExecKit kit{comps_.generator.get(), comps_.scorer.get(),
-                      comps_.policy.get(), comps_.cost_model.get(),
-                      comps_.value_model.get()};
+    const ExecKit kit{comps_.scorer.get(), comps_.policy.get(),
+                      comps_.cost_model.get(), comps_.value_model.get()};
     ExecConfig cfg2 = cfg;
     cfg2.no_backtrack = comps_.backward_no_backtrack;
     return comps_.executor->Run(goal, state, &witness, &failures, ctx, cfg2,

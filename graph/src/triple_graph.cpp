@@ -99,6 +99,7 @@ TripleGraph TripleGraph::Build(std::vector<std::string> entity_names,
 }
 
 void TripleGraph::RebuildOutAdjacency() {
+  out_dirty_ = false;
   const std::uint32_t slots = static_cast<std::uint32_t>(rel_pairs_.size());
   all_out_offsets_.assign(num_entities_ + 1, 0);
   for (std::uint32_t r = 0; r < slots; ++r) {
@@ -141,10 +142,25 @@ void TripleGraph::RebuildOutAdjacency() {
 std::uint64_t TripleGraph::AddEdges(
     std::uint32_t slot,
     const std::vector<std::pair<std::uint32_t, std::uint32_t>>& edges) {
-  return AddEdgesBatch({{slot, edges}});
+  // Agent per-derivation path: merge now, defer the unified-adjacency
+  // rebuild to the next unified-adjacency read (see header).
+  const std::uint64_t added = MergeEdges({{slot, edges}});
+  if (added > 0) out_dirty_ = true;
+  return added;
 }
 
 std::uint64_t TripleGraph::AddEdgesBatch(
+    const std::unordered_map<
+        std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
+        by_slot) {
+  // Bulk path (chase rounds, workload construction): one eager rebuild, so
+  // the unified adjacency is guaranteed fresh before any parallel reads.
+  const std::uint64_t added = MergeEdges(by_slot);
+  if (added > 0) RebuildOutAdjacency();
+  return added;
+}
+
+std::uint64_t TripleGraph::MergeEdges(
     const std::unordered_map<
         std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
         by_slot) {
@@ -188,7 +204,6 @@ std::uint64_t TripleGraph::AddEdgesBatch(
     if (slot < num_relations_) num_edges_ += fresh.size();
     added += fresh.size();
   }
-  if (added > 0) RebuildOutAdjacency();
   return added;
 }
 

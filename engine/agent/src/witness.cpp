@@ -19,8 +19,12 @@ std::uint64_t Fnv1a64(const std::string& s) {
 }  // namespace
 
 WitnessLog::WitnessLog(std::uint32_t hdc_dim, const graph::TripleGraph* g,
-                       const analysis::PredicateTable* table)
-    : hdc_ev_(hdc_dim), packed_cache_(hdc_dim), g_(g), table_(table) {}
+                       const analysis::PredicateTable* table, bool use_hdc)
+    : hdc_ev_(hdc_dim),
+      packed_cache_(hdc_dim),
+      g_(g),
+      table_(table),
+      use_hdc_(use_hdc) {}
 
 std::uint64_t FactPredicateSymbol(const Fact& f, const graph::TripleGraph& g,
                                   const analysis::PredicateTable& table) {
@@ -33,10 +37,12 @@ std::uint64_t FactPredicateSymbol(const Fact& f, const graph::TripleGraph& g,
 
 void WitnessLog::WitnessFact(const Fact& f, const hdc::HdcEncoder& enc) {
   exact_.insert(KeyOf(f));
-  const std::uint64_t args[2] = {f.args[0], f.args[1]};
-  hdc_ev_.Witness(
-      enc.EncodeFact(FactPredicateSymbol(f, *g_, *table_), args, f.arity));
-  packed_dirty_ = true;
+  if (use_hdc_) {
+    const std::uint64_t args[2] = {f.args[0], f.args[1]};
+    hdc_ev_.Witness(
+        enc.EncodeFact(FactPredicateSymbol(f, *g_, *table_), args, f.arity));
+    packed_dirty_ = true;
+  }
   ++count_;
 }
 
