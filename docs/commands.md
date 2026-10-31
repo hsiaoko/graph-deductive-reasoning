@@ -160,7 +160,7 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 ./build/bin/gar_reason --mode agent --csr <immutable_csr_dir> --rules <rules_root> \
     --goal 'rel_name(src,dst)' --budget 30 \
     [--policy deterministic|random|hybrid] [--scorer exact|hdc|null] [--hdc-dim 8192] \
-    [--executor greedy|bnb|backward] [--direction forward|backward] [--top-k N] [--seed 42] [--max-candidates-per-rule 256] \
+    [--executor greedy|bnb|backward] [--direction forward|backward] [--top-k N] [--seed 42] [--policy-seed N] [--hdc-seed N] [--max-subgoal-depth N] [--max-candidates-per-rule 256] \
     [--bnb-priority utility|hdc-value] [--backward-priority heuristic|hdc-value] [--value-model PATH] [--no-dg] \
     [--backward-order score|random|hybrid] [--open-collect-cap N] \
     [--alpha 1] [--beta 1] [--gamma 0.5] [--nu 1] [--nu2 0.5] [--tau-hdc 0.15] \
@@ -172,6 +172,8 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--goal 'rel(s,d)'` | 必填 | 目标事实；实体名，`_` = 开放变元 |
 | `--budget N` | 100 | 单链成本上限（unit cost：一次应用 = 1，成败都计费） |
 | `--policy` | deterministic | argmax / softmax(total/τ)（`--seed` 可复现）/ admissible 硬过滤+argmax / **jev**（LLM 决策模型，§5.3） |
+| `--policy-seed` / `--hdc-seed` | 回退 `--seed` | 种子解耦：policy 侧 RNG（random policy、backward-order 洗牌、jev mock）用 policy-seed；HDC encoder 用 hdc-seed；缺省均回退 --seed（旧行为逐字节不变）。summary.yaml 记录三者 |
+| `--max-subgoal-depth` | 4 | backward/backward-bnb 子目标递归深度上限（默认 4 保持旧命令不变） |
 | `--scorer` | exact | exact（见证前提比例）/ hdc（cos(v_μ,E) 证据向量读数）/ null（消融：无打分，仅保留符号 admissible 过滤，greedy 退化为候选枚举序，bnb 退化为 uniform-cost） |
 | `--executor` | greedy | backward（目标制导反向演绎，主引擎）/ greedy（增量 forward：policy 前置选规则 + 候选 cache + delta 匹配，§5.1）/ bnb（Figure 6 分支定界） |
 | `--direction` | 不设 | 推理方向开关：不设 = 旧行为（`--executor` 为准，逐字节不变）；`forward` 下 `--executor backward` 互斥报错；`backward` = 反向纪律（`--executor backward` 为完整 DFS+回溯，`--executor greedy` 为退化单路径消融臂——首选即终选、不回溯；`--executor bnb` 报错，留待 Phase 2 的 AND-OR 证书） |
