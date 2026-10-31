@@ -221,7 +221,7 @@ cache 持久化（首次全量、后续按新事实 delta 增量匹配，pin 住
 可达规则已初始化且 cache 在当前 fact version 耗尽（cap 截断空间内的
 fixpoint，截断由 fwd_capped_enums 明示，不声称完备）；`timeout` =
 --wall-limit 到期（部分结果照常落盘）。开发校验：
-`GAR_VERIFY_INCREMENTAL=1` 时每次 delta 合并后对该规则全量重枚举比对
+`GAR_VERIFY_INCREMENTAL=1` 时每次 delta 合并后对全部触及规则逐一全量重枚举比对
 （不一致即 abort，仅小图/小预算使用）。
 
 **证书语义**：bnb `--top-k 0`（默认）为精确模式——搜索穷尽时
