@@ -58,26 +58,34 @@ precision 1.000、毫秒级、0 派生。
 1. **GT 规模**：8 轮/25,515 → 18 轮/222,146（8.7×）；g3 从 degenerate
    变为 955 答案（20 条 profession head 规则 + 祖先入子集）；g4 结构性
    空集不变（4 条 head 规则在 256 内仍推不出 /m/0nvt9 的答案）。
-2. **recall**：各臂逐 goal 不变——forward 全非退化 goal 100%/100%；
-   backward g5 all-recall 0.991→**0.974**（derived-only 0.946→0.955；
-   绝对缺口 25→145 条派生答案）——backward 的结构性覆盖缺口随 GT
-   增大而放大；**forward 增量引擎在两个规模下都完备**。
+2. **recall**：forward 在两个规模的全部非退化 goal 上均为 100%/100%；
+   backward g5 all-recall 0.991→**0.974**，derived-only 0.946→**0.955**，
+   两个指标方向不同，但绝对漏答从 25 增至 **145 条派生答案**。因此稳定
+   的结论是 backward g5 的结构性覆盖缺口随 GT 增大而放大，而不是“所有
+   recall 都不变”或“derived-only 也下降”。
 3. **wall 趋势**（同 goal 不同 N，仅趋势）：g2 bwd 26ms→4.8s（185×，
    DG 锥变大需探更多死路）；g2 fwd exact 2.6s→37.8s；HDC 溢价随规模
    放大（g2：20.3s→226s；null:exact:hdc = 1:3.8:22.8 @256 vs
    1:3.4:26 @64）。
-4. **policy 开始分化——但只在搜索成本，不在 recall**：forward random
-   比 det 慢 1.4×（g2 exact：50.2s vs 37.8s）至 8×（g5 exact：7.8s vs
-   0.99s；hdc rand 44s vs 5.7s），recall 逐数一致。backward 各臂时间
-   与 recall 均无分化。**即"policy 无 recall 分化"不等于"无时间
-   差"**——本矩阵首次给出该区分。
-5. **HDC 仍纯开销**：所有 hdc 臂 recall 与 exact 逐数一致，时间 5.8×
-   （g3）到 23×（g2）更慢。
-6. **方向边界**：小答案集（g1/g2）backward 目标制导赢时间（g2：
-   4.8s/6 派生 vs forward 9.9s+/33,868 派生——forward fixpoint 推导
-   整个 DG 锥）；大答案集（g3/g5）**forward 完备且毫秒-秒级，
-   backward 不完备**（g5 -2.6pt recall、-145 条派生答案）——方向边界
-   比 rules64 更清晰：backward 的候选空间缺口随规则规模放大。
+4. **policy 不改变最终 recall，但搜索成本差异在 256 档放大**：forward
+   random 比 det 慢约 1.3×（g2 exact：50.2s vs 37.8s）至 8×（g5 exact：
+   7.8s vs 0.99s；hdc rand 44s vs 5.7s），recall 逐数一致。backward
+   recall 也无分化，但 g2 random 的一个 seed 达 6.67s、高于 det 4.82s，
+   不能说 backward 时间无分化。该结论延续并放大 rules64 的观察。
+5. **HDC 仍只有开销**：所有 hdc 臂 recall 与 exact 逐数一致。确定性臂
+   HDC 相对 exact 约 **5.6–6.0×**；相对 null 的倍数随 goal 为
+   **7.6–22.8×**（g2/g3/g5），两种分母不混用。
+6. **方向边界**：小答案集 g2 上 backward 目标制导更快（4.8s/6 派生 vs
+   forward 9.9s+/33,868 派生）；g3 上 forward 与 backward 都完备，且
+   forward+null 0.050s 快于 backward 约 0.10s；g5 上 forward 完备，
+   backward 有 145 条派生答案缺口。不能概括成 backward 在所有大答案集
+   都不完备，缺口是逐 goal 的结构性现象。
+7. **chase 口径**：一次 3.58s 覆盖 5 goal，摊销约 0.72s/goal。g3 的
+   forward/backward 均低于该摊销；g2 所有 agent 臂都高于摊销；g5 的
+   forward+null 0.745s 与摊销相近但略慢，backward 更快却不完备。多 goal
+   或需要完整闭包时 chase 仍有明确价值。
+8. g1 仍只有 1 个派生答案、g4 为空 GT；主要非平凡证据来自 g2/g3/g5，
+   不把 256 条规则的结果外推到不可行的 1,652 条完整矩阵。
 
 ## 复现 / 续跑
 
