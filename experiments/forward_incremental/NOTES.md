@@ -63,3 +63,30 @@ goal 选层（沿用 tasks50/open_full 口径，held-out 不必要——测的�
 - 惰性邻接可能破坏假设"邻接即最新"的调用方——构建后全仓 grep
   OutAdjacency 调用点逐一确认。
 - HDC witness 门控不得改变 hdc scorer 数值（synth hdc 链回归）。
+
+## 复核修正记录（2026-10-31，主代理复核后）
+
+四点修复，判据不变：
+
+1. **active 判定覆盖缺口**：旧 `!initialized || !cands.empty()` 使
+   cands 空 + hold 全是 dynamic failure 的规则永久失活（除非 delta 恰
+   好产生新 embedding）。修复：hold 中存在当前 version 可重准入的
+   motif 时规则重新 active；仍全 retired 的 hold-only 规则不 active
+   （防 deterministic 无计费空转）。端到端合成验证：`.work_hdcv/
+   dyn_rules`（B: q(x0,x1) pattern + r(x0,x1) 动态前提 → s(x0,x1)）——
+   修复前 no_candidates 且不命中（dyn_before），修复后 4 步推出
+   s(a,b)（dyn_after）。
+2. **GAR_VERIFY_INCREMENTAL 覆盖**：delta_update 记录全部触及规则，
+   逐规则 verify（此前只验被应用的那条）。
+3. **no-pick key 生命周期**：`!pick` 时不再清 cands（旧实现清 cands
+   不清 keys，后续 delta 同 embedding 会被 dedup 误挡）；改为记录
+   declined_version，图增长后恢复 eligible——与 failure registry 的
+   重准入纪律一致，且无无计费空转。
+4. **cap 语义精确化**（不重述判据，只精确化表述）：cap 是**每次枚举
+   调用**的上限（规则初始化一次 + 每次 delta 枚举一次），cache 跨
+   delta 累计可超过 cap。与旧 naive 的"每步全量枚举取前 cap 个"既不
+   是子集也不是超集；与 NOTES 中"同 cap 语义"的表述差异在此明示。
+   合理性：delta 枚举被 pin 到单条新事实，窗口极窄、几乎不触顶；
+   只有用 per-call cap 才能保持每步成本有界。任何一次枚举触顶即计
+   fwd_capped_enums，**capped>0 时不声称任何完备性**（fixpoint 仅
+   对该可枚举空间而言）。

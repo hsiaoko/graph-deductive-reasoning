@@ -1,5 +1,6 @@
 #include "gar/engine/agent/executor.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -46,13 +47,19 @@
 // is empty by construction). Constants are NOT propagated along multi-hop
 // DG paths (that would be Magic Sets; not implemented and not faked).
 //
-// Truncation is explicit: every enumeration obeys --max-candidates-per-rule
-// and capped enumerations are counted (stats.capped_enums); the engine
-// never claims completeness. Termination "no_candidates" means every
-// reachable rule is initialized and every cache is drained at the current
-// fact version — a fixpoint of the CAPPED candidate space. Under
-// --forward-full-enum (open goals) that becomes "full_enum_fixpoint" once
-// at least one goal fact was derived.
+// Truncation is explicit and per-enumeration-CALL, not per-rule-global:
+// --max-candidates-per-rule bounds the rule's initial enumeration AND each
+// delta enumeration (one call per matching pattern edge per derivation).
+// The cache accumulates across deltas, so a rule's cached candidate count
+// may exceed the cap. This is NOT the removed naive engine's "first cap
+// embeddings of every per-step full enumeration" window: neither space is
+// a subset of the other in general (delta windows are pinned to a single
+// new fact, so they rarely hit the cap; the union over deltas tracks graph
+// growth instead of a frozen prefix). "no_candidates" is the fixpoint of
+// THAT space; whenever any enumeration reports capped (stats.capped_enums
+// > 0) the engine makes no completeness claim. Under --forward-full-enum
+// (open goals) that fixpoint becomes "full_enum_fixpoint" once at least
+// one goal fact was derived.
 //
 // Debug self-check: GAR_VERIFY_INCREMENTAL=1 re-enumerates every
 // delta-touched rule in full after each merge and aborts on any set
@@ -75,6 +82,11 @@ struct RuleEntry {
   std::vector<Motif> cands;   // active motifs (enumeration order)
   std::vector<Motif> hold;    // retired motifs (awaiting re-admission)
   std::unordered_set<std::uint64_t> keys;  // MotifHash over cands ∪ hold
+  // Version at which the policy declined this rule's entire cache
+  // (Policy::Select nullopt). The rule becomes eligible again only after
+  // the fact set grows — mirrors the failure registry's re-admission
+  // semantics and prevents an uncharged decline loop.
+  std::uint64_t declined_version = UINT64_MAX;
 };
 
 bool VerifyIncremental() {
@@ -201,8 +213,10 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
   // references d.slot (or its mirror). Each matching pattern edge gets both
   // endpoints pinned to the new fact's endpoints; a pin conflicting with a
   // goal pin on the same vertex voids that edge's delta (empty by
-  // construction).
-  auto delta_update = [&](const graph::DerivedEdge& d) {
+  // construction). Every rule that received a delta enumeration is appended
+  // to `touched` (for the GAR_VERIFY_INCREMENTAL equivalence check).
+  auto delta_update = [&](const graph::DerivedEdge& d,
+                          std::vector<std::uint32_t>* touched) {
     const std::uint32_t mirror = g.IsInverse(d.slot)
                                      ? g.BaseRelation(d.slot)
                                      : d.slot + g.num_relations();
@@ -213,6 +227,7 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
       for (const std::uint32_t ei : it->second) {
         RuleEntry& e = entries[ei];
         if (!e.initialized) continue;  // first selection enumerates in full
+        bool enumerated = false;
         for (const auto& edge : e.spec.edges) {
           if (edge[2] != slot) continue;
           const auto m0 = std::chrono::steady_clock::now();
@@ -229,6 +244,7 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
           bool capped = false;
           const std::uint64_t n_emb = matcher.Enumerate(
               e.spec, cfg.match_cap_per_rule, &embs, &capped, pins);
+          enumerated = true;
           ++stats.delta_enums;
           stats.capped_enums += capped ? 1 : 0;
           stats.embeddings_generated += n_emb;
@@ -238,6 +254,11 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
             cache_insert(e, embs.data() + t * n);
           }
           stats.match_wall_ms += ms_since(m0);
+        }
+        if (enumerated &&
+            std::find(touched->begin(), touched->end(), ei) ==
+                touched->end()) {
+          touched->push_back(ei);
         }
       }
     }
@@ -292,14 +313,40 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
       res.termination = "timeout";
       break;
     }
-    // Active rules: uninitialized, or holding active candidates. (A drained
-    // rule goes inactive until a delta refills it — facts only accumulate,
-    // so an initialized rule with an empty cache has nothing new.)
+    // Active rules: uninitialized, holding active candidates, or holding a
+    // retired motif that the CURRENT fact version re-admits (dynamic
+    // failures re-enter on ANY growth of Gamma — a rule whose pattern gains
+    // no new embeddings can still become applicable because its antecedent
+    // did). A rule the policy declined at this version stays inactive until
+    // the version moves (no uncharged decline loop; facts only accumulate,
+    // so a still-declined/still-retired rule genuinely has nothing new).
     std::vector<ScoredRule> active;
     std::vector<std::uint32_t> active_idx;
+    const std::uint64_t version = state->version();
     for (std::uint32_t ei = 0; ei < entries.size(); ++ei) {
-      if (!entries[ei].initialized || !entries[ei].cands.empty()) {
-        active.push_back(entries[ei].sr);
+      const RuleEntry& e = entries[ei];
+      if (!e.initialized) {
+        active.push_back(e.sr);
+        active_idx.push_back(ei);
+        continue;
+      }
+      if (!e.cands.empty() && version != e.declined_version) {
+        active.push_back(e.sr);
+        active_idx.push_back(ei);
+        continue;
+      }
+      bool readmittable = false;
+      for (const Motif& m : e.hold) {
+        if (!failures->IsRetired(
+                MotifHash(m.rule, m.embedding.data(),
+                          static_cast<std::uint32_t>(m.embedding.size())),
+                version)) {
+          readmittable = true;
+          break;
+        }
+      }
+      if (readmittable) {
+        active.push_back(e.sr);
         active_idx.push_back(ei);
       }
     }
@@ -362,7 +409,13 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
     const auto pick = kit.policy->Select(scored);
     stats.score_wall_ms += ms_since(s0);
     if (!pick) {
-      e.cands.clear();
+      // Policy declined every candidate: keep the cache and its dedup keys
+      // intact (clearing cands without keys would let a later delta
+      // re-insert then get dedup-blocked, corrupting the cache). Mark the
+      // rule declined at this fact version; it becomes eligible again only
+      // after the graph grows (same re-admission discipline as the failure
+      // registry), so a declining policy cannot spin uncharged.
+      e.declined_version = state->version();
       continue;
     }
 
@@ -411,8 +464,13 @@ AgentResult GreedyExecutor::Run(const Goal& goal, AgentState* state,
       e.keys.erase(mkey);
       erase_motif(e);
       stats.apply_wall_ms += ms_since(a0);
-      delta_update(d);
-      if (VerifyIncremental()) verify_rule(e);
+      std::vector<std::uint32_t> touched;
+      delta_update(d, &touched);
+      if (VerifyIncremental()) {
+        // Every rule this delta touched — not just the applied one — must
+        // match a fresh full enumeration at the new fact version.
+        for (const std::uint32_t ei : touched) verify_rule(entries[ei]);
+      }
     } else {
       const FailureInfo fi =
           ClassifyFailure(rule, emb, state->attrs(), g, ctx);

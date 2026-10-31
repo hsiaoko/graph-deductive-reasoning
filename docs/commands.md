@@ -186,7 +186,7 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--no-dg` | 关 | 关闭 DG 制导（d(·) 全零：不剪枝、rel_fam 中性、price=w₀）；消融用 |
 | `--top-k N` | 0 | bnb 每分支候选截断；0=精确模式（带证书） |
 | `--hdc-dim N` | 8192 | HDC 维度（档位 2 的幂，128…16384） |
-| `--max-candidates-per-rule` | 256 | 每规则每步 motif 枚举上限 |
+| `--max-candidates-per-rule` | 256 | 每次枚举调用上限：bnb=每分支全候选展开；增量 greedy=规则的初始全量枚举一次 + 每次 delta 枚举（每个匹配新事实 slot 的 pattern edge 一次调用）。cache 跨 delta 累计，规则候选总数可超过该值；任何一次枚举触顶即计入 fwd_capped_enums，引擎不声称完备 |
 | `--alpha/--beta/--gamma/--nu/--nu2/--tau-hdc` | 1/1/0.5/1/0.5/0.15 | 打分权重（total=α·(rel_fam+ν·rel_evd+ν2·conf)−β·dcost） |
 | `--verify-against-closure` | 关 | app 层另跑 CpuChaseEngine 全闭包，断言 agent 导出 ⊆ 闭包（soundness 写入 summary.yaml） |
 | `--jev-endpoint URL` | http://127.0.0.1:8080 | Jev System One 本地端点（纯 HTTP，超时 `--jev-timeout-ms` 默认 2000ms） |

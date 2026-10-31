@@ -1,6 +1,9 @@
 # forward_incremental：增量 forward greedy 替换 naive — 正确性 + 受控性能
 
-日期：2026-10-31。预注册：NOTES.md（判据未移动）。实现 commit aee79d7。
+日期：2026-10-31。预注册：NOTES.md（判据未移动）。实现 commit aee79d7 +
+复核修复（见 NOTES"复核修正记录"：active 判定的 dynamic 重准入覆盖、
+verify 扩展到全部 delta 触及规则、no-pick 的 key 生命周期、cap 语义精
+确化；修复后 fi_perf 全 10 run 的 steps/derived/termination 逐数不变）。
 计划：plans/phantom-stranger-rocket-phantom-stranger.md。
 
 ## 变更内容（对应计划逐步）
