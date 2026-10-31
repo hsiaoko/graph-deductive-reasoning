@@ -42,6 +42,19 @@ struct AgentModeArgs {
   std::uint32_t top_k = 0;                // bnb: 0 = exact (no truncation)
   std::uint32_t hdc_dim = gar::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
+  // Seed decoupling (--policy-seed / --hdc-seed; both fall back to --seed,
+  // so omitting them reproduces legacy runs bit-for-bit). The HDC encoder
+  // uses the hdc seed; every policy-side RNG (RandomizedPolicy, backward
+  // --backward-order random/hybrid shuffles, JEV mock) uses the policy seed.
+  std::optional<std::uint64_t> policy_seed;
+  std::optional<std::uint64_t> hdc_seed;
+  [[nodiscard]] std::uint64_t PolicySeed() const {
+    return policy_seed.value_or(seed);
+  }
+  [[nodiscard]] std::uint64_t HdcSeed() const { return hdc_seed.value_or(seed); }
+  // Backward subgoal recursion cap (--max-subgoal-depth; default 4 keeps
+  // legacy behaviour). Both backward executors read ExecConfig's copy.
+  std::uint32_t max_subgoal_depth = 4;
   std::uint32_t max_candidates_per_rule = 256;
   // BackwardExecutor open-target collect cap (default 8 = legacy).
   std::uint32_t open_collect_cap = 8;
@@ -93,6 +106,10 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->top_k = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--hdc-dim") a->hdc_dim = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--seed") a->seed = std::stoull(next());
+  else if (k == "--policy-seed") a->policy_seed = std::stoull(next());
+  else if (k == "--hdc-seed") a->hdc_seed = std::stoull(next());
+  else if (k == "--max-subgoal-depth")
+    a->max_subgoal_depth = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--open-collect-cap")
     a->open_collect_cap = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--max-candidates-per-rule")
@@ -191,7 +208,7 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
     const std::vector<std::string>* rule_ids = nullptr,
     gar::engine::agent::JevPolicy** jev_out = nullptr) {
   namespace agent = gar::engine::agent;
-  const gar::hdc::HdcEncoder encoder({args.hdc_dim, args.seed});
+  const gar::hdc::HdcEncoder encoder({args.hdc_dim, args.HdcSeed()});
   agent::ReasoningAgent::Components comps;
   comps.cost_model = std::make_unique<agent::UnitCostModel>();
   if (args.scorer == "exact") {
@@ -214,7 +231,7 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
     }
     std::unique_ptr<agent::JevClient> client;
     if (args.jev_mock) {
-      client = std::make_unique<agent::MockJevClient>(args.seed);
+      client = std::make_unique<agent::MockJevClient>(args.PolicySeed());
     } else {
       client = std::make_unique<agent::HttpJevClient>(args.jev.endpoint,
                                                       args.jev.timeout_ms);
@@ -225,7 +242,7 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
     if (jev_out != nullptr) *jev_out = jev.get();
     comps.policy = std::move(jev);
   } else if (args.policy == "random") {
-    comps.policy = std::make_unique<agent::RandomizedPolicy>(args.seed);
+    comps.policy = std::make_unique<agent::RandomizedPolicy>(args.PolicySeed());
   } else if (args.policy == "hybrid") {
     comps.policy = std::make_unique<agent::HybridNeuroSymbolicPolicy>();
   } else {
@@ -378,12 +395,14 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   ec.backward_full_enum = args.backward_full_enum;
   ec.forward_full_enum = args.forward_full_enum;
   ec.wall_limit_sec = args.wall_limit_sec;
-  ec.seed = args.seed;
+  ec.seed = args.PolicySeed();
+  ec.max_subgoal_depth = args.max_subgoal_depth;
 
   std::cerr << "[gar_reason] running: policy=" << args.policy
             << " scorer=" << args.scorer << " executor=" << args.executor
             << " budget=" << args.budget << " hdc_dim=" << args.hdc_dim
-            << " seed=" << args.seed;
+            << " seed=" << args.seed << " policy_seed=" << args.PolicySeed()
+            << " hdc_seed=" << args.HdcSeed();
   if (args.executor == "bnb") std::cerr << " top_k=" << args.top_k;
   std::cerr << "\n";
   const auto run_t0 = std::chrono::steady_clock::now();
@@ -479,6 +498,9 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "executor: " << args.executor << "\n"
       << "hdc_dim: " << args.hdc_dim << "\n"
       << "seed: " << args.seed << "\n"
+      << "policy_seed: " << args.PolicySeed() << "\n"
+      << "hdc_seed: " << args.HdcSeed() << "\n"
+      << "max_subgoal_depth: " << args.max_subgoal_depth << "\n"
       << "steps: " << res.chain.size() << "\n"
       << "derived: " << res.derived.size() << "\n"
       << "total_cost: " << res.total_cost << "\n"

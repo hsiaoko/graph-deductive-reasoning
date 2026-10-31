@@ -643,7 +643,8 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
     ec.backward_full_enum = agent_args.backward_full_enum;
     ec.forward_full_enum = agent_args.forward_full_enum;
     ec.wall_limit_sec = agent_args.wall_limit_sec;
-    ec.seed = agent_args.seed;
+    ec.seed = agent_args.PolicySeed();
+    ec.max_subgoal_depth = agent_args.max_subgoal_depth;
     *agent_out = rag.Run(&state, goal, ec);
   }
   v.agent_goal = agent_out->goal_derived;
@@ -885,7 +886,8 @@ int CmdVerifyTasks(const VerifyArgs& a) {
         ec.backward_full_enum = task_args.backward_full_enum;
         ec.forward_full_enum = task_args.forward_full_enum;
         ec.wall_limit_sec = task_args.wall_limit_sec;
-        ec.seed = task_args.seed;
+        ec.seed = task_args.PolicySeed();
+        ec.max_subgoal_depth = task_args.max_subgoal_depth;
         agent_res = rag.Run(&state, goal, ec);
       }
       agent_wall_ms = std::chrono::duration<double, std::milli>(
