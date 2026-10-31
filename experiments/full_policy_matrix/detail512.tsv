@@ -1,0 +1,96 @@
+goal	config	termination	recall	derived_recall	precision	derived	wall_med	wall_min	wall_max
+g1	bwd_hyb_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0014	0.0014	0.0014
+g1	bwd_hyb_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0013	0.0013	0.0013
+g1	bwd_hyb_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0013	0.0013	0.0013
+g1	bwd_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0013	0.0013	0.0013
+g1	bwd_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0013	0.0013	0.0013
+g1	bwd_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0014	0.0014	0.0014
+g1	bwd_score	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0013	0.0013	0.0013
+g1	fwd_exact_det	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_exact_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_exact_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_exact_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_exact_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_hdc_det	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_hdc_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_hdc_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_hdc_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_hdc_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_null_det	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_null_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_null_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_null_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g1	fwd_null_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1	0.0007	0.0007	0.0007
+g2	bwd_hyb_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	6	4.7994	4.7994	4.7994
+g2	bwd_hyb_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	6	4.7898	4.7898	4.7898
+g2	bwd_hyb_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	6	4.7878	4.7878	4.7878
+g2	bwd_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	6	4.8793	4.8793	4.8793
+g2	bwd_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	6	4.7993	4.7993	4.7993
+g2	bwd_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	6	6.5775	6.5775	6.5775
+g2	bwd_score	full_enum_fixpoint	1.0000	1.0000	1.0000	6	4.8277	4.8231	4.8457
+g2	fwd_exact_det	full_enum_fixpoint	1.0000	1.0000	1.0000	35326	38.5372	38.0176	38.8298
+g2	fwd_exact_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	35326	38.1791	37.8697	38.2499
+g2	fwd_exact_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	51.8874	51.8874	51.8874
+g2	fwd_exact_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	52.0754	52.0754	52.0754
+g2	fwd_exact_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	52.4743	52.4743	52.4743
+g2	fwd_hdc_det	full_enum_fixpoint	1.0000	1.0000	1.0000	35326	230.2930	226.0200	230.9060
+g2	fwd_hdc_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	35326	226.0770	225.8600	228.2790
+g2	fwd_hdc_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	322.1480	322.1480	322.1480
+g2	fwd_hdc_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	314.3050	314.3050	314.3050
+g2	fwd_hdc_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	310.7970	310.7970	310.7970
+g2	fwd_null_det	full_enum_fixpoint	1.0000	1.0000	1.0000	35327	10.0713	10.0105	10.1548
+g2	fwd_null_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	35327	10.2378	9.9388	10.5792
+g2	fwd_null_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	20.0397	20.0397	20.0397
+g2	fwd_null_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	19.7964	19.7964	19.7964
+g2	fwd_null_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	35324	20.1109	20.1109	20.1109
+g3	bwd_hyb_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	947	0.1314	0.1314	0.1314
+g3	bwd_hyb_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	947	0.1320	0.1320	0.1320
+g3	bwd_hyb_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	947	0.1042	0.1042	0.1042
+g3	bwd_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	947	0.1015	0.1015	0.1015
+g3	bwd_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	947	0.1025	0.1025	0.1025
+g3	bwd_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	947	0.1038	0.1038	0.1038
+g3	bwd_score	full_enum_fixpoint	1.0000	1.0000	1.0000	947	0.1040	0.1037	0.1045
+g3	fwd_exact_det	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.1133	0.1128	0.1136
+g3	fwd_exact_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.1136	0.1129	0.1153
+g3	fwd_exact_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.1235	0.1235	0.1235
+g3	fwd_exact_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.1219	0.1219	0.1219
+g3	fwd_exact_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.1204	0.1204	0.1204
+g3	fwd_hdc_det	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.6314	0.6313	0.6330
+g3	fwd_hdc_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.6314	0.6307	0.6315
+g3	fwd_hdc_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.6101	0.6101	0.6101
+g3	fwd_hdc_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.6256	0.6256	0.6256
+g3	fwd_hdc_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.6358	0.6358	0.6358
+g3	fwd_null_det	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.0504	0.0503	0.0509
+g3	fwd_null_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.0505	0.0504	0.0537
+g3	fwd_null_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.0631	0.0631	0.0631
+g3	fwd_null_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.0632	0.0632	0.0632
+g3	fwd_null_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	1789	0.0632	0.0632	0.0632
+g4	bwd_hyb_s13	full_enum_fixpoint			1.0000	0	0.4668	0.4668	0.4668
+g4	bwd_hyb_s42	full_enum_fixpoint			1.0000	0	0.4663	0.4663	0.4663
+g4	bwd_hyb_s7	full_enum_fixpoint			1.0000	0	0.4670	0.4670	0.4670
+g4	bwd_rand_s13	full_enum_fixpoint			1.0000	0	0.4630	0.4630	0.4630
+g4	bwd_rand_s42	full_enum_fixpoint			1.0000	0	0.4700	0.4700	0.4700
+g4	bwd_rand_s7	full_enum_fixpoint			1.0000	0	0.4710	0.4710	0.4710
+g4	bwd_score	full_enum_fixpoint			1.0000	0	0.4585	0.4573	0.4609
+g4	fwd_exact_det	no_candidates			1.0000	131	0.0045	0.0045	0.0046
+g4	fwd_exact_hyb	no_candidates			1.0000	131	0.0045	0.0045	0.0046
+g4	fwd_exact_rand_s13	no_candidates			1.0000	131	0.0046	0.0046	0.0046
+g4	fwd_exact_rand_s42	no_candidates			1.0000	131	0.0048	0.0048	0.0048
+g4	fwd_exact_rand_s7	no_candidates			1.0000	131	0.0048	0.0048	0.0048
+g4	fwd_hdc_det	no_candidates			1.0000	131	0.0142	0.0142	0.0143
+g4	fwd_hdc_hyb	no_candidates			1.0000	131	0.0143	0.0143	0.0143
+g4	fwd_hdc_rand_s13	no_candidates			1.0000	131	0.0128	0.0128	0.0128
+g4	fwd_hdc_rand_s42	no_candidates			1.0000	131	0.0143	0.0143	0.0143
+g4	fwd_hdc_rand_s7	no_candidates			1.0000	131	0.0139	0.0139	0.0139
+g4	fwd_null_det	no_candidates			1.0000	131	0.0026	0.0026	0.0026
+g4	fwd_null_hyb	no_candidates			1.0000	131	0.0026	0.0026	0.0027
+g4	fwd_null_rand_s13	no_candidates			1.0000	131	0.0034	0.0034	0.0034
+g4	fwd_null_rand_s42	no_candidates			1.0000	131	0.0034	0.0034	0.0034
+g4	fwd_null_rand_s7	no_candidates			1.0000	131	0.0034	0.0034	0.0034
+g5	fwd_exact_det	full_enum_fixpoint	1.0000	1.0000	1.0000	60214	45.6772	45.5216	46.6237
+g5	fwd_exact_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	60214	1114.8600	1114.8600	1114.8600
+g5	fwd_null_det	full_enum_fixpoint	1.0000	1.0000	1.0000	60214	10.0799	9.9977	10.1215
+g5	fwd_null_hyb	full_enum_fixpoint	1.0000	1.0000	1.0000	60214	17.2019	17.0968	18.3699
+g5	fwd_null_rand_s13	full_enum_fixpoint	1.0000	1.0000	1.0000	60214	339.0290	339.0290	339.0290
+g5	fwd_null_rand_s42	full_enum_fixpoint	1.0000	1.0000	1.0000	60214	367.0230	367.0230	367.0230
+g5	fwd_null_rand_s7	full_enum_fixpoint	1.0000	1.0000	1.0000	60214	225.9110	225.9110	225.9110

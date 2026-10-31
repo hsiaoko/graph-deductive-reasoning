@@ -1,8 +1,8 @@
 # full_policy_matrix：rules64 完整矩阵（chase/backward/增量 forward × policy × scorer）
 
-> **规模说明（2026-10-31 更新）**：本文件是 **N=64 中间档**。最终规模
-> 为 **N=256**，结果见 `summary256.md`（预注册 RULE_SCALEUP.md；
-> rules64 ⊂ rules256 前缀嵌套）。请勿把本文件当作最终规模引用。
+> **规模说明（2026-10-31 更新）**：本文件是 **N=64 中间档**。规模序列
+> 64 → 256（`summary256.md`）→ **512（`summary512.md`，最新）**。
+> 请勿把本文件当作最终规模引用。
 
 日期：2026-10-31。预注册：NOTES.md + RULE_SUBSET.md（判据未移动）。
 **本轮为 rules64（64 条确定性子集，manifest.tsv 可审阅/可重建），不与

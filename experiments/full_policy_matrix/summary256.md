@@ -1,4 +1,8 @@
-# full_policy_matrix @ rules256（最终规模；rules64 为中间档）
+# full_policy_matrix @ rules256（中间档；最新为 rules512）
+
+> **规模说明（2026-10-31 更新）**：本文件是 **N=256 中间档**。最新规
+> 模为 **N=512**（`summary512.md`，g5 部分 pending 待续跑；前缀嵌套
+> rules256 ⊂ rules512 已程序验证）。
 
 日期：2026-10-31。预注册：NOTES.md + RULE_SUBSET.md + RULE_SCALEUP.md
 （判据未移动）。**本文件是当前最终规模（N=256）的结果；summary.md 是
