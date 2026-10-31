@@ -20,11 +20,7 @@ GOALS = {
     'g5': ('/soccer/football_team/current_roster./soccer/football_roster_position/position', None),
 }
 # GT-derived>0 at rules512 = {g1,g2,g3,g5}; g4 empty (excluded).
-# NOTE (2026-10-31, partial run): g5 matrix incomplete (7/22 configs done,
-# time box). Macro mean is therefore computed over the COMMON completed
-# set {g1,g2,g3} for every method; completed g5 rows are reported
-# separately in summary512.md, not folded into the mean.
-MACRO_GOALS = ['g1', 'g2', 'g3']
+MACRO_GOALS = ['g1', 'g2', 'g3', 'g5']
 D_CHASE_TOTAL = 349552
 
 def load_gt():
@@ -129,7 +125,7 @@ def main():
             'wall': st.median([x['wall_med'] for x in rs]),
             'derived': st.median([x['derived'] for x in rs]),
         }
-    print('== MACRO (unweighted mean over common completed goals g1,g2,g3; g4 empty excluded, g5 PENDING — see summary512.md) ==')
+    print('== MACRO (unweighted mean over member goals g1,g2,g3,g5; g4 empty, excluded) ==')
     print(f'{"method":18s} {"recall":>7s} {"drecall":>7s} {"prec":>7s} {"wall_s":>9s} {"derived":>9s} {"reduct":>7s}   (per-goal walls: ' + ' '.join(MACRO_GOALS) + ')')
     for m in sorted(methods):
         gvals = []
