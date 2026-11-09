@@ -42,7 +42,11 @@ inline void WriteClosureOutputs(const gar::graph::TripleGraph& g,
     std::ofstream f(out_root + "/summary.yaml");
     f << "rounds: " << res.rounds << "\nfixpoint: "
       << (res.fixpoint ? "true" : "false")
-      << "\nderived_total: " << res.derived.size() << "\nrules:\n";
+      << "\nderived_total: " << res.derived.size()
+      << "\nembeddings_total: " << res.embeddings_total
+      << "\nx_satisfied_total: " << res.x_satisfied_total
+      << "\nderivation_candidates_total: " << res.derivation_candidates_total
+      << "\nrules:\n";
     for (std::size_t i = 0; i < rule_ids.size(); ++i) {
       const auto& st = res.rules[i];
       f << "  - id: " << rule_ids[i] << "\n"

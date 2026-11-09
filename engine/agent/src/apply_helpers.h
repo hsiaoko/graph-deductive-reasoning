@@ -28,6 +28,20 @@ struct FailureInfo {
 // failed application: an edge predicate is DYNAMIC iff some rule derives
 // its (base) relation (dependency-graph in-degree > 0); attribute/ML
 // preconditions are STATIC (they read G only, and G never changes).
+// Whether a rule predicate is DYNAMIC: an edge predicate whose base
+// relation some rule derives (dependency-graph in-degree > 0). Attr/ML
+// predicates read G only and are static. Shared by the executors' failure
+// classification (ClassifyFailure) and the fixpoint executor's
+// precondition cache — one definition, no logic fork.
+inline bool IsDynamicPredicate(const gar::Predicate& pred,
+                               const gar::GARule& rule,
+                               const AgentContext& ctx) {
+  if (pred.kind != gar::PredKind::kEdge) return false;
+  const std::uint32_t id =
+      ctx.table->Find(analysis::PredicateIdOf(pred, rule));
+  return id != analysis::kInvalidPredicate && ctx.dg->InDegree(id) > 0;
+}
+
 inline FailureInfo ClassifyFailure(const gar::GARule& rule,
                                    const std::uint32_t* emb,
                                    const graph::VertexAttrs* attrs,
@@ -39,12 +53,7 @@ inline FailureInfo ClassifyFailure(const gar::GARule& rule,
     const gar::Predicate& pred = rule.antecedent[j];
     if (!graph::EvalAntecedent({pred}, emb, attrs, g)) {
       fi.fail_idx = j;
-      if (pred.kind == gar::PredKind::kEdge) {
-        const std::uint32_t id =
-            ctx.table->Find(analysis::PredicateIdOf(pred, rule));
-        fi.dynamic =
-            id != analysis::kInvalidPredicate && ctx.dg->InDegree(id) > 0;
-      }
+      fi.dynamic = IsDynamicPredicate(pred, rule, ctx);
       break;
     }
   }

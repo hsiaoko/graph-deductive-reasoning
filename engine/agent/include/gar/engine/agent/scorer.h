@@ -83,6 +83,10 @@ class Scorer {
   // Whether the scorer reads the witness's HDC evidence vector (only the
   // HDC scorer does; exact/null skip the 8192-dim bundle maintenance).
   virtual bool NeedsHdcWitness() const { return false; }
+  // Exact/null scores can be maintained through new exact-witness facts.
+  // HDC evidence changes on every witness event, including duplicates, and
+  // therefore keeps the full-rescoring path.
+  virtual bool SupportsIncrementalScoring() const { return false; }
 };
 
 class ExactScorer final : public Scorer {
@@ -95,6 +99,8 @@ class ExactScorer final : public Scorer {
 
   void ScoreRule(const GARule& rule, const ScoringContext& ctx,
                  ScoredRule* out) const override;
+
+  bool SupportsIncrementalScoring() const override { return true; }
 
  private:
   HandcraftedConfig cfg_;
@@ -120,6 +126,8 @@ class NullScorer final : public Scorer {
     (void)ctx;
     (void)out;  // all zeros: rule order falls back to rule index
   }
+
+  bool SupportsIncrementalScoring() const override { return true; }
 };
 
 class HdcScorer final : public Scorer {

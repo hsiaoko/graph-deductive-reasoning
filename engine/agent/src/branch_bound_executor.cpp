@@ -1,6 +1,7 @@
 #include "gar/engine/agent/branch_bound_executor.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cmath>
 #include <limits>
@@ -198,6 +199,7 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
                                      const ExecConfig& cfg,
                                      const ExecKit& kit) {
   AgentResult res;
+  const auto run_started = std::chrono::steady_clock::now();
   const auto& rules = state->rules();
   const double B = static_cast<double>(cfg.budget);
 
@@ -382,6 +384,13 @@ AgentResult BranchBoundExecutor::Run(const Goal& goal, AgentState* state,
                      child->cost);
       }
       if (child->cost < best_cost) {
+        if (!std::isfinite(best_cost)) {
+          res.first_goal_expansions = res.expansions;
+          res.first_goal_wall_ms =
+              std::chrono::duration<double, std::milli>(
+                  std::chrono::steady_clock::now() - run_started)
+                  .count();
+        }
         best_cost = child->cost;
         best_chain = child->chain;
         best_utility = child->utility;

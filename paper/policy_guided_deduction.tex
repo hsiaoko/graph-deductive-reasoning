@@ -1,0 +1,613 @@
+%%%%%%%%%% Section 5 %%%%%%%%%%
+\vspace{-0.3ex}
+\section{Policy Construction and Execution}
+\label{sec-classes}
+\vspace{-0.2ex}
+
+This section develops goal-aware policies for the
+inference agent and an algorithm for their adaptive
+execution. Section~\ref{sec-policies} constructs
+score-based, learned, and hybrid policies using the
+scores of Section~\ref{sec-score}.
+Section~\ref{sec-execution} presents the %agent's
+deduction
+algorithm and shows its soundness,
+goal-level completeness, and termination guarantees.
+%\looseness=-1
+
+%%%%%%%%%% Section 5.1 %%%%%%%%%%
+\vspace{-1ex}
+\subsection{Policy Construction}
+\label{sec-policies}
+\vspace{-0.2ex}
+
+A scoring function ranks individual inference
+actions, while a policy determines which action
+the agent evaluates next. We first construct
+policies directly from $f(S,g,\mu)$, and then
+develop learned policies that exploit previous
+executions to estimate downstream costs.
+All policies operate on the available actions
+$\mathcal A(S)$ of Section~\ref{sec-model}.
+
+\stitle{Score-based policies.}
+A {\em deterministic policy} selects the  action that has the
+highest score, \ie we select action $\mu$ such that
+\vspace{-0.7ex}\[
+\pi_{\rm det}(S,g)=
+\arg\max_{\mu\in\mathcal A_g(S)}f(S,g,\mu),
+\vspace{-0.7ex}\]
+where
+$\mathcal A_g(S)=
+\{\mu\in\mathcal A(S)\mid r(g,\mu)>0\}$
+contains the goal-relevant available actions.
+Ties are resolved by a fixed order.
+The policy favors actions with stronger
+symbolic relevance and supporting evidence,
+but lower estimated evaluation costs.
+
+Since $f$ is an estimate, the score may favor an action that turns out
+to be costly or unsuccessful; thus the agent should
+also explore other promising alternatives.
+A {\em randomized policy} does so by selecting actions
+with probabilities proportional to their scores:
+\vspace{-0.7ex}\[
+\pi_{\rm rnd}(\mu\mid S,g)=
+\frac{\exp(f(S,g,\mu)/\tau)}
+{\sum_{\mu'\in\mathcal A_g(S)}
+\exp(f(S,g,\mu')/\tau)},
+\vspace{-0.7ex}\]
+where $\exp(x)=e^x$ is the exponential function,
+assigning higher selection probabilities
+to higher-scoring actions, and $\tau>0$ controls
+this preference. Small $\tau$ favors the
+highest-scoring action, and larger $\tau$
+promotes exploration. Randomization reduces
+reliance on potentially inaccurate scores,
+but does not alone guarantee completeness.
+\looseness=-1
+
+\begin{example}
+\label{exa-policy}
+Consider the AML goal
+$g=\textsf{HighRisk}(v)$ of
+Example~\ref{exa-chase}.
+After action $\mu_1=(\varphi_1,h_1)$ derives
+$\textsf{HighRisk}(u)$, both
+$\mu_2=(\varphi_2,h_2)$ and
+$\mu_3=(\varphi_3,h_3)$ can derive the goal $g$.
+If previously validated transfer conditions
+give $\mu_2$ a higher score, then the deterministic
+policy selects $\mu_2$. In contrast,
+the randomized policy favors $\mu_2$ but
+may explore $\mu_3$, which uses shared
+infrastructure instead.
+\end{example}
+\vspace{-1.4ex}
+
+\stitle{Learned policies.}
+The handcrafted score considers immediate
+relevance, evidence, and evaluation cost,
+but cannot fully capture the downstream
+computational consequences of selecting an
+action. We thus learn from execution
+experience.
+Let $\Phi(S,g,\mu)$ denote the features of
+a candidate action, including its symbolic
+relevance $r(g,\mu)$, evidence estimate
+$\widehat e(S,\mu)$, remaining evaluation-cost
+estimate $\widehat c_{\rm eval}(S,\mu)$,
+and the representations $\mathbf v_\mu$
+and $\mathbf E(S)$ from Section~\ref{sec-score}.
+
+Rather than predicting whether an action
+appears in a successful derivation, we learn
+its {\em action-conditioned cost-to-go}.
+Let $\pi_b$ be a continuation policy used
+to collect training executions.
+Define
+\vspace{-0.7ex}\[
+Q^{\pi_b}(S,g,\mu)=
+\mathbb E\left[
+\cost(C)\mid S,\mu,\pi_b
+\right],
+\vspace{-0.7ex}\]
+where $C$ starts by evaluating $\mu$ at state $S$
+and then follows policy $\pi_b$ until reaching $g$.
+Here $\mathbb E$ averages the execution costs over
+the possible action sequences induced by $\pi_b$,
+since randomized choices may lead to different
+costs. For a deterministic $\pi_b$, the expectation
+reduces to the cost of its single execution.
+The cost includes all action evaluations and
+policy overhead, as in PSP. An execution that
+fails to reach a derivable goal has infinite cost.
+
+
+To implement this policy,
+we train a model $\widehat Q_\theta$
+to estimate this cost from
+$\Phi(S,g,\mu)$.
+For training, we collect completed executions
+under $\pi_b$, retaining the state, selected
+action, and remaining observed execution cost
+at each decision.
+Additional rollouts from recorded states
+evaluate alternative actions and their
+subsequent executions. These observations
+provide action-conditioned cost targets;
+unobserved alternatives are not assigned
+artificial costs.
+
+
+For each training observation $(S,g,\mu,y)$,
+let $y$ be the observed remaining execution cost
+after selecting $\mu$ at state $S$ and following
+$\pi_b$. We train a model
+$\widehat Q_\theta(S,g,\mu)$, parameterized by
+$\theta$, to predict this cost from the features
+$\Phi(S,g,\mu)$. The model minimizes
+\vspace{-0.7ex}\[
+\mathcal L(\theta)=
+\sum_{(S,g,\mu,y)\in\mathcal D}
+\big(\widehat Q_\theta(S,g,\mu)-y\big)^2,
+\vspace{-0.7ex}\]
+where $\mathcal D$ contains the collected
+finite-cost training observations. Note that
+failed goal-reaching rollouts are recorded
+separately rather than assigned finite targets.
+During execution, the agent combines learned
+selection with {\em fair} exploration: it periodically
+selects the longest-waiting available action,
+ensuring that no candidate is indefinitely
+ignored because of a low predicted score.
+Together with the \revise{revival} of dynamically
+suspended actions, this preserves goal-level
+completeness (see Theorem~\ref{thm-complete} shortly).
+
+
+
+Unlike immediate scoring, cost-to-go learning
+can recognize that a seemingly inexpensive
+action may trigger costly subsequent deductions.
+However, $\widehat Q_\theta$ estimates costs
+under the continuation policy $\pi_b$;
+it does not guarantee globally optimal
+policy selection.
+
+
+\stitle{Hybrid neuro-symbolic policies.}
+Learned policies may assign high scores to
+actions that are unlikely to contribute to
+the target goal. To prevent such choices,
+we combine symbolic reasoning with learned
+action selection in two stages.
+
+First, we use the rule dependency graph
+to restrict the available actions to
+$\mathcal A_g(S)$.
+By Proposition~\ref{prop-relevance},
+excluding actions with $r(g,\mu)=0$
+preserves goal derivability.
+Second, among the remaining candidates,
+the agent selects the action with the
+lowest predicted cost-to-go
+$\widehat Q_\theta(S,g,\mu)$.
+Alternatively, it can rank candidates
+using the handcrafted score $f(S,g,\mu)$.
+Thus, symbolic filtering identifies
+potentially useful deductions, while
+learned guidance estimates which action
+can reach the goal at lower computational
+cost.
+
+We also support LLM-guided selection,
+\revise{instantiated with the decision model
+Jev~\cite{Jev}.}
+Given the target goal $g$, relevant
+\GARs, grounded candidate actions,
+and the current execution evidence,
+\revise{Jev} ranks actions in $\mathcal A_g(S)$
+according to their expected contribution
+to the goal and evaluation cost\revise{,
+returning a calibrated ranking over the
+candidates in one pass~\cite{Jev-benchmark}}.
+The agent selects a recommended action
+and validates its preconditions using
+the exact \GAR semantics.
+The resulting facts and evaluation outcomes
+update the deduction state for subsequent
+decisions.
+
+In both cases, learned models and LLMs
+control only the order of inference actions, without
+introducing unsupported facts.
+Combined with fair selection and
+retrial of suspended actions,
+this preserves soundness and goal-level
+completeness.
+
+
+
+%%%%%%%%%% Section 5.2 %%%%%%%%%%
+\vspace{-1ex}
+\subsection{Policy-Guided Deduction}
+\label{sec-execution}
+\vspace{-0.2ex}
+
+\revise{We integrate the policies into an adaptive
+deduction algorithm.
+\AdaDeduce derives the goal in two loops:
+a {\em main loop} that drives the deduction
+toward the goal under the policy, and a
+{\em fixpoint loop} that completes the
+inference steps that had to wait for
+premises still to be derived.
+It stops when the goal is derived, or when
+no further fact can be derived.}
+
+\vspace{-0.4ex}
+\stitle{Working sets.}
+\revise{Recall from Section~\ref{sec-model}
+the deduction state $S=(G,\Sigma,\Gamma,H)$.
+The agent maintains two collections on top
+of it.
+The {\em ready set} $\mathcal R$ consists of
+pairs $(\varphi,h)$, where $h$ is a complete
+match of the pattern of a \GAR
+$\varphi$; these are the discovered
+goal-relevant actions awaiting evaluation.
+The {\em suspended set} $\mathcal W$
+consists of such pairs annotated with the
+dynamic preconditions still missing,
+together with the preconditions already
+validated; these are the partial results
+that wait for their missing facts.
+%$\mathcal W$ is managed by the algorithm
+%alone and never competes for selection.
+The two sets exchange objects in a closed
+loop: graph matching instantiates
+goal-relevant rules into actions, which
+enter $\mathcal R$; predicate evaluation
+then checks the preconditions of an action
+of $\mathcal R$ under its match, deriving
+its consequent into $\Gamma$,
+or suspending it in $\mathcal W$
+when only dynamic preconditions are
+missing; and new facts complete suspended
+actions.}
+
+\vspace{-0.2ex}
+\stitle{Agent.}
+\revise{We implement \AdaDeduce in
+Algorithm~\ref{alg-policy}.
+Given a graph $G$, \GARs $\Sigma$, initial
+facts $\Gamma_0$, and target goal $g$, the
+agent builds $D_{\Sigma,g}$ once (line 1),
+marking each node as a {\em leaf} if it has
+no incoming edge, and {\em derivable}
+otherwise; the two loops below run on
+$D_{\Sigma,g}$ and its marks.
+It derives $g$ in the main loop and the
+fixpoint loop, and returns whether $g$ is
+derived, the resulting facts, the complete
+execution trace, and the actual execution
+cost.}
+
+\begin{figure}[t]
+\centering
+\begin{minipage}{0.98\columnwidth}
+\small
+\myhrule\\[0.5ex]
+{\bf Input}: Graph $G$, \GARs $\Sigma$,
+initial facts $\Gamma_0$, goal $g$, policy $\pi$.\\
+{\bf Output}: Trace $C$, facts $\Gamma$, cost $c$.\\[0.5ex]
+\bcc \hspace{2ex}~$\Gamma\gets\Gamma_0$;
+$H,\mathcal R,\mathcal W\gets\emptyset$;
+$c\gets0$; \revise{build $D_{\Sigma,g}$;}\\
+\icc \hspace{2ex}~\revise{\ForEach star $\varphi$
+of $D_{\Sigma,g}$ \Do}\\
+\icc \hspace{2ex}~\quad\revise{match the pattern
+of $\varphi$ in $G$, reusing matches of
+shared sub-patterns, and add the actions
+$(\varphi,h)$ to $\mathcal R$;}\\
+\icc \hspace{2ex}~\quad\While
+$\mathcal R\neq\emptyset$ \Do\\
+\icc \hspace{2ex}~\qquad\revise{select
+$\mu\in\mathcal R$ by $\pi$;}\\
+\icc \hspace{2ex}~\qquad\revise{check the
+preconditions of $\mu$, reusing outcomes
+in $H$;}\\
+\icc \hspace{2ex}~\qquad\If all preconditions
+hold \Then $\Gamma\gets
+\Gamma\cup\{h(p_0)\}$, where $\mu=(\varphi,h)$;\\
+\icc \hspace{2ex}~\qquad\revise{charge
+$c_{\rm sel}$ and $c_{\rm eval}$ to $c$;
+\If $h(p_0)=g$ \Then \Return $(C,\Gamma,c)$;}\\
+\icc \hspace{2ex}~\qquad\Else \If a leaf
+precondition $p$ fails \Then \revise{drop
+$\mu$, record $p$ in $H$, and prune all
+actions sharing $p$;}\\
+\icc \hspace{2ex}~\qquad\Else \revise{suspend
+$\mu$ in $\mathcal W$ with its validated
+and missing preconditions;}\\
+\icc \hspace{2ex}~\qquad\revise{$S'\gets(G,\Sigma,\Gamma,H)$;
+$C\gets C\circ\langle(S,\mu,S')\rangle$;}\\
+\icc \hspace{2ex}~\revise{\Repeat}\\
+\icc \hspace{2ex}~\quad\revise{\ForEach
+$\mu\in\mathcal W$ \Do}\\
+\icc \hspace{2ex}~\qquad\revise{\If the missing
+preconditions of $\mu$ are all in $\Gamma$
+\Then apply $\mu$ as in lines 7--8 and 11,
+and remove it from $\mathcal W$;}\\
+\icc \hspace{2ex}~\qquad\revise{\Else \If some
+missing precondition of $\mu$ has no
+remaining action deriving it \Then drop
+$\mu$;}\\
+\icc \hspace{2ex}~\revise{\Until
+$\mathcal W=\emptyset$ or a round derives
+no new fact;}\\
+\icc \hspace{2ex}~\Return $(C,\Gamma,c)$.\\[0.5ex]
+\myhrule
+\end{minipage}
+\vspace{-2.4ex}
+\caption{\revise{Agent \AdaDeduce: policy-guided
+deduction with star expansion and fixpoint
+revival.}}
+\label{alg-policy}
+\vspace{-4.3ex}
+\end{figure}
+
+\etitle{The main loop.}
+\revise{The agent works in rounds over
+$D_{\Sigma,g}$, one star per round, each
+round in two stages: the generation stage
+produces the candidate actions of the star,
+and the policy stage evaluates them before
+the next round begins (lines 2--11).}
+
+\eetitle{(1) The generation stage.}
+\revise{This stage produces all candidate
+actions of the rules in $D_{\Sigma,g}$.
+It expands one {\em star} of $D_{\Sigma,g}$ at a time,
+a rule with its consequent as the center
+and its preconditions as the spokes
+(Figure~\ref{fig-dSigma}), by matching
+its pattern in $G$; each complete match $h$
+forms one candidate action $(\varphi,h)$
+and enters $\mathcal R$ (lines 2--3).
+Matching checks vertex labels and edges
+only, and shared
+sub-patterns are matched once and reused.
+%Since $G$ never changes, this stage
+%determines the candidate actions of the
+%entire execution.
+}
+
+\vspace{-0.2ex}
+\eetitle{(2) The policy stage.}
+\revise{As the downstream stage of each
+generation stage, it turns the candidate actions of
+$\mathcal R$ into facts under the control
+of the policy $\pi$.
+Whenever $\mathcal R$ is nonempty,
+the agent evaluates its actions until
+$\mathcal R$ turns empty (lines 4--11): the
+policy picks the next action (line 5), and
+the agent checks its preconditions, \ie predicates, 
+reusing
+outcomes in $H$ (line 6).
+The marks of $D_{\Sigma,g}$ split the
+actions into two kinds
+(Section~\ref{sec-model}): a {\em static}
+action has only leaf spokes and is settled
+by one evaluation; a {\em dynamic} action
+has a derivable spoke and may have to wait.
+Three outcomes are possible.
+(a) All preconditions hold: the action
+derives its consequent, $\Gamma$ is
+updated, and the cost is charged, stopping
+at once if the fact is $g$ (lines 7--8).
+(b) A leaf precondition fails: the action
+can never succeed and is discarded, with
+every action sharing that failed
+precondition (line 9).
+(c) Only derivable facts are missing: the
+action is suspended in $\mathcal W$ with
+its bindings and validated preconditions
+(line 10).
+In each case the transition is recorded in
+the trace (line 11), and the agent proceeds
+to the next action of $\mathcal R$.}
+
+\vspace{-0.2ex}
+\etitle{The fixpoint loop.}
+\revise{When the main loop ends,
+$\mathcal W$ may still hold partial results
+waiting for missing facts, and the fixpoint loop
+closes them out in rounds (lines 12--13).
+No matching is needed anymore: all matches
+were computed in the main loop, and
+$G$ never changes; each round only looks up
+the missing facts of $\mathcal W$ in $\Gamma$, reusing the
+recorded partial results.
+An action whose missing facts have all
+arrived succeeds and leaves $\mathcal W$
+(line 14), possibly completing others in
+later rounds; one waiting on a fact that no
+remaining action can derive is abandoned
+(line 15).
+The rounds iterate until $\mathcal W$ is
+empty or $\Gamma$ stays the same for two
+consecutive rounds, \ie it reaches a
+fixpoint (line 16): only a new fact could
+complete a partial result, so nothing in
+$\mathcal W$ can ever succeed again.
+Together with the early stop at $g$
+(line 8), \AdaDeduce terminates, returning
+the trace, facts and cost (line 17).}
+
+\begin{example}
+\label{exa-execution}
+Continue Example~\ref{exa-policy}, with
+$g=\textsf{HighRisk}(v)$.
+\revise{Suppose that the generation stage
+expands the star of $\varphi_2$ first, and
+the policy stage picks
+$\mu_2=(\varphi_2,h_2)$ from $\mathcal R$.}
+Its ownership, transfer, and amount
+conditions hold, but
+$\textsf{HighRisk}(u)$ is missing.
+\revise{Since only a dynamic precondition
+fails, the action is suspended}
+in $\mathcal W$; its validated
+preconditions are recorded with it as a
+partial result.
+\revise{When the star of $\varphi_1$ is
+expanded,} the agent evaluates
+$\mu_1=(\varphi_1,h_1)$, deriving
+$\textsf{HighRisk}(u)$.
+\revise{After all stars are processed, the
+fixpoint loop revisits $\mu_2$ in its
+first round: the missing precondition is
+now in $\Gamma$, the recorded partial
+result is reused without re-evaluation,
+and $\mu_2$ derives
+$g=\textsf{HighRisk}(v)$.}
+Execution stops immediately.
+
+A learned policy may
+revisit $\mu_2$ before $\mu_3$ in the
+fixpoint loop
+because its estimated remaining cost is
+lower. The earlier unsuccessful evaluation
+is thus useful: its evidence reduces
+the cost of reaching the goal.
+\end{example}
+\vspace{-1.4ex}
+
+\stitle{Correctness guarantees.}
+We next show that policy-guided deduction
+preserves logical validity and derives
+every reachable goal under fair execution.
+These guarantees hold due to exact \GAR
+evaluation and the working-set discipline,
+not on scoring accuracy.
+
+We first show the soundness: heuristic, learned, or LLM-based
+selection cannot introduce unsupported
+deductions.
+
+\begin{theorem}
+\label{thm-sound}
+For any policy $\pi$, every fact derived
+by \AdaDeduce belongs to
+$\Gamma^*=\Chase(G,\Sigma,\Gamma_0)$.
+\end{theorem}
+\vspace{-1ex}
+
+\proofS~We show by induction on the execution steps 
+that $\Gamma\subseteq\Gamma^*$.
+Initially, $\Gamma=\Gamma_0\subseteq\Gamma^*$.
+For the inductive step, note that 
+each successful action validates all
+preconditions of a \GAR and performs
+a sound chase step.
+Failed actions add no facts.
+\eop
+
+\vspace{0.8ex}
+We next show the goal-level completeness, \ie goal reachability even
+when the policy's scores are inaccurate.
+
+\begin{theorem}
+\label{thm-complete}
+For finite $G$ and $\Sigma$, under
+complete goal-relevant candidate discovery
+and fair execution,
+\AdaDeduce derives
+%every goal
+all $g\in\Gamma^*$.
+\end{theorem}\looseness=-1
+
+\vspace{-1ex}
+
+\proofS~We prove this also by induction
+on the number of chase derivation steps.
+Since $g\in\Gamma^*$, a finite chase
+derivation of $g$ exists.
+By Proposition~\ref{prop-relevance},
+every action needed for this derivation
+survives symbolic filtering.
+\revise{Every action of the derivation is
+generated and evaluated, since the
+generation stage expands every star in the
+cone of $g$.
+Such an action either succeeds or suspends
+only on dynamic preconditions; those are
+derived by earlier actions of the
+derivation, which succeed by induction, and
+the fixpoint rounds revisit the action
+until they arrive.
+The fixpoint cannot end before $g$ is
+derived: the first action of the derivation
+not yet succeeded would have all its
+preconditions in $\Gamma$ and would derive
+a new fact.}
+\eop
+
+\vspace{0.8ex}
+Finally, we show that our algorithm terminates, and
+repeated unsuccessful
+evaluations cannot cause nontermination.
+
+\begin{theorem}
+\label{thm-termination}
+For finite $G$ and $\Sigma$,
+\revise{\AdaDeduce terminates.}
+\end{theorem}%\looseness=-1
+
+\vspace{-1ex}
+
+\proofS~The finite graph admits finitely many
+grounded rule applications and ground facts.
+\revise{Each star is expanded once, so each
+action is generated once, and the policy
+stage evaluates each generated action once.
+In the fixpoint loop, every round except
+the last derives at least one new fact;
+since $\Gamma$ grows monotonically and only
+finitely many facts exist, the number of
+rounds is finite.}
+\eop
+
+\etitle{Computational cost.}
+\revise{The execution cost of a trace is
+accounted as in Section~\ref{sec-statement}.}
+By Section~\ref{sec-score}, scoring a
+candidate with a precomputed representation
+takes $O(D+|P_\mu|)$ time, where $D$ is
+the HDC dimension.
+\revise{Generation matches only the rules
+of $D_{\Sigma,g}$, each star exactly once,
+and the fixpoint loop re-checks only the
+missing preconditions of suspended actions,
+at most $|\mathcal W|$ lookups per round.}
+Incremental maintenance of the working sets
+avoids repeating unaffected graph matches,
+and recorded precondition outcomes avoid
+redundant evaluations.
+The saving depends on the reduction in
+inference work relative to these control
+costs, which we measure experimentally.\looseness=-1
+
+\etitle{Remark.}
+Unlike Meta-Chase~\cite{Meta-Chase}, which
+controls rule-set selection, we
+select individual grounded inference
+actions to minimize goal-reaching cost.
+\revise{Its novelty lies in combining
+cost-to-go learning, reusable execution
+evidence, and cone-restricted star expansion
+over the working sets with sound, complete,
+and terminating \GAR deduction.}

@@ -4,3 +4,6 @@ lib/
 *.o
 *.a
 .baseline/
+.work_hdcv/
+__pycache__/
+*.pyc

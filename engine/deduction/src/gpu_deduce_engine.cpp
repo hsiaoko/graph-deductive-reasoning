@@ -486,6 +486,12 @@ ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
         }
       }
     }
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+      if (skipped[i]) continue;
+      result.embeddings_total += result.rules[i].embeddings;
+      result.x_satisfied_total += result.rules[i].x_satisfied;
+      result.derivation_candidates_total += contribs[i].size();
+    }
     const double enum_secs = std::chrono::duration<double>(
                                  std::chrono::steady_clock::now() - round_t0)
                                  .count();

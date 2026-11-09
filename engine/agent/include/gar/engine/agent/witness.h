@@ -49,7 +49,9 @@ class WitnessLog {
   WitnessLog(std::uint32_t hdc_dim, const graph::TripleGraph* g,
              const analysis::PredicateTable* table, bool use_hdc = true);
 
-  void WitnessFact(const Fact& f, const hdc::HdcEncoder& enc);
+  // Returns true iff the fact is new to the exact witness set. HDC evidence
+  // still accumulates every event, including an already witnessed fact.
+  bool WitnessFact(const Fact& f, const hdc::HdcEncoder& enc);
 
   [[nodiscard]] bool Contains(const Fact& f) const {
     return exact_.count(KeyOf(f)) != 0;

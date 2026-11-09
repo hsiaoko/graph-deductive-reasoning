@@ -190,6 +190,12 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
 #else
     for (std::size_t i = 0; i < rules.size(); ++i) process_rule(i);
 #endif
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+      if (pp[i].skip) continue;
+      result.embeddings_total += result.rules[i].embeddings;
+      result.x_satisfied_total += result.rules[i].x_satisfied;
+      result.derivation_candidates_total += contribs[i].size();
+    }
 
     const double enum_secs = std::chrono::duration<double>(
                                  std::chrono::steady_clock::now() - round_t0)

@@ -73,6 +73,14 @@ total   = α·(rel_fam + ν·rel_evd + ν₂·conf) − β·dcost
   （naive 实现已删除；2026-10 前的 greedy 实验数字属该历史实现）。
   开放变元 goal 可开 `--forward-full-enum` 求 fixpoint 外延（截断由
   fwd_capped_enums 明示，不声称完备）。
+- **fixpoint（挂起-复活）**：R/W 两工作集两循环；action 级 policy 只调
+  度 R；动态缺失（含 CSR pattern 内缺失动态边形成的 partial action，
+  未绑定变量仅存内部）挂起进 W，事实到齐由 fixpoint 循环复活；静态假
+  经前提缓存 H 永久共享剪枝；producer 全灭的等待项才安全删除；派生按
+  slot/mirror 触发 delta 补全。公平调度：`--fair-interval N` 周期强制
+  等待最久 ready action。终止区分 goal/fixpoint/budget/timeout/
+  candidate_cap；成本分离 proof_cost/search_cost。详见
+  docs/commands.md 与 docs/fixpoint_implementation_plan.md。
 - **bnb**：保留整棵分支树 + 界限剪枝，能证明最优链。慢、吃内存。
   （其每分支的全候选展开用 EnumerateAllCandidates——这是证书语义
   所需，与 greedy 的增量路径无关。）

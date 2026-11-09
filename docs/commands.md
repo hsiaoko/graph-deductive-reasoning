@@ -133,9 +133,11 @@ EOF
 | `--threads N` | 0 | CPU 引擎 TBB 并行上限，0=全核（GPU 引擎忽略） |
 | `--print N` | 20 | CLI 按 derived 降序打印前 N 条规则 |
 
-输出（`<out>/`）：`summary.yaml`（逐规则 embeddings/x_satisfied/derived +
-总轮数/不动点标记）、`closure_edges.tsv`（新事实：src、relation、dst、推导轮次、
-来源规则）、`matches/<rule>.tsv`（末轮全部匹配 + x_ok/head 标记）。
+输出（`<out>/`）：`summary.yaml`（逐规则末轮 embeddings/x_satisfied/derived +
+总轮数/不动点标记，以及全轮累计 `embeddings_total`、`x_satisfied_total`、
+`derivation_candidates_total`；最后一个计数是轮内去重前候选，不等于新事实数）、
+`closure_edges.tsv`（新事实：src、relation、dst、推导轮次、来源规则）、
+`matches/<rule>.tsv`（末轮全部匹配 + x_ok/head 标记）。
 
 **兼容**：旧 app `deduce` / `deduce_gpu` 仍是独立二进制，CLI 与输出**逐字节
 等价**于 `gar_reason --mode full --engine cpu|gpu`（薄壳共享
@@ -159,9 +161,11 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 ```bash
 ./build/bin/gar_reason --mode agent --csr <immutable_csr_dir> --rules <rules_root> \
     --goal 'rel_name(src,dst)' --budget 30 \
-    [--policy deterministic|random|hybrid] [--scorer exact|hdc|null] [--hdc-dim 8192] \
-    [--executor greedy|bnb|backward] [--direction forward|backward] [--top-k N] [--seed 42] [--policy-seed N] [--hdc-seed N] [--max-subgoal-depth N] [--max-candidates-per-rule 256] \
-    [--bnb-priority utility|hdc-value] [--backward-priority heuristic|hdc-value] [--value-model PATH] [--no-dg] \
+    [--policy deterministic|random|hybrid|jev|q-hdc|q-numeric] [--scorer exact|hdc|null] [--hdc-dim 8192] \
+    [--executor greedy|bnb|backward|fixpoint] [--direction forward|backward] [--top-k N] [--seed 42] [--policy-seed N] [--hdc-seed N] [--max-subgoal-depth N] [--max-candidates-per-rule 256] \
+    [--bnb-priority utility|hdc-value|numeric-value] [--backward-priority heuristic|hdc-value] [--value-model PATH] \
+    [--hdc-value-backend original|simd|bit-lut] [--no-dg] \
+    [--fair-interval N] [--fixpoint-star-order input|goal] [--fixpoint-q-trace PATH] \
     [--backward-order score|random|hybrid] [--open-collect-cap N] \
     [--alpha 1] [--beta 1] [--gamma 0.5] [--nu 1] [--nu2 0.5] [--tau-hdc 0.15] \
     [--no-confidence] [--out <dir>] [--verify-against-closure] [--print 20]
@@ -171,11 +175,14 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 |---|---|---|
 | `--goal 'rel(s,d)'` | 必填 | 目标事实；实体名，`_` = 开放变元 |
 | `--budget N` | 100 | 单链成本上限（unit cost：一次应用 = 1，成败都计费） |
-| `--policy` | deterministic | argmax / softmax(total/τ)（`--seed` 可复现）/ admissible 硬过滤+argmax / **jev**（LLM 决策模型，§5.3） |
+| `--policy` | deterministic | argmax / softmax(total/τ)（`--seed` 可复现）/ admissible 硬过滤+argmax / **jev**（LLM 决策模型，§5.3）/ **q-hdc、q-numeric**（action-level cost-to-go，仅限 fixpoint+exact，需 `--value-model`，只改排序） |
 | `--policy-seed` / `--hdc-seed` | 回退 `--seed` | 种子解耦：policy 侧 RNG（random policy、backward-order 洗牌、jev mock）用 policy-seed；HDC encoder 用 hdc-seed；缺省均回退 --seed（旧行为逐字节不变）。summary.yaml 记录三者 |
 | `--max-subgoal-depth` | 4 | backward/backward-bnb 子目标递归深度上限（默认 4 保持旧命令不变） |
 | `--scorer` | exact | exact（见证前提比例）/ hdc（cos(v_μ,E) 证据向量读数）/ null（消融：无打分，仅保留符号 admissible 过滤，greedy 退化为候选枚举序，bnb 退化为 uniform-cost） |
-| `--executor` | greedy | backward（目标制导反向演绎，主引擎）/ greedy（增量 forward：policy 前置选规则 + 候选 cache + delta 匹配，§5.1）/ bnb（Figure 6 分支定界） |
+| `--executor` | greedy | backward（目标制导反向演绎，主引擎）/ greedy（增量 forward：policy 前置选规则 + 候选 cache + delta 匹配，§5.1）/ bnb（Figure 6 分支定界）/ fixpoint（挂起-复活两循环，见下） |
+| `--fair-interval` | 0（关） | fixpoint 执行器：每 N 次 policy 选择强制执行等待最久的 ready action（trace 记 fair_select）；0=纯 policy 序 |
+| `--fixpoint-star-order` | input | fixpoint 的 star 展开顺序：input=规则目录序（保留旧调度）；goal=按结论谓词到 goal 的 DG 距离稳定排序，同距离保持目录序。无提前终止时两者都展开全部 goal-cone star |
+| `--fixpoint-q-trace PATH` | 空（关） | fixpoint+exact 下写出每个实际求值 action 的 11 个特征；goal 命中时 `remaining_evaluations` 为含当前 action 的剩余求值数，未命中为 0。仅训练用，未观察 alternative 不伪造标签 |
 | `--direction` | 不设 | 推理方向开关：不设 = 旧行为（`--executor` 为准，逐字节不变）；`forward` 下 `--executor backward` 互斥报错；`backward` = 反向纪律（`--executor backward` 为完整 DFS+回溯，`--executor greedy` 为退化单路径消融臂——首选即终选、不回溯；`--executor bnb` 报错，留待 Phase 2 的 AND-OR 证书） |
 | `--backward-priority` | heuristic | backward 的 OR 候选（规则尝试）排序：heuristic（tier/open_d/rel_fam/conf，旧行为）/ hdc-value（HDC 价值模型预测失败率，只改排序，需 `--value-model`） |
 | `--backward-order` | score | BackwardExecutor 候选排序：score（打分序，默认逐字节不变）/ random（`--seed` 洗牌，打分不参与排序）/ hybrid（top-8 打分窗口内洗牌，其余按分） |
@@ -183,8 +190,9 @@ dbpedia 2 轮 GPU 32 秒 vs CPU 21 秒。
 | `--backward-full-enum` | 关 | 开放变元 goal 全外延模式：pass1/pass2 扫描循环至 journal 不动点（已知结论跳过、失败备忘录随图增长重准入）；默认关 = 旧行为逐字节不变 |
 | `--forward-full-enum` | 关 | greedy 对开放变元 goal 的全外延模式：不在首个答案处停，继续步进至候选耗尽（fixpoint）/budget/墙钟；默认关 = 旧行为逐字节不变 |
 | `--wall-limit S` | 0（关） | 执行器内墙钟上限（秒）：到时干净终止（termination=timeout）并照常写出部分结果；外部 kill 会丢数据 |
-| `--bnb-priority` | utility | bnb 优先级来源：utility（原公式）/ hdc-value（HDC 价值模型，需 `--value-model`，只改排序，见 §3.3） |
-| `--value-model PATH` | 无 | HDC 价值模型 meta.txt（train_export.py 导出，配合同名 weights.bin） |
+| `--bnb-priority` | utility | bnb 优先级来源：utility（原公式）/ hdc-value（HDC 价值模型，需 `--value-model`，只改排序，见 §3.3）/ numeric-value（同 11 原始特征+同 4 交互项的数值 ridge，标准化参数只从训练集拟合；同样只改排序） |
+| `--value-model PATH` | 无 | HDC/numeric 价值模型的 `.meta` 路径，同名 `.bin` 保存向量与权重 |
+| `--hdc-value-backend` | bit-lut | HDC 价值模型计算后端：original=原始稠密计算；simd=在线 AVX2 bundle/bind/dot；bit-lut=加载期 bit-packed XOR + SIMD 预计算有限分箱词表的加权点积，在线仅查表求和。三者数学模型相同，summary 记录后端 |
 | `--no-dg` | 关 | 关闭 DG 制导（d(·) 全零：不剪枝、rel_fam 中性、price=w₀）；消融用 |
 | `--top-k N` | 0 | bnb 每分支候选截断；0=精确模式（带证书） |
 | `--hdc-dim N` | 8192 | HDC 维度（档位 2 的幂，128…16384） |
@@ -205,7 +213,9 @@ summary.yaml 的 `control_overhead{calls, wall_ms, fallbacks}` 记录。HTTP
 输出（`--out`）：`chain.tsv`（每步 rule/embedding/成败/成本/导出事实）、
 `closure_edges.tsv`（与 full 同布局）、`summary.yaml`（goal/derived/成本/
 终止原因/达成 + bnb 的 certified_optimal/certified_no_chain/anytime_fallback/
-utility/expansions + greedy 的 fwd_* 增量引擎计数：`fwd_rule_selections`
+utility/expansions；`first_goal_expansions` 和 `first_goal_wall_ms` 记录首个解的
+展开数与执行器内耗时（未找到 goal 时分别为 0/-1），最终证书搜索仍继续至穷尽；
+greedy 的 fwd_* 增量引擎计数：`fwd_rule_selections`
 （policy 规则选择次数）、`fwd_rules_initialized`（首次全量枚举规则数）、
 `fwd_delta_enums`（delta 枚举次数）、`fwd_embeddings_generated`（枚举产出
 embedding 总数）、`fwd_candidates_reused`（cache 复用候选数）、
@@ -225,6 +235,45 @@ fixpoint，截断由 fwd_capped_enums 明示，不声称完备）；`timeout` =
 --wall-limit 到期（部分结果照常落盘）。开发校验：
 `GAR_VERIFY_INCREMENTAL=1` 时每次 delta 合并后对全部触及规则逐一全量重枚举比对
 （不一致即 abort，仅小图/小预算使用）。
+
+**fixpoint = 挂起-复活两循环执行器**（docs/fixpoint_implementation_plan.md
+的实现）：R（完整 action）只由 action policy 调度；前提逐条求值（不短路）：
+全成立→精确派生；静态假→永久剪枝并经前提缓存 H 共享（H 键 = 结构化
+GroundPreconditionKey：完整逻辑谓词 + ground 绑定、full equality，不同
+op/常量/rhs_attr 的前提不共享）；动态缺失→连全部缺失 ground key 挂起进 W
+（含 CSR pattern 内缺失动态边形成的 partial action——未绑定变量只存内部
+PartialMatch，不进 Motif/Scorer/Policy）。逐 star 展开并排空其 R，delta 只投给
+已展开 star；全部展开后进 fixpoint 循环；W 由 delta 或 fixpoint 循环复活，
+producer 全灭才安全剪枝。goal 命中立即返回。
+
+2026-11-05 性能与正确性修订：exact/null 缓存 action 分数，并按新 witness
+事实订阅关系只重算受影响候选；deterministic/hybrid 使用保持当前位置同分
+顺序的惰性堆，random 保持 softmax 分布。HDC/Jev 仍走完整评分路径，不复用
+不满足其更新语义的缓存。R/W 都有 id→位置索引；delta 按 slot→plan 索引，
+partial W 按 ground/open-side WaitKey 索引，不再逐边全表扫描。
+`--fixpoint-star-order goal` 是独立的规则级调度消融，默认 input 保留目录序。
+
+2026-11-06 Random 调度优化：Fixpoint 的 exact/null 增量路径使用 Gumbel-max，
+为每个存活 action 保留一个独立 Gumbel 扰动，并以 `total/tau + gumbel` 复用
+同一惰性堆。选最大扰动优先级与 softmax(total/tau) 抽样分布等价，但不再为
+每次选择扫描整个 R；action 删除时释放扰动。固定 seed 在当前实现可复现，
+不保证与旧的逐次全表 softmax 实现产生相同抽样轨迹。HDC/Jev 完整评分路径不变。
+
+**递归 goal 的 pin 约束**：若 goal 谓词位于递归 SCC（含自循环），其
+goal-headed 规则不再把全部完整匹配钉到最终常量，否则会同名中间事实被排除，
+造成无 cap 的漏推（真实反例 p04；最小复现为单规则 gar_000798）。非递归
+goal 仍固定结论两端。此修正同时作用于 input/goal 两种 star 顺序。
+
+终止状态：goal / fixpoint / budget / timeout / candidate_cap（任何枚举触顶
+--max-candidates-per-rule 即记，不声称完备）。输出：`fixpoint_trace.tsv`
+（select/fair_select/evaluate/suspend/revive/prune/derive 事件）+ summary.yaml
+的 fx_* 计数与 prepare/generation/selection/score/removal/evaluation/derivation/
+delta/revival 分项耗时；delta 再细分 complete、partial-complete、partial-grow。
+其中 `fx_match_embeddings` 是实际物化且通过顶点 label 的完整匹配（不含 matcher
+内部回溯和未完成 partial），`fx_ready_insertions` 是 R 入队次数（含 revival），
+`fx_evaluate_events` 是实际求值 action 数；三者均不等于最终派生数。
+**注意**：action 级 learned policy（rollout 训练）**未实现**——现有 BNB
+ValueModel 是分支级模型，不能冒充。
 
 **证书语义**：bnb `--top-k 0`（默认）为精确模式——搜索穷尽时
 `certified_optimal=true`（Theorem 5）或 `certified_no_chain=true`（预算不足

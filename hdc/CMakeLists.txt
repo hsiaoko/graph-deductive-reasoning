@@ -12,6 +12,7 @@ add_library(gar_hdc STATIC
     src/hypervector.cpp
     src/encoder.cpp
     src/evidence.cpp
+    src/value_kernels.cpp
 )
 add_library(gar::hdc ALIAS gar_hdc)
 

@@ -48,6 +48,12 @@ struct ChaseResult {
   std::vector<RuleChaseStats> rules;
   std::vector<RuleMatches> matches;
   std::vector<graph::DerivedEdge> derived;  // all new facts, in derivation order
+  // Materialized work over ALL rounds. Per-rule embeddings/x_satisfied above
+  // remain final-round values; these totals make batch exploration comparable
+  // with goal-directed executors without redefining branches as derivations.
+  std::uint64_t embeddings_total = 0;
+  std::uint64_t x_satisfied_total = 0;
+  std::uint64_t derivation_candidates_total = 0;  // before round dedup
   std::uint32_t rounds = 0;
   bool fixpoint = false;             // false when stopped by a cap
 };

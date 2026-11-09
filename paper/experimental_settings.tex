@@ -1,0 +1,27 @@
+\revise{\etitle{Baselines and policy variants}.
+We implement agent \AdaDeduce in \tbf.
+We compare five methods:
+(1) {\em Chase}, which uses all \GARs in a
+fixed order and computes the complete closure;
+(2) {\em GoalChase}, which restricts deduction
+to goal-relevant rules, executes actions in a
+fixed order without evidence- or cost-aware
+ranking, and stops when the goal is derived;
+(3) {\em Deterministic}, an \AdaDeduce variant
+that selects the ready action with the highest
+combined score $f(S,g,\mu)$;
+(4) {\em Random}, an \AdaDeduce variant that
+samples ready actions from the score-based
+softmax distribution $\pi_{\rm rnd}$; and
+(5) {\em Learned}, an \AdaDeduce variant that
+selects the ready action with the lowest predicted
+cost-to-go $\widehat Q_\theta(S,g,\mu)$.
+Deterministic, Random, and Learned share
+goal-relevance filtering, candidate generation,
+precondition reuse, suspended-action handling,
+and the same fair-execution mechanism; they
+differ only in action selection.
+All five methods use the same rule semantics
+and exact precondition evaluation.
+Unless stated otherwise, \AdaDeduce denotes
+the Learned variant in the experiments.}

@@ -4,6 +4,9 @@
 #include "gar/engine/agent/policy.h"
 
 #include "gar/analysis/predicate_table.h"
+#include "gar/engine/agent/value_model.h"
+
+#include <stdexcept>
 
 namespace gar {
 namespace engine {
@@ -165,6 +168,36 @@ std::optional<std::size_t> JevPolicy::Select(
     if (pick < acc) return admissible[i];
   }
   return admissible.back();
+}
+
+}  // namespace agent
+}  // namespace engine
+}  // namespace gar
+
+
+namespace gar {
+namespace engine {
+namespace agent {
+
+double LearnedQPolicy::SelectionPriorityWithFeatures(
+    std::uint64_t action_id, double total,
+    const std::array<double, 11>& features) {
+  (void)action_id;
+  (void)total;
+  return -model_->PredictRemaining(features);
+}
+
+std::optional<std::size_t> LearnedQPolicy::Select(
+    const std::vector<ScoredMotif>& cands) {
+  (void)cands;
+  throw std::logic_error("LearnedQPolicy requires Fixpoint feature selection");
+}
+
+std::optional<std::size_t> LearnedQPolicy::SelectScores(
+    const std::vector<double>& totals, const std::vector<char>& admissible) {
+  (void)totals;
+  (void)admissible;
+  throw std::logic_error("LearnedQPolicy requires Fixpoint feature selection");
 }
 
 }  // namespace agent

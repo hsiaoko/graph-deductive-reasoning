@@ -85,9 +85,19 @@ struct ExecConfig {
   // Wall-clock limit in seconds (0 = off). Checked inside the executor
   // loops so a wall-limited run still terminates cleanly (termination
   // "timeout") and writes its partial chain/journal — an external kill
-  // would lose them. Applies to the greedy loop and the backward
-  // full-enum loop.
+  // would lose them.
   double wall_limit_sec = 0.0;
+  // FixpointExecutor: every `fair_interval` policy selections, force the
+  // longest-waiting ready action (0 = off, pure policy order). The fair
+  // picks are marked in the event trace.
+  std::uint32_t fair_interval = 0;
+  // "input" preserves rule-path order; "goal" stable-sorts stars by
+  // consequent-to-goal DG distance. Both expand every cone star unless the
+  // goal, a cap, or a budget/wall limit stops the run.
+  std::string fixpoint_star_order = "input";
+  // Optional per-evaluated-action trace for offline cost-to-go training.
+  // Empty disables all tracing overhead; labels are finite only on goal hits.
+  std::string fixpoint_q_trace_path;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its
@@ -97,7 +107,7 @@ struct ExecKit {
   const Scorer* scorer;
   Policy* policy;
   const CostModel* cost_model;
-  // Optional bnb branch value model (hdc-value priority, ordering only).
+  // Optional value model for BNB branch or Fixpoint action ordering.
   const ValueModel* value_model = nullptr;
 };
 
@@ -123,9 +133,10 @@ struct AgentResult {
   bool certified_no_chain = false;   // top_k==0, no chain fits the budget
   bool anytime_fallback = false;     // returned chain is the line-14 fallback
   std::uint64_t expansions = 0;      // branches actually expanded (bnb)
+  std::uint64_t first_goal_expansions = 0;  // 0 until the first goal
+  double first_goal_wall_ms = -1.0;         // executor-local; -1 if none
 
   // Incremental-greedy instrumentation (only set by GreedyExecutor):
-  // rule selections by the policy, first-time full enumerations, delta
   // enumerations, raw embeddings generated, candidates served from cache,
   // capped enumerations, and the match/apply/score wall-clock split.
   struct ForwardStats {
@@ -140,6 +151,48 @@ struct AgentResult {
     double score_wall_ms = 0.0;
   };
   std::optional<ForwardStats> fwd_stats;
+
+  // FixpointExecutor instrumentation (only set by it): event trace
+  // (select/fair_select/evaluate/suspend/revive/prune/derive, one text row
+  // per event, written by the app to fixpoint_trace.tsv) and counters.
+  // Cost separation (the backward cost-semantics lesson): proof_cost =
+  // cost of the successful derivation chain; search_cost = every charged
+  // evaluation (incl. failed/suspended); selection/evaluation event counts
+  // are separate counters; wall is wall.
+  struct FixpointStats {
+    std::uint64_t select_events = 0;
+    std::uint64_t fair_select_events = 0;
+    std::uint64_t evaluate_events = 0;   // == search_cost charged
+    std::uint64_t suspend_events = 0;
+    std::uint64_t revive_events = 0;
+    std::uint64_t prune_events = 0;
+    std::uint64_t derive_events = 0;
+    std::uint64_t candidate_caps = 0;    // enumerations that hit match cap
+    std::uint64_t ready_peak = 0;
+    std::uint64_t suspended_peak = 0;
+    std::uint64_t generation_events = 0;
+    std::uint64_t match_embeddings = 0;  // label-valid full embeddings
+    std::uint64_t ready_insertions = 0;  // includes revival re-enqueues
+    std::uint64_t revival_passes = 0;
+    std::uint64_t score_calls = 0;
+    std::uint64_t scored_candidates = 0;
+    double search_cost = 0.0;
+    double proof_cost = 0.0;
+    double prepare_wall_ms = 0.0;
+    double generation_wall_ms = 0.0;
+    double selection_wall_ms = 0.0;
+    double score_wall_ms = 0.0;
+    double ready_remove_wall_ms = 0.0;
+    double evaluation_wall_ms = 0.0;
+    double derivation_wall_ms = 0.0;
+    double delta_wall_ms = 0.0;
+    double delta_complete_wall_ms = 0.0;
+    double partial_complete_wall_ms = 0.0;
+    double partial_grow_wall_ms = 0.0;
+    double revival_wall_ms = 0.0;
+    std::vector<std::string> trace;
+  };
+  std::optional<FixpointStats> fx_stats;
 };
 
 class Executor {
@@ -156,6 +209,22 @@ class Executor {
 // failure; unit cost = 1). Terminates on goal derived, no candidates, or
 // budget exhausted.
 class GreedyExecutor final : public Executor {
+ public:
+  AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
+                  FailureRegistry* failures, const AgentContext& ctx,
+                  const ExecConfig& cfg, const ExecKit& kit) override;
+};
+
+// FixpointExecutor (docs/fixpoint_implementation_plan.md): two working sets
+// and two loops. The MAIN loop generates actions for goal-cone rules
+// (complete matches on G∪Γ plus partial matches that defer one dynamic
+// pattern edge), schedules only R via the injected Policy, and evaluates
+// every precondition (collecting all misses): full pass derives, static
+// failure prunes (shared via the precondition cache), dynamic absence
+// suspends into W. The FIXPOINT loop revives W entries whose missing facts
+// arrived (or whose partial wait completed on a delta) and prunes dead
+// waits (no live producer). policy never schedules W.
+class FixpointExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
                   FailureRegistry* failures, const AgentContext& ctx,

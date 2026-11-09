@@ -13,7 +13,9 @@ L4  apps/        kg_loader / match_pattern / mine_predicates / deduce /
 L3  engine/      deduction/（DeductionEngine 基类 + CpuChaseEngine +
                  GpuDeduceEngine）   agent/（ReasoningAgent + Executor
                  （greedy=增量 forward：policy 前置规则选择 + 持久候选
-                 cache + delta 匹配 / bnb / backward）+ Scorer/Policy 插件
+                 cache + delta 匹配 / bnb / backward / fixpoint=挂起-复活
+                 两循环：R 由 action 级 policy 调度、W 由 fixpoint 复活，
+                 见 docs/fixpoint_implementation_plan.md）+ Scorer/Policy 插件
                  + ValueModel（HDC 价值模型，bnb 可选排序，见
                  docs/hdc_value_model.md））
         miner/（ChainMiner / PatternMiner）

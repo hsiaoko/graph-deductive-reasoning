@@ -18,8 +18,8 @@
 //
 //   gar_reason --mode agent --csr <dir> --rules <root>
 //              --goal 'rel_name(src,dst)' --budget B
-//              [--policy deterministic|random|hybrid|jev] [--scorer exact|hdc|null]
-//              [--hdc-dim N] [--executor greedy] [--seed 42]
+//              [--policy deterministic|random|hybrid|jev|q-hdc|q-numeric] [--scorer exact|hdc|null]
+//              [--hdc-dim N] [[--executor greedy|bnb|backward|fixpoint] [--seed 42]
 //              [--max-candidates-per-rule 256]
 //              [--alpha A] [--beta B] [--gamma G] [--nu N] [--nu2 N2]
 //              [--tau-hdc T] [--no-confidence]
@@ -55,12 +55,14 @@ void PrintUsage() {
          "[--print N] [--threads N]\n"
          "  gar_reason --mode agent --csr <csr_dir> --rules <rules_root> "
          "--goal 'rel_name(src,dst)' --budget B [--policy "
-         "deterministic|random|hybrid|jev] [--scorer exact|hdc|null] [--hdc-dim N] "
-         "[--executor greedy|bnb] [--top-k N] [--seed N] [--policy-seed N] [--hdc-seed N] "
+         "deterministic|random|hybrid|jev|q-hdc|q-numeric] [--scorer exact|hdc|null] [--hdc-dim N] "
+         "[--executor greedy|bnb|backward|fixpoint] [--top-k N] [--seed N] [--policy-seed N] [--hdc-seed N] "
             "[--max-subgoal-depth N] [--max-candidates-per-rule N] "
-            "[--bnb-priority utility|hdc-value] [--value-model PATH] "
+            "[--bnb-priority utility|hdc-value|numeric-value] [--value-model PATH] "
+            "[--hdc-value-backend original|simd|bit-lut] "
             "[--backward-order score|random|hybrid] [--open-collect-cap N] "
-            "[--backward-full-enum] [--forward-full-enum] [--wall-limit S] "
+            "[--backward-full-enum] [--forward-full-enum] [--wall-limit S] [--fair-interval N] "
+            "[--fixpoint-star-order input|goal] [--fixpoint-q-trace PATH] "
          "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
          "[--tau-hdc F] [--no-confidence] [--out <dir>] "
          "[--verify-against-closure] [--print N]\n"
@@ -98,11 +100,12 @@ Args ParseArgs(int argc, char** argv) {
     if (a.full.csr_dir.empty() || a.full.rules_root.empty() ||
         a.agent.goal_spec.empty() || a.agent.budget == 0 ||
         (a.agent.policy != "deterministic" && a.agent.policy != "random" &&
-         a.agent.policy != "hybrid" && a.agent.policy != "jev") ||
+         a.agent.policy != "hybrid" && a.agent.policy != "jev" &&
+         a.agent.policy != "q-hdc" && a.agent.policy != "q-numeric") ||
         (a.agent.scorer != "exact" && a.agent.scorer != "hdc" &&
          a.agent.scorer != "null") ||
         (a.agent.executor != "greedy" && a.agent.executor != "bnb" &&
-         a.agent.executor != "backward")) {
+         a.agent.executor != "backward" && a.agent.executor != "fixpoint")) {
       PrintUsage();
       std::exit(2);
     }

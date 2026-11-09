@@ -29,7 +29,7 @@ class ReasoningAgent {
     std::unique_ptr<Policy> policy;
     std::unique_ptr<Executor> executor;
     std::unique_ptr<CostModel> cost_model;
-    // Optional bnb branch value model (hdc-value priority, ordering only).
+    // Optional value model for BNB branch or Fixpoint action ordering.
     std::shared_ptr<ValueModel> value_model;
     // --direction backward --executor greedy arm: single-path backward.
     bool backward_no_backtrack = false;

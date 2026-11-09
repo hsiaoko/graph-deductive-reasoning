@@ -1,7 +1,7 @@
 #pragma once
 
 // Hypervector: a D-dimensional bipolar hypervector, bit-packed into uint64
-// words. Bit convention: 1 = +1, 0 = -1 (so XOR is bipolar multiplication,
+// words. Bit convention: 1 = -1, 0 = +1 (so XOR is bipolar multiplication,
 // i.e. binding). The dimension is a runtime value (constructor argument),
 // not a template parameter, so CLIs can pick it from kHdcDimPresets.
 
@@ -23,8 +23,8 @@ inline std::uint64_t SplitMix64Next(std::uint64_t& state) {
 
 class Hypervector {
  public:
-  // All-zero vector (all -1 in bipolar reading); the additive identity of
-  // Bind. `dim` need not be a multiple of 64 — the tail bits of the last
+  // All-zero vector (all +1 in bipolar reading); the identity of Bind.
+  // `dim` need not be a multiple of 64 — the tail bits of the last
   // word are kept zeroed.
   explicit Hypervector(std::uint32_t dim);
 

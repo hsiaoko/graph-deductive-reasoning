@@ -5,6 +5,7 @@
 // (empty for the handcrafted policies).
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "gar/analysis/dependency_graph.h"
@@ -25,6 +27,8 @@ namespace gar {
 namespace engine {
 namespace agent {
 
+class ValueModel;
+
 class Policy {
  public:
   virtual ~Policy() = default;
@@ -32,6 +36,32 @@ class Policy {
   // then terminates with "no_candidates").
   [[nodiscard]] virtual std::optional<std::size_t> Select(
       const std::vector<ScoredMotif>& cands) = 0;
+  // Score-only selection avoids copying every embedding when the executor
+  // maintains current scores incrementally. Policies that need full dossiers
+  // (Jev) keep the default and use Select above instead.
+  virtual bool SupportsScoreView() const { return false; }
+  virtual bool PrefersHighestScore() const { return false; }
+  virtual double SelectionPriority(std::uint64_t action_id, double total) {
+    (void)action_id;
+    return total;
+  }
+  virtual double SelectionPriorityWithFeatures(
+      std::uint64_t action_id, double total,
+      const std::array<double, 11>& features) {
+    (void)features;
+    return SelectionPriority(action_id, total);
+  }
+  virtual void ReleaseSelectionPriority(std::uint64_t action_id) {
+    (void)action_id;
+  }
+  virtual bool RequiresAdmissible() const { return false; }
+  [[nodiscard]] virtual std::optional<std::size_t> SelectScores(
+      const std::vector<double>& totals,
+      const std::vector<char>& admissible) {
+    (void)totals;
+    (void)admissible;
+    return std::nullopt;
+  }
   // Rule-level selection (incremental greedy, policy-first): picks an
   // index into `rules`, or nullopt to decline. Default: argmax of the
   // static priority, ties to the lower index — the deterministic order.
@@ -59,14 +89,30 @@ class Policy {
 // ties break to the lower index (candidate order is deterministic).
 class DeterministicPolicy final : public Policy {
  public:
-  std::optional<std::size_t> Select(
-      const std::vector<ScoredMotif>& cands) override {
-    if (cands.empty()) return std::nullopt;
+  bool SupportsScoreView() const override { return true; }
+  bool PrefersHighestScore() const override { return true; }
+
+  std::optional<std::size_t> SelectScores(
+      const std::vector<double>& totals,
+      const std::vector<char>& admissible) override {
+    (void)admissible;
+    if (totals.empty()) return std::nullopt;
     std::size_t best = 0;
-    for (std::size_t i = 1; i < cands.size(); ++i) {
-      if (cands[i].total > cands[best].total) best = i;
+    for (std::size_t i = 1; i < totals.size(); ++i) {
+      if (totals[i] > totals[best]) best = i;
     }
     return best;
+  }
+
+  std::optional<std::size_t> Select(
+      const std::vector<ScoredMotif>& cands) override {
+    std::vector<double> totals;
+    std::vector<char> admissible;
+    for (const auto& c : cands) {
+      totals.push_back(c.total);
+      admissible.push_back(c.admissible);
+    }
+    return SelectScores(totals, admissible);
   }
 };
 
@@ -78,25 +124,55 @@ class RandomizedPolicy final : public Policy {
   explicit RandomizedPolicy(std::uint64_t seed, double tau = 1.0)
       : rng_(seed), tau_(tau) {}
 
-  std::optional<std::size_t> Select(
-      const std::vector<ScoredMotif>& cands) override {
-    if (cands.empty()) return std::nullopt;
-    double mx = cands[0].total;
-    for (const auto& c : cands) mx = std::max(mx, c.total);
-    std::vector<double> w(cands.size());
+  bool SupportsScoreView() const override { return true; }
+  bool PrefersHighestScore() const override { return true; }
+
+  // Gumbel-max is softmax sampling without rescanning the ready set. Keep
+  // one independent perturbation per live action while its score is updated.
+  double SelectionPriority(std::uint64_t action_id, double total) override {
+    auto [it, inserted] = gumbel_.try_emplace(action_id);
+    if (inserted) {
+      const double u = 1.0 - unit_(rng_);
+      it->second = -std::log(-std::log(u));
+    }
+    return total / tau_ + it->second;
+  }
+
+  void ReleaseSelectionPriority(std::uint64_t action_id) override {
+    gumbel_.erase(action_id);
+  }
+
+  std::optional<std::size_t> SelectScores(
+      const std::vector<double>& totals,
+      const std::vector<char>& admissible) override {
+    (void)admissible;
+    if (totals.empty()) return std::nullopt;
+    const double mx = *std::max_element(totals.begin(), totals.end());
+    std::vector<double> w(totals.size());
     double sum = 0.0;
-    for (std::size_t i = 0; i < cands.size(); ++i) {
-      w[i] = std::exp((cands[i].total - mx) / tau_);
+    for (std::size_t i = 0; i < totals.size(); ++i) {
+      w[i] = std::exp((totals[i] - mx) / tau_);
       sum += w[i];
     }
     std::uniform_real_distribution<double> u(0.0, sum);
     const double pick = u(rng_);
     double acc = 0.0;
-    for (std::size_t i = 0; i < cands.size(); ++i) {
+    for (std::size_t i = 0; i < totals.size(); ++i) {
       acc += w[i];
       if (pick < acc) return i;
     }
-    return cands.size() - 1;
+    return totals.size() - 1;
+  }
+
+  std::optional<std::size_t> Select(
+      const std::vector<ScoredMotif>& cands) override {
+    std::vector<double> totals;
+    std::vector<char> admissible;
+    for (const auto& c : cands) {
+      totals.push_back(c.total);
+      admissible.push_back(c.admissible);
+    }
+    return SelectScores(totals, admissible);
   }
 
   // Rule level: softmax over the static priority with the same tau/stream.
@@ -123,6 +199,8 @@ class RandomizedPolicy final : public Policy {
 
  private:
   std::mt19937 rng_;
+  std::uniform_real_distribution<double> unit_{0.0, 1.0};
+  std::unordered_map<std::uint64_t, double> gumbel_;
   double tau_;
 };
 
@@ -131,15 +209,54 @@ class RandomizedPolicy final : public Policy {
 // stays complete, Corollary 4), then argmax of the score inside.
 class HybridNeuroSymbolicPolicy final : public Policy {
  public:
-  std::optional<std::size_t> Select(
-      const std::vector<ScoredMotif>& cands) override {
+  bool SupportsScoreView() const override { return true; }
+  bool PrefersHighestScore() const override { return true; }
+  bool RequiresAdmissible() const override { return true; }
+
+  std::optional<std::size_t> SelectScores(
+      const std::vector<double>& totals,
+      const std::vector<char>& admissible) override {
     std::optional<std::size_t> best;
-    for (std::size_t i = 0; i < cands.size(); ++i) {
-      if (!cands[i].admissible) continue;
-      if (!best || cands[i].total > cands[*best].total) best = i;
+    for (std::size_t i = 0; i < totals.size(); ++i) {
+      if (!admissible[i]) continue;
+      if (!best || totals[i] > totals[*best]) best = i;
     }
     return best;
   }
+
+  std::optional<std::size_t> Select(
+      const std::vector<ScoredMotif>& cands) override {
+    std::vector<double> totals;
+    std::vector<char> admissible;
+    for (const auto& c : cands) {
+      totals.push_back(c.total);
+      admissible.push_back(c.admissible);
+    }
+    return SelectScores(totals, admissible);
+  }
+};
+
+// Learned action-conditioned cost-to-go ordering for Fixpoint. The model is
+// ordering-only; symbolic admissibility and exact predicate evaluation stay
+// in the executor. Non-owning pointer: ReasoningAgent owns the model.
+class LearnedQPolicy final : public Policy {
+ public:
+  explicit LearnedQPolicy(const ValueModel* model) : model_(model) {}
+
+  bool SupportsScoreView() const override { return true; }
+  bool PrefersHighestScore() const override { return true; }
+  bool RequiresAdmissible() const override { return true; }
+  double SelectionPriorityWithFeatures(
+      std::uint64_t action_id, double total,
+      const std::array<double, 11>& features) override;
+  std::optional<std::size_t> Select(
+      const std::vector<ScoredMotif>& cands) override;
+  std::optional<std::size_t> SelectScores(
+      const std::vector<double>& totals,
+      const std::vector<char>& admissible) override;
+
+ private:
+  const ValueModel* model_;
 };
 
 struct JevConfig {

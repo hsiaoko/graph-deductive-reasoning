@@ -14,6 +14,12 @@ add_library(gar_engine_agent STATIC
     src/motif_generator.cpp
     src/executor.cpp
     src/branch_bound_executor.cpp
+    src/fixpoint_executor.cpp
+    src/fixpoint_session.cpp
+    src/fixpoint_matcher.cpp
+    src/fixpoint_working_set.cpp
+    src/fixpoint_preconditions.cpp
+    src/fixpoint_producers.cpp
     src/jev_client.cpp
     src/policy.cpp
     src/value_model.cpp

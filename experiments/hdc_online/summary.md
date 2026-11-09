@@ -16,7 +16,7 @@
   泄漏**：每个测试 goal 的模型训练集明确排除该 goal（构成见下）。
 - 默认关闭：athletes 两次复验 chain.tsv 逐字节一致（reg_default、reg2）。
 
-## A/B（rules=3023, budget=2, cap=64, hybrid/exact, top_k=0）
+## A/B（rules=1652, DG arcs=3023, budget=2, cap=64, hybrid/exact, top_k=0）
 
 | goal | 展开数 util → hdc | 变化 | wall util → hdc | best_cost | certified | chain.tsv |
 |---|---|---|---|---|---|---|

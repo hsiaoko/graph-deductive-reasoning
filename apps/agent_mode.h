@@ -1,7 +1,7 @@
 #pragma once
 
-// gar_reason --mode agent: policy-guided deduction — a single greedy chain
-// toward a goal fact (paper §3-§5). Argument parsing, execution and output
+// gar_reason --mode agent: policy-guided goal deduction (paper §3-§5).
+// Argument parsing, execution and output
 // live here; the engine itself is engine/agent/. The
 // --verify-against-closure cross-check composes engine::deduction at the
 // app layer — the agent library never sees its sibling engine.
@@ -30,9 +30,12 @@ namespace gar_apps {
 struct AgentModeArgs {
   std::string goal_spec;  // "rel_name(src,dst)"; '_' = open argument
   std::uint64_t budget = 100;
-  std::string policy = "deterministic";   // deterministic|random|hybrid|jev
+  std::string policy = "deterministic";   // deterministic|random|hybrid|jev|q-hdc|q-numeric
   std::string scorer = "exact";           // exact|hdc|null
-  std::string executor = "greedy";        // greedy|bnb|backward
+  std::string executor = "greedy";        // greedy|bnb|backward|fixpoint
+  // FixpointExecutor: longest-waiting fair scheduling interval (0=off).
+  std::uint32_t fair_interval = 0;
+  std::string fixpoint_star_order = "input";  // input|goal
   // Reasoning direction switch (architecture decoupling; unset = legacy
   // --executor behaviour, bit-identical). forward: greedy|bnb only.
   // backward: backward executor = full discipline; backward+greedy =
@@ -90,6 +93,9 @@ struct AgentModeArgs {
   bool forward_full_enum = false;
   double wall_limit_sec = 0.0;
   std::string value_model;
+  gar::engine::agent::HdcBackend hdc_value_backend =
+      gar::engine::agent::HdcBackend::kBitLut;
+  std::string fixpoint_q_trace_path;
 };
 
 // Parses one agent-mode option; returns false when `k` is not one.
@@ -135,6 +141,16 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--backward-full-enum") a->backward_full_enum = true;
   else if (k == "--forward-full-enum") a->forward_full_enum = true;
   else if (k == "--wall-limit") a->wall_limit_sec = std::stod(next());
+  else if (k == "--fair-interval")
+    a->fair_interval = static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--fixpoint-star-order") {
+    a->fixpoint_star_order = next();
+    if (a->fixpoint_star_order != "input" &&
+        a->fixpoint_star_order != "goal") {
+      throw std::invalid_argument("unknown --fixpoint-star-order: " +
+                                  a->fixpoint_star_order + " (input|goal)");
+    }
+  }
   else if (k == "--backward-order") {
     a->backward_order = next();
     if (a->backward_order != "score" && a->backward_order != "random" &&
@@ -145,6 +161,21 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     }
   }
   else if (k == "--value-model") a->value_model = next();
+  else if (k == "--hdc-value-backend") {
+    const std::string backend = next();
+    if (backend == "original") {
+      a->hdc_value_backend = gar::engine::agent::HdcBackend::kOriginal;
+    } else if (backend == "simd") {
+      a->hdc_value_backend = gar::engine::agent::HdcBackend::kSimd;
+    } else if (backend == "bit-lut") {
+      a->hdc_value_backend = gar::engine::agent::HdcBackend::kBitLut;
+    } else {
+      throw std::invalid_argument(
+          "unknown --hdc-value-backend: " + backend +
+          " (original|simd|bit-lut)");
+    }
+  }
+  else if (k == "--fixpoint-q-trace") a->fixpoint_q_trace_path = next();
   else if (k == "--jev-sample") a->jev.sample = true;
   else if (k == "--jev-mock") a->jev_mock = true;
   else return false;
@@ -245,6 +276,27 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
     comps.policy = std::make_unique<agent::RandomizedPolicy>(args.PolicySeed());
   } else if (args.policy == "hybrid") {
     comps.policy = std::make_unique<agent::HybridNeuroSymbolicPolicy>();
+  } else if (args.policy == "q-hdc" || args.policy == "q-numeric") {
+    if (args.value_model.empty()) {
+      throw std::invalid_argument("--policy " + args.policy +
+                                  " requires --value-model PATH");
+    }
+    if (args.scorer != "exact") {
+      throw std::invalid_argument("Q policies require --scorer exact");
+    }
+    auto vm = std::make_shared<agent::ValueModel>();
+    vm->SetHdcBackend(args.hdc_value_backend);
+    if (!vm->Load(args.value_model)) {
+      throw std::runtime_error("failed to load value model: " +
+                               args.value_model);
+    }
+    const std::string want = args.policy == "q-hdc" ? "hdc" : "numeric";
+    if (vm->kind() != want) {
+      throw std::runtime_error("--policy " + args.policy + " got a " +
+                               vm->kind() + " model: " + args.value_model);
+    }
+    comps.policy = std::make_unique<agent::LearnedQPolicy>(vm.get());
+    comps.value_model = std::move(vm);
   } else {
     comps.policy = std::make_unique<agent::DeterministicPolicy>();
   }
@@ -282,16 +334,37 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
       throw std::invalid_argument("unknown --direction: " + args.direction);
     }
   }
+  const bool q_policy =
+      args.policy == "q-hdc" || args.policy == "q-numeric";
+  if ((q_policy || !args.fixpoint_q_trace_path.empty()) &&
+      executor != "fixpoint") {
+    throw std::invalid_argument(
+        "Q policies and --fixpoint-q-trace require --executor fixpoint");
+  }
+  if (!args.fixpoint_q_trace_path.empty() && args.scorer != "exact") {
+    throw std::invalid_argument("--fixpoint-q-trace requires --scorer exact");
+  }
   if (executor == "bnb") {
     comps.executor = std::make_unique<agent::BranchBoundExecutor>();
-    if (args.bnb_priority == "hdc-value") {
+    if (args.bnb_priority == "hdc-value" ||
+        args.bnb_priority == "numeric-value") {
       if (args.value_model.empty()) {
-        throw std::invalid_argument(
-            "--bnb-priority hdc-value requires --value-model PATH");
+        throw std::invalid_argument("--bnb-priority " + args.bnb_priority +
+                                    " requires --value-model PATH");
       }
       auto vm = std::make_shared<agent::ValueModel>();
+      vm->SetHdcBackend(args.hdc_value_backend);
       if (!vm->Load(args.value_model)) {
         throw std::runtime_error("failed to load value model: " +
+                                 args.value_model);
+      }
+      // Arm/format consistency: hdc-value = hdc_value_v1, numeric-value =
+      // numeric_ridge_v1 (a mismatch is almost certainly a wrong path).
+      const std::string want =
+          args.bnb_priority == "hdc-value" ? "hdc" : "numeric";
+      if (vm->kind() != want) {
+        throw std::runtime_error("--bnb-priority " + args.bnb_priority +
+                                 " got a " + vm->kind() + " model: " +
                                  args.value_model);
       }
       comps.value_model = std::move(vm);
@@ -310,6 +383,7 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
             "--backward-priority hdc-value requires --value-model PATH");
       }
       auto vm = std::make_shared<agent::ValueModel>();
+      vm->SetHdcBackend(args.hdc_value_backend);
       if (!vm->Load(args.value_model)) {
         throw std::runtime_error("failed to load value model: " +
                                  args.value_model);
@@ -319,6 +393,8 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
       throw std::invalid_argument("unknown --backward-priority: " +
                                   args.backward_priority);
     }
+  } else if (executor == "fixpoint") {
+    comps.executor = std::make_unique<agent::FixpointExecutor>();
   } else {
     comps.executor = std::make_unique<agent::GreedyExecutor>();
   }
@@ -395,6 +471,9 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   ec.backward_full_enum = args.backward_full_enum;
   ec.forward_full_enum = args.forward_full_enum;
   ec.wall_limit_sec = args.wall_limit_sec;
+  ec.fair_interval = args.fair_interval;
+  ec.fixpoint_star_order = args.fixpoint_star_order;
+  ec.fixpoint_q_trace_path = args.fixpoint_q_trace_path;
   ec.seed = args.PolicySeed();
   ec.max_subgoal_depth = args.max_subgoal_depth;
 
@@ -488,6 +567,13 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
     }
   }
   WriteClosureEdges(io.out_root, g, rule_ids, res.derived);
+  if (res.fx_stats) {
+    std::ofstream f(io.out_root + "/fixpoint_trace.tsv");
+    f << "# seq\tevent\n";
+    for (std::size_t i = 0; i < res.fx_stats->trace.size(); ++i) {
+      f << i + 1 << '\t' << res.fx_stats->trace[i] << "\n";
+    }
+  }
   {
     std::ofstream f(io.out_root + "/summary.yaml");
     f << "mode: agent\n"
@@ -496,7 +582,10 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "policy: " << args.policy << "\n"
       << "scorer: " << args.scorer << "\n"
       << "executor: " << args.executor << "\n"
+      << "fixpoint_star_order: " << args.fixpoint_star_order << "\n"
       << "hdc_dim: " << args.hdc_dim << "\n"
+      << "hdc_value_backend: "
+      << gar::engine::agent::HdcBackendName(args.hdc_value_backend) << "\n"
       << "seed: " << args.seed << "\n"
       << "policy_seed: " << args.PolicySeed() << "\n"
       << "hdc_seed: " << args.HdcSeed() << "\n"
@@ -510,6 +599,8 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "termination: " << res.termination << "\n"
       << "utility: " << res.utility << "\n"
       << "expansions: " << res.expansions << "\n"
+      << "first_goal_expansions: " << res.first_goal_expansions << "\n"
+      << "first_goal_wall_ms: " << res.first_goal_wall_ms << "\n"
       << "certified_optimal: " << (res.certified_optimal ? "true" : "false")
       << "\n"
       << "certified_no_chain: "
@@ -530,6 +621,44 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
         << "fwd_match_wall_ms: " << res.fwd_stats->match_wall_ms << "\n"
         << "fwd_apply_wall_ms: " << res.fwd_stats->apply_wall_ms << "\n"
         << "fwd_score_wall_ms: " << res.fwd_stats->score_wall_ms << "\n";
+    }
+    if (res.fx_stats) {
+      // FixpointExecutor instrumentation (flat fields; the event trace is
+      // written to fixpoint_trace.tsv below).
+      f << "fx_select_events: " << res.fx_stats->select_events << "\n"
+        << "fx_fair_select_events: " << res.fx_stats->fair_select_events
+        << "\n"
+        << "fx_evaluate_events: " << res.fx_stats->evaluate_events << "\n"
+        << "fx_suspend_events: " << res.fx_stats->suspend_events << "\n"
+        << "fx_revive_events: " << res.fx_stats->revive_events << "\n"
+        << "fx_prune_events: " << res.fx_stats->prune_events << "\n"
+        << "fx_derive_events: " << res.fx_stats->derive_events << "\n"
+        << "fx_candidate_caps: " << res.fx_stats->candidate_caps << "\n"
+        << "fx_ready_peak: " << res.fx_stats->ready_peak << "\n"
+        << "fx_suspended_peak: " << res.fx_stats->suspended_peak << "\n"
+        << "fx_generation_events: " << res.fx_stats->generation_events << "\n"
+        << "fx_match_embeddings: " << res.fx_stats->match_embeddings << "\n"
+        << "fx_ready_insertions: " << res.fx_stats->ready_insertions << "\n"
+        << "fx_revival_passes: " << res.fx_stats->revival_passes << "\n"
+        << "fx_score_calls: " << res.fx_stats->score_calls << "\n"
+        << "fx_scored_candidates: " << res.fx_stats->scored_candidates << "\n"
+        << "fx_search_cost: " << res.fx_stats->search_cost << "\n"
+        << "fx_proof_cost: " << res.fx_stats->proof_cost << "\n"
+        << "fx_prepare_wall_ms: " << res.fx_stats->prepare_wall_ms << "\n"
+        << "fx_generation_wall_ms: " << res.fx_stats->generation_wall_ms << "\n"
+        << "fx_selection_wall_ms: " << res.fx_stats->selection_wall_ms << "\n"
+        << "fx_score_wall_ms: " << res.fx_stats->score_wall_ms << "\n"
+        << "fx_ready_remove_wall_ms: " << res.fx_stats->ready_remove_wall_ms << "\n"
+        << "fx_evaluation_wall_ms: " << res.fx_stats->evaluation_wall_ms << "\n"
+        << "fx_derivation_wall_ms: " << res.fx_stats->derivation_wall_ms << "\n"
+        << "fx_delta_wall_ms: " << res.fx_stats->delta_wall_ms << "\n"
+        << "fx_delta_complete_wall_ms: "
+        << res.fx_stats->delta_complete_wall_ms << "\n"
+        << "fx_partial_complete_wall_ms: "
+        << res.fx_stats->partial_complete_wall_ms << "\n"
+        << "fx_partial_grow_wall_ms: " << res.fx_stats->partial_grow_wall_ms
+        << "\n"
+        << "fx_revival_wall_ms: " << res.fx_stats->revival_wall_ms << "\n";
     }
     if (jev != nullptr) {
       // §5.3: decision-model calls are control overhead — wall-clock, not

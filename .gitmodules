@@ -1,0 +1,3 @@
+[submodule "third_party/MatrixGraph"]
+	path = third_party/MatrixGraph
+	url = https://github.com/hsiaoko/MatrixGraph

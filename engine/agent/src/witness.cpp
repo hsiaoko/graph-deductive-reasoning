@@ -35,8 +35,8 @@ std::uint64_t FactPredicateSymbol(const Fact& f, const graph::TripleGraph& g,
   return hdc::SplitMix64Next(s) | (1ull << 63);
 }
 
-void WitnessLog::WitnessFact(const Fact& f, const hdc::HdcEncoder& enc) {
-  exact_.insert(KeyOf(f));
+bool WitnessLog::WitnessFact(const Fact& f, const hdc::HdcEncoder& enc) {
+  const bool inserted = exact_.insert(KeyOf(f)).second;
   if (use_hdc_) {
     const std::uint64_t args[2] = {f.args[0], f.args[1]};
     hdc_ev_.Witness(
@@ -44,6 +44,7 @@ void WitnessLog::WitnessFact(const Fact& f, const hdc::HdcEncoder& enc) {
     packed_dirty_ = true;
   }
   ++count_;
+  return inserted;
 }
 
 }  // namespace agent
