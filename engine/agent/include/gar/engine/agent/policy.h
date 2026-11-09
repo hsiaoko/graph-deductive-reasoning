@@ -284,9 +284,9 @@ struct JevConfig {
 // once on stderr and falls back to plain argmax-total over ALL candidates
 // (exactly DeterministicPolicy's selection).
 //
-// NOTE: with BranchBoundExecutor the ranking comes from the scorer (the
-// symbolic f), so a Jev policy makes no calls there (calls()==0); Jev
-// ranks inside the greedy loop, which is the §5.1 policy point.
+// NOTE: the agent has a single executor (FixpointExecutor / Algorithm 6);
+// Jev ranks candidates inside its ready-set selection, which is the §5.1
+// policy point.
 class JevPolicy final : public Policy {
  public:
   JevPolicy(JevConfig cfg, std::unique_ptr<JevClient> client,

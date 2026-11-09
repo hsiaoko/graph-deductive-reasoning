@@ -29,10 +29,8 @@ class ReasoningAgent {
     std::unique_ptr<Policy> policy;
     std::unique_ptr<Executor> executor;
     std::unique_ptr<CostModel> cost_model;
-    // Optional value model for BNB branch or Fixpoint action ordering.
+    // Optional value model for Fixpoint action ordering.
     std::shared_ptr<ValueModel> value_model;
-    // --direction backward --executor greedy arm: single-path backward.
-    bool backward_no_backtrack = false;
   };
 
   ReasoningAgent(Components comps, const analysis::DependencyGraph* dg,
@@ -70,9 +68,7 @@ class ReasoningAgent {
     FailureRegistry failures;
     const ExecKit kit{comps_.scorer.get(), comps_.policy.get(),
                       comps_.cost_model.get(), comps_.value_model.get()};
-    ExecConfig cfg2 = cfg;
-    cfg2.no_backtrack = comps_.backward_no_backtrack;
-    return comps_.executor->Run(goal, state, &witness, &failures, ctx, cfg2,
+    return comps_.executor->Run(goal, state, &witness, &failures, ctx, cfg,
                                 kit);
   }
 

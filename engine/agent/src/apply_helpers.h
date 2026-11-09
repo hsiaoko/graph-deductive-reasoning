@@ -1,7 +1,7 @@
 // src-local: shared motif-application failure classification of the
-// executors. GreedyExecutor and BranchBoundExecutor both apply motifs with
-// the exact chase semantics (graph::EvalAntecedent) and must classify
-// failures identically.
+// executor. Applying a motif uses the exact chase semantics
+// (graph::EvalAntecedent) and classifies failures as static (permanent) or
+// dynamic (waits for missing facts).
 #pragma once
 
 #include <cstdint>

@@ -11,9 +11,6 @@ add_library(gar_engine_agent STATIC
     src/motif.cpp
     src/witness.cpp
     src/scorer.cpp
-    src/motif_generator.cpp
-    src/executor.cpp
-    src/branch_bound_executor.cpp
     src/fixpoint_executor.cpp
     src/fixpoint_session.cpp
     src/fixpoint_matcher.cpp
@@ -23,8 +20,6 @@ add_library(gar_engine_agent STATIC
     src/jev_client.cpp
     src/policy.cpp
     src/value_model.cpp
-    src/backward_executor.cpp
-    src/backward_bnb_executor.cpp
 )
 add_library(gar::engine::agent ALIAS gar_engine_agent)
 

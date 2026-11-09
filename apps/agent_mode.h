@@ -32,35 +32,21 @@ struct AgentModeArgs {
   std::uint64_t budget = 100;
   std::string policy = "deterministic";   // deterministic|random|hybrid|jev|q-hdc|q-numeric
   std::string scorer = "exact";           // exact|hdc|null
-  std::string executor = "greedy";        // greedy|bnb|backward|fixpoint
-  // FixpointExecutor: longest-waiting fair scheduling interval (0=off).
+  // Longest-waiting fair scheduling interval (0=off).
   std::uint32_t fair_interval = 0;
   std::string fixpoint_star_order = "input";  // input|goal
-  // Reasoning direction switch (architecture decoupling; unset = legacy
-  // --executor behaviour, bit-identical). forward: greedy|bnb only.
-  // backward: backward executor = full discipline; backward+greedy =
-  // degenerate single-path arm (first OR choice only, no backtracking);
-  // backward+bnb = reserved for Phase 2 (error).
-  std::string direction;                  // ""|forward|backward
-  std::uint32_t top_k = 0;                // bnb: 0 = exact (no truncation)
   std::uint32_t hdc_dim = gar::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
-  // Seed decoupling (--policy-seed / --hdc-seed; both fall back to --seed,
-  // so omitting them reproduces legacy runs bit-for-bit). The HDC encoder
-  // uses the hdc seed; every policy-side RNG (RandomizedPolicy, backward
-  // --backward-order random/hybrid shuffles, JEV mock) uses the policy seed.
+  // Seed decoupling (--policy-seed / --hdc-seed; both fall back to --seed).
+  // The HDC encoder uses the hdc seed; every policy-side RNG
+  // (RandomizedPolicy, JEV mock) uses the policy seed.
   std::optional<std::uint64_t> policy_seed;
   std::optional<std::uint64_t> hdc_seed;
   [[nodiscard]] std::uint64_t PolicySeed() const {
     return policy_seed.value_or(seed);
   }
   [[nodiscard]] std::uint64_t HdcSeed() const { return hdc_seed.value_or(seed); }
-  // Backward subgoal recursion cap (--max-subgoal-depth; default 4 keeps
-  // legacy behaviour). Both backward executors read ExecConfig's copy.
-  std::uint32_t max_subgoal_depth = 4;
   std::uint32_t max_candidates_per_rule = 256;
-  // BackwardExecutor open-target collect cap (default 8 = legacy).
-  std::uint32_t open_collect_cap = 8;
   gar::engine::agent::HandcraftedConfig score;
   bool verify_against_closure = false;
   // Ablation: --no-dg removes dependency-graph guidance (d(.) table all
@@ -71,26 +57,6 @@ struct AgentModeArgs {
   // for the network-free MockJevClient (development/regression support).
   gar::engine::agent::JevConfig jev;
   bool jev_mock = false;
-  // bnb branch value model: --bnb-priority utility|hdc-value plus
-  // --value-model PATH (required when hdc-value). Ordering only; default
-  // utility reproduces the stock best-first behaviour bit-for-bit.
-  std::string bnb_priority = "utility";
-  // backward attempt ordering: heuristic (default, bit-identical legacy)
-  // or hdc-value (needs --value-model PATH).
-  std::string backward_priority = "heuristic";
-  // BackwardBnB lower bound flavour (only meaningful with
-  // --direction backward --executor bnb).
-  std::string backward_bnb_lb = "predicate";  // predicate|instance
-  std::string backward_bnb_enum = "eager";    // eager|lazy
-  // BackwardExecutor candidate ordering (policy analogue for backward):
-  // score (default, bit-identical) | random (seeded shuffle) | hybrid
-  // (seeded shuffle inside the top-8 score window).
-  std::string backward_order = "score";
-  // Full-extension mode for open-sided backward goals (loop to fixpoint).
-  bool backward_full_enum = false;
-  // Greedy analogue for open-sided goals; --wall-limit gives a clean
-  // in-process stop (partial results still written) at N seconds.
-  bool forward_full_enum = false;
   double wall_limit_sec = 0.0;
   std::string value_model;
   gar::engine::agent::HdcBackend hdc_value_backend =
@@ -106,18 +72,10 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--budget") a->budget = std::stoull(next());
   else if (k == "--policy") a->policy = next();
   else if (k == "--scorer") a->scorer = next();
-  else if (k == "--executor") a->executor = next();
-  else if (k == "--direction") a->direction = next();
-  else if (k == "--top-k")
-    a->top_k = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--hdc-dim") a->hdc_dim = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--seed") a->seed = std::stoull(next());
   else if (k == "--policy-seed") a->policy_seed = std::stoull(next());
   else if (k == "--hdc-seed") a->hdc_seed = std::stoull(next());
-  else if (k == "--max-subgoal-depth")
-    a->max_subgoal_depth = static_cast<std::uint32_t>(std::stoul(next()));
-  else if (k == "--open-collect-cap")
-    a->open_collect_cap = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--max-candidates-per-rule")
     a->max_candidates_per_rule = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--alpha") a->score.alpha = std::stod(next());
@@ -134,12 +92,6 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->jev.timeout_ms = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--jev-top-k")
     a->jev.top_k = static_cast<std::size_t>(std::stoull(next()));
-  else if (k == "--bnb-priority") a->bnb_priority = next();
-  else if (k == "--backward-priority") a->backward_priority = next();
-  else if (k == "--backward-bnb-lb") a->backward_bnb_lb = next();
-  else if (k == "--backward-bnb-enum") a->backward_bnb_enum = next();
-  else if (k == "--backward-full-enum") a->backward_full_enum = true;
-  else if (k == "--forward-full-enum") a->forward_full_enum = true;
   else if (k == "--wall-limit") a->wall_limit_sec = std::stod(next());
   else if (k == "--fair-interval")
     a->fair_interval = static_cast<std::uint32_t>(std::stoul(next()));
@@ -149,15 +101,6 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
         a->fixpoint_star_order != "goal") {
       throw std::invalid_argument("unknown --fixpoint-star-order: " +
                                   a->fixpoint_star_order + " (input|goal)");
-    }
-  }
-  else if (k == "--backward-order") {
-    a->backward_order = next();
-    if (a->backward_order != "score" && a->backward_order != "random" &&
-        a->backward_order != "hybrid") {
-      throw std::invalid_argument("unknown --backward-order: " +
-                                  a->backward_order +
-                                  " (score|random|hybrid)");
     }
   }
   else if (k == "--value-model") a->value_model = next();
@@ -300,106 +243,11 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
   } else {
     comps.policy = std::make_unique<agent::DeterministicPolicy>();
   }
-  // --direction resolution (unset = legacy --executor behaviour).
-  std::string executor = args.executor;
-  bool backward_no_backtrack = false;
-  if (!args.direction.empty()) {
-    if (args.direction == "forward") {
-      if (args.executor == "backward") {
-        throw std::invalid_argument(
-            "--direction forward and --executor backward are mutually "
-            "exclusive");
-      }
-    } else if (args.direction == "backward") {
-      if (args.executor == "bnb") {
-        executor = "backward-bnb";  // Phase 2: AND-OR branch-and-bound
-        if (args.backward_bnb_lb != "predicate" &&
-            args.backward_bnb_lb != "instance") {
-          throw std::invalid_argument("unknown --backward-bnb-lb: " +
-                                      args.backward_bnb_lb);
-        }
-        if (args.backward_bnb_enum != "eager" &&
-            args.backward_bnb_enum != "lazy") {
-          throw std::invalid_argument("unknown --backward-bnb-enum: " +
-                                      args.backward_bnb_enum);
-        }
-      } else if (args.executor == "backward") {
-        executor = "backward";  // full discipline (DFS + backtracking)
-      } else {
-        executor = "backward";         // degenerate single-path arm rides
-        backward_no_backtrack = true;  // the backward executor, OR = first
-                                       // choice only, no pass-2 fallback
-      }
-    } else {
-      throw std::invalid_argument("unknown --direction: " + args.direction);
-    }
-  }
-  const bool q_policy =
-      args.policy == "q-hdc" || args.policy == "q-numeric";
-  if ((q_policy || !args.fixpoint_q_trace_path.empty()) &&
-      executor != "fixpoint") {
-    throw std::invalid_argument(
-        "Q policies and --fixpoint-q-trace require --executor fixpoint");
-  }
   if (!args.fixpoint_q_trace_path.empty() && args.scorer != "exact") {
     throw std::invalid_argument("--fixpoint-q-trace requires --scorer exact");
   }
-  if (executor == "bnb") {
-    comps.executor = std::make_unique<agent::BranchBoundExecutor>();
-    if (args.bnb_priority == "hdc-value" ||
-        args.bnb_priority == "numeric-value") {
-      if (args.value_model.empty()) {
-        throw std::invalid_argument("--bnb-priority " + args.bnb_priority +
-                                    " requires --value-model PATH");
-      }
-      auto vm = std::make_shared<agent::ValueModel>();
-      vm->SetHdcBackend(args.hdc_value_backend);
-      if (!vm->Load(args.value_model)) {
-        throw std::runtime_error("failed to load value model: " +
-                                 args.value_model);
-      }
-      // Arm/format consistency: hdc-value = hdc_value_v1, numeric-value =
-      // numeric_ridge_v1 (a mismatch is almost certainly a wrong path).
-      const std::string want =
-          args.bnb_priority == "hdc-value" ? "hdc" : "numeric";
-      if (vm->kind() != want) {
-        throw std::runtime_error("--bnb-priority " + args.bnb_priority +
-                                 " got a " + vm->kind() + " model: " +
-                                 args.value_model);
-      }
-      comps.value_model = std::move(vm);
-    } else if (args.bnb_priority != "utility") {
-      throw std::invalid_argument("unknown --bnb-priority: " +
-                                  args.bnb_priority);
-    }
-  } else if (executor == "backward-bnb") {
-    comps.executor = std::make_unique<agent::BackwardBnBExecutor>();
-  } else if (executor == "backward") {
-    comps.executor = std::make_unique<agent::BackwardExecutor>();
-    comps.backward_no_backtrack = backward_no_backtrack;
-    if (args.backward_priority == "hdc-value") {
-      if (args.value_model.empty()) {
-        throw std::invalid_argument(
-            "--backward-priority hdc-value requires --value-model PATH");
-      }
-      auto vm = std::make_shared<agent::ValueModel>();
-      vm->SetHdcBackend(args.hdc_value_backend);
-      if (!vm->Load(args.value_model)) {
-        throw std::runtime_error("failed to load value model: " +
-                                 args.value_model);
-      }
-      comps.value_model = std::move(vm);
-    } else if (args.backward_priority != "heuristic") {
-      throw std::invalid_argument("unknown --backward-priority: " +
-                                  args.backward_priority);
-    }
-  } else if (executor == "fixpoint") {
-    comps.executor = std::make_unique<agent::FixpointExecutor>();
-  } else {
-    comps.executor = std::make_unique<agent::GreedyExecutor>();
-  }
-  return agent::ReasoningAgent(std::move(comps), dg, encoder,
-                               !args.no_dg);
+  comps.executor = std::make_unique<agent::FixpointExecutor>();
+  return agent::ReasoningAgent(std::move(comps), dg, encoder, !args.no_dg);
 }
 
 // Renders a derived fact as "rel(src,dst)" with entity names.
@@ -462,28 +310,18 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   agent::ExecConfig ec;
   ec.budget = args.budget;
   ec.match_cap_per_rule = args.max_candidates_per_rule;
-  ec.open_collect_cap = args.open_collect_cap;
-  ec.top_k = args.top_k;
   ec.utility_gamma = args.score.gamma;
-  ec.backward_bnb_instance_lb = (args.backward_bnb_lb == "instance");
-  ec.backward_bnb_lazy_enum = (args.backward_bnb_enum == "lazy");
-  ec.backward_order = args.backward_order;
-  ec.backward_full_enum = args.backward_full_enum;
-  ec.forward_full_enum = args.forward_full_enum;
   ec.wall_limit_sec = args.wall_limit_sec;
   ec.fair_interval = args.fair_interval;
   ec.fixpoint_star_order = args.fixpoint_star_order;
   ec.fixpoint_q_trace_path = args.fixpoint_q_trace_path;
   ec.seed = args.PolicySeed();
-  ec.max_subgoal_depth = args.max_subgoal_depth;
 
   std::cerr << "[gar_reason] running: policy=" << args.policy
-            << " scorer=" << args.scorer << " executor=" << args.executor
+            << " scorer=" << args.scorer
             << " budget=" << args.budget << " hdc_dim=" << args.hdc_dim
             << " seed=" << args.seed << " policy_seed=" << args.PolicySeed()
-            << " hdc_seed=" << args.HdcSeed();
-  if (args.executor == "bnb") std::cerr << " top_k=" << args.top_k;
-  std::cerr << "\n";
+            << " hdc_seed=" << args.HdcSeed() << "\n";
   const auto run_t0 = std::chrono::steady_clock::now();
   const agent::AgentResult res = rag.Run(&state, goal, ec);
   const double wall =
@@ -504,18 +342,6 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << " derived=" << res.derived.size() << " cost=" << res.total_cost
             << " goal_derived=" << (res.goal_derived ? "true" : "false")
             << " termination=" << res.termination << " wall=" << wall << "s\n";
-  if (res.fwd_stats) {
-    std::cerr << "[gar_reason] forward-incremental: rule_selections="
-              << res.fwd_stats->rule_selections
-              << " rules_initialized=" << res.fwd_stats->rules_initialized
-              << " delta_enums=" << res.fwd_stats->delta_enums
-              << " embeddings=" << res.fwd_stats->embeddings_generated
-              << " reused=" << res.fwd_stats->candidates_reused
-              << " capped=" << res.fwd_stats->capped_enums
-              << " match_ms=" << res.fwd_stats->match_wall_ms
-              << " apply_ms=" << res.fwd_stats->apply_wall_ms
-              << " score_ms=" << res.fwd_stats->score_wall_ms << "\n";
-  }
 
   // ---- optional soundness cross-check against the full closure (L4
   // composition: the agent library itself never sees engine::deduction) ----
@@ -581,7 +407,6 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "goal_slot: " << goal.slot << "\n"
       << "policy: " << args.policy << "\n"
       << "scorer: " << args.scorer << "\n"
-      << "executor: " << args.executor << "\n"
       << "fixpoint_star_order: " << args.fixpoint_star_order << "\n"
       << "hdc_dim: " << args.hdc_dim << "\n"
       << "hdc_value_backend: "
@@ -589,7 +414,6 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "seed: " << args.seed << "\n"
       << "policy_seed: " << args.PolicySeed() << "\n"
       << "hdc_seed: " << args.HdcSeed() << "\n"
-      << "max_subgoal_depth: " << args.max_subgoal_depth << "\n"
       << "steps: " << res.chain.size() << "\n"
       << "derived: " << res.derived.size() << "\n"
       << "total_cost: " << res.total_cost << "\n"
@@ -597,31 +421,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "budget_exhausted: " << (res.budget_exhausted ? "true" : "false")
       << "\n"
       << "termination: " << res.termination << "\n"
-      << "utility: " << res.utility << "\n"
-      << "expansions: " << res.expansions << "\n"
-      << "first_goal_expansions: " << res.first_goal_expansions << "\n"
-      << "first_goal_wall_ms: " << res.first_goal_wall_ms << "\n"
-      << "certified_optimal: " << (res.certified_optimal ? "true" : "false")
-      << "\n"
-      << "certified_no_chain: "
-      << (res.certified_no_chain ? "true" : "false") << "\n"
-      << "anytime_fallback: " << (res.anytime_fallback ? "true" : "false")
-      << "\n";
-    if (res.fwd_stats) {
-      // Incremental-greedy instrumentation (flat fields).
-      f << "fwd_rule_selections: " << res.fwd_stats->rule_selections << "\n"
-        << "fwd_rules_initialized: " << res.fwd_stats->rules_initialized
-        << "\n"
-        << "fwd_delta_enums: " << res.fwd_stats->delta_enums << "\n"
-        << "fwd_embeddings_generated: " << res.fwd_stats->embeddings_generated
-        << "\n"
-        << "fwd_candidates_reused: " << res.fwd_stats->candidates_reused
-        << "\n"
-        << "fwd_capped_enums: " << res.fwd_stats->capped_enums << "\n"
-        << "fwd_match_wall_ms: " << res.fwd_stats->match_wall_ms << "\n"
-        << "fwd_apply_wall_ms: " << res.fwd_stats->apply_wall_ms << "\n"
-        << "fwd_score_wall_ms: " << res.fwd_stats->score_wall_ms << "\n";
-    }
+      << "utility: " << res.utility << "\n";
     if (res.fx_stats) {
       // FixpointExecutor instrumentation (flat fields; the event trace is
       // written to fixpoint_trace.tsv below).
