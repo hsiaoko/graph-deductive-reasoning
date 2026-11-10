@@ -13,100 +13,44 @@
 
 ```
 ├── CMakeLists.txt            # 顶层构建
-├── core/                     # 规则表示与 IO（纯 CPU）
-│   ├── include/gar/
-│   │   ├── types.h           #   VertexID/EdgeIndex/LabelID（对齐 MatrixGraph：均 uint32）
-│   │   ├── csr.h             #   CSRTopology：offsets/indices/edge_labels
-│   │   ├── predicate.h       #   五种谓词：const/var/edge/exists/ml
-│   │   ├── rule.h            #   GARule = (Q, X -> p₀)：pivot、可选 consequent、quality
-│   │   ├── rule_loader.h     #   YAML/目录/规则集加载（容错解析）
-│   │   └── rule_store.h      #   规则集 YAML 写出（挖掘结果序列化）
-│   └── src/
-├── graph/                    # 图与语义内核（纯 CPU，无 MatrixGraph 依赖）
-│   ├── include/gar/graph/
-│   │   ├── triple_graph.h    #   三元组存储（uint32 字典编码 + 逆关系 + 多种索引）
-│   │   ├── pattern_matcher.h #   任意连通小拓扑的 embedding 枚举（CPU 回溯）
-│   │   ├── vertex_attrs.h    #   顶点属性列（AttrColumn/VertexAttrs，纯 CPU 类型）
-│   │   ├── fact.h            #   DerivedEdge：一轮 chase 导出的新事实
-│   │   ├── predicate_evaluator.h  # EvalAntecedent：X 谓词对单个 embedding 求值
-│   │   └── fact_merger.h     #   MergeRoundFacts/MarkAbsentEdges：轮末事实合并
-│   └── src/
-├── bridge/                   # MatrixGraph 适配层（唯一可 include MatrixGraph 的库）
-│   ├── include/gar/bridge/
-│   │   ├── graph_loader.h    #   ImmutableCSR → TripleGraph
-│   │   ├── vertex_attrs_loader.h  # vertex_attr → CPU 属性列（.cu 内联头）
-│   │   └── pattern_bridge.h  #   零拷贝桥接到 MatrixGraph GARPatternArrays
-│   └── src/
-├── hdc/                      # HDC 数值库（bit-packed 超向量，纯 CPU，零仓库内依赖）
-│   ├── include/gar/hdc/
-│   │   ├── const.h           #   维度档位 + ChooseDim（App I：(m+N)² ≤ D）
-│   │   ├── hypervector.h     #   Hypervector：Bind(XOR)/Permute(循环移位)/Hamming/Cosine
-│   │   ├── encoder.h         #   HdcEncoder：符号在线哈希 + v_p ⊕ ⨁ᵢ ρⁱ(v_aᵢ)
-│   │   └── evidence.h        #   EvidenceVector：int16 坐标累加器 + cosine 读数
-│   └── src/
-├── analysis/                 # L2 分析服务（只依赖 core + graph）
-│   ├── include/gar/analysis/
-│   │   ├── predicate_table.h #   PredicateTable：谓词名 → 稠密 id（身份规则唯一来源）
-│   │   ├── dependency_graph.h#   DependencyGraph：BuildDG + 反向 BFS/Dijkstra d(·) + Tarjan SCC + dot/yaml
-│   │   ├── rule_stats.h      #   RuleSetStats：规则集与依赖形态统计
-│   │   └── goal_sampler.h    #   GoalSampler：可导出槽位上的目标事实采样（纯采样，无 chase）
-│   └── src/
-├── miner/                    # GAR 挖掘
-│   ├── include/gar/miner/
-│   │   ├── chain_miner.h     #   链式规则挖掘（AMIE 式，support/confidence）
-│   │   └── pattern_miner.h   #   通用拓扑规则挖掘（星型/三角/带环，逐层扩展）
-│   ├── mine_rules.cpp        #   链式挖掘命令行
-│   └── mine_graph_rules.cpp  #   通用拓扑挖掘命令行
-├── engine/                   # 演绎引擎家族
-│   ├── deduction/            #   全闭包演绎（chase）：抽象基类 + CPU/GPU 双实现
-│   │   ├── include/gar/engine/deduction/
-│   │   │   ├── deduction_engine.h    # DeductionEngine 基类 + ChaseConfig/ChaseResult 契约
-│   │   │   ├── cpu_chase_engine.h    # CpuChaseEngine：拓扑匹配 + X 谓词 + 迭代至不动点（oneTBB）
-│   │   │   └── gpu_deduce_engine.h   # GpuDeduceEngine：匹配/X/head 发射在 device（GARDeduce）
-│   │   └── src/
-│   └── agent/                #   策略制导演绎（policy-guided deduction，论文核心）
-│       ├── include/gar/engine/agent/
-│       │   ├── reasoning_agent.h     # ReasoningAgent：composition root
-│       │   ├── executor.h            # Executor 基类 + GreedyExecutor + BranchBoundExecutor（HybNS 分支定界）
-│       │   ├── motif_generator.h     # EnumerateAllCandidates（bnb 专用全候选枚举辅助；d(p₀)<∞ 硬过滤前置）
-│       │   ├── scorer.h              # ExactScorer / HdcScorer（rel_fam/rel_evd/dcost/price）
-│       │   ├── policy.h              # Deterministic / Randomized / HybridNeuroSymbolic
-│       │   ├── state.h               # AgentState（Γ 只增 + version 计数）
-│       │   ├── failure_registry.h    # static 永久退休 / dynamic 按版本重准入
-│       │   ├── witness.h             # WitnessLog：exact 集 + HDC 证据向量双写
-│       │   ├── cost_model.h          # CostModel/UnitCostModel（w₀ 下界）
-│       │   ├── branch_bound_executor.h # 分支状态设计（TripleGraph 克隆/分支）
-│       │   ├── fact.h / goal.h / motif.h
-│       └── src/
-├── apps/
-│   ├── kg_loader.cu          # KG 装载：TripleGraph -> MatrixGraph ImmutableCSR + CLI 展示
-│   ├── match_pattern.cu      # 规则模式匹配：GARMatch（GPU）物化匹配表 + 属性谓词统计
-│   ├── mine_predicates.cu    # 阶段三：在规则匹配上挖 const/var 属性谓词（回填 X）
-│   ├── deduce.cu             # 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase，薄壳）
-│   ├── deduce_gpu.cu         # 演绎 GPU 版（薄壳）：匹配 + X 求值 + head 发射在 device（GARDeduce）
-│   ├── gar_reason.cu         # 演绎统一入口：--mode full（cpu|gpu）/ --mode agent（策略制导，--goal/--budget/--policy/--scorer）
-│   ├── gar_analyze.cu        # 分析工具链：rules-stats/gen-goals/gen-workload/chain-cmp/verify
-│   ├── validate_rules.cu     # 规则检验：重算 pivot-pair support/confidence 并与挖掘值对账
-│   ├── agent_mode.h          # gar_reason/gar_analyze 共享：agent 模式 CLI + 组装（MakeReasoningAgent）
-│   ├── full_deduce_cli.h     # gar_reason/deduce/deduce_gpu 共享：CLI 解析 + 加载 + 输出
-│   └── closure_output.h      # deduce 双端共享：summary/closure/matches 输出
+├── core/                     # gar::core 单一库（规则 + 图 + HDC + 分析 + 演绎引擎）
+│   ├── include/gar/          #   gar::core::rule：规则表示与 IO
+│   │   ├── types.h           #     VertexID/EdgeIndex/LabelID（对齐 MatrixGraph：均 uint32）
+│   │   ├── csr.h             #     CSRTopology（仅 legacy csr_*.bin 二进制序列化）
+│   │   ├── predicate.h       #     五种谓词：const/var/edge/exists/ml
+│   │   ├── rule.h            #     GARule = (Q, X -> p₀)：扁平边数组 + 语义字段
+│   │   ├── rule_loader.h     #     YAML/目录/规则集加载
+│   │   └── rule_store.h      #     规则集 YAML 写出
+│   ├── graph/                #   gar::core::graph：图与语义内核
+│   │   ├── triple_graph.h    #     G∪Γ 三元组存储（惰性 out-adjacency）
+│   │   ├── pattern_matcher.h #     embedding 枚举（CPU 回溯；已被 HomMatch 取代）
+│   │   ├── predicate_evaluator.h / fact_merger.h / vertex_attrs.h / fact.h
+│   ├── hdc/                  #   gar::core::hdc：HDC 数值库（bit-packed 超向量）
+│   ├── analysis/             #   gar::core::analysis：依赖图 + 谓词表 + 统计
+│   ├── bridge/               #   gar::core::bridge：ImmutableCSR → TripleGraph 适配
+│   └── engine/
+│       ├── deduction/        #     gar::core::engine::chase：全闭包 chase（CPU + GPU）
+│       └── agent/            #     gar::core::engine::agent：AdaDeduce（策略制导演绎，论文核心）
+├── tools/                    # 消费者（用 gar::core）
+│   ├── cli/                  #   kg_loader / match_pattern / mine_predicates / deduce /
+│   │                         #   gar_reason / gar_analyze / validate_rules
+│   ├── miner/                #   gar::tools::miner：规则挖掘（chain/pattern）
+│   └── prepare_*.py          #   数据准备脚本
+├── third_party/MatrixGraph/  # 唯一外部图引擎（ImmutableCSR / GARMatch / HomMatch / GARDeduce）
+├── examples/                 # load_rule / rule_set_info / matrixgraph_bridge / value_model_*
 ├── docs/
-│   ├── requirements.md       # 需求文档（v0.1→v0.4 终版留档）
-│   ├── agent_design.md       # 架构设计：五级层化 + 依赖禁令 + 语义口径
-│   └── commands.md           # 命令手册：挖掘/演绎/分析 CLI 参考
-├── tools/
-│   ├── prepare_finreflectkg.py  # FinReflectKG parquet -> TripleGraph 二进制
-│   ├── prepare_triples.py    # 通用三元组转换（tsv/nt/ogb-biokg -> TripleGraph）
-│   └── prepare_dbpedia_literals.py  # DBpedia literals -> 顶点属性列 TSV
-├── examples/                 # load_rule / rule_set_info / matrixgraph_bridge
-├── data/
-│   ├── rules/example/        # 手写示例规则（rule.yaml + csr_*.bin）
-│   ├── synth/                # 合成测试图（已知答案的回归用例）
-│   ├── finreflectkg_s2/      # FinReflectKG 2 分片子集（TripleGraph）
-│   ├── finreflectkg_s2_rules.yaml  # 该子集挖出的 1340 条规则
-│   └── paper.pdf             # 目标论文（policy-guided deduction）
-└── third_party/MatrixGraph/  # 图引擎（含 gflags/oneTBB/yaml-cpp 子模块）
+└── data/                     # synth / finreflectkg_s2 / rules/example
 ```
+
+核心层级（依赖只向下）：
+
+```
+gar::core::rule  ←  gar::core::{graph,hdc,analysis}
+                  ↖   gar::core::engine::{chase,agent}  ←  gar::core::bridge（ImmutableCSR 加载）
+tools::{cli,miner}  ←  gar::core（消费者）
+MatrixGraph        ←  gar::core::bridge / gar::core::engine（唯一外部依赖）
+```
+
 
 ## 构建
 
@@ -462,28 +406,31 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 ./build/bin/gar_reason --mode agent \
     --csr /tmp/synth_csr --rules /tmp/synth_rules \
     --goal 'lives_in(p0,t1)' --budget 20 \
-    --policy hybrid --scorer exact --executor bnb \
+    --policy deterministic --scorer exact \
     --out /tmp/synth_agent --verify-against-closure
-#    → goal_derived=true，certified_optimal=true，2 步最优链（greedy 需 7 步）
+#    → goal_derived=true，soundness=pass
 
 # 4. 三方对账（agent vs cpu 闭包）
 ./build/bin/gar_analyze verify --run \
     --csr /tmp/synth_csr --rules /tmp/synth_rules \
-    --goal 'lives_in(p0,t1)' --budget 20 --executor bnb
+    --goal 'lives_in(p0,t1)' --budget 20
 #    → verdict: CONSISTENT
 ```
 
 ## 库目标
 
-| CMake target | 说明 |
+单一 `gar::core` 库（INTERFACE，聚合全部子模块）；子模块 target 与命名空间一一对应：
+
+| 子模块别名 | 说明 |
 |---|---|
-| `gar::core` | 规则表示与加载（CSR + YAML，纯 CPU） |
-| `gar::graph` | 图与语义内核（TripleGraph + PatternMatcher + 谓词求值/事实合并，纯 CPU） |
-| `gar::hdc` | HDC 数值内核（bit-packed 超向量：bind/bundle/permute/cosine，零依赖纯 CPU） |
-| `gar::analysis` | L2 分析服务（PredicateTable + DependencyGraph/SCC + RuleSetStats + GoalSampler；仅依赖 core+graph） |
-| `gar::miner` | GAR 挖掘（ChainMiner 链式 + PatternMiner 通用拓扑，纯 CPU） |
-| `gar::engine::deduction` | GAR 演绎引擎家族（DeductionEngine 基类；CpuChaseEngine 朴素 chase 纯 CPU + GpuDeduceEngine） |
-| `gar::engine::agent` | 策略制导演绎（ReasoningAgent + GreedyExecutor + Scorer/Policy 插件，依赖 graph/analysis/hdc/core） |
+| `gar::core::rule` | 规则表示与加载（扁平边数组 + YAML） |
+| `gar::core::graph` | 图与语义内核（TripleGraph + 谓词求值/事实合并） |
+| `gar::core::hdc` | HDC 数值内核（bit-packed 超向量） |
+| `gar::core::analysis` | 依赖图 + 谓词表 + 统计 |
+| `gar::core::bridge` | ImmutableCSR → TripleGraph 适配 |
+| `gar::core::engine::chase` | 全闭包 chase（CPU + GPU） |
+| `gar::core::engine::agent` | AdaDeduce（策略制导演绎） |
+| `gar::tools::miner` | 规则挖掘 |
 | `gar::bridge` | 到 MatrixGraph 的桥接（依赖 `matrixgraph_core`，CUDA） |
 
 ## 可执行程序
