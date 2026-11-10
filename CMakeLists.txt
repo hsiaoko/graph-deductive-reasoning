@@ -57,16 +57,18 @@ endif ()
 #######################
 # Project Components
 #######################
+# Everything (except third_party) lives under core/ (the gar::core library
+# tree) and tools/ (executables and scripts). See docs/refactor_plan.md.
 add_subdirectory(core)
-add_subdirectory(hdc)
-add_subdirectory(graph)
-add_subdirectory(analysis)
+add_subdirectory(core/hdc)
+add_subdirectory(core/graph)
+add_subdirectory(core/analysis)
 if (GAR_ENABLE_MATRIXGRAPH)
-    add_subdirectory(bridge)
+    add_subdirectory(core/bridge)
 endif ()
-add_subdirectory(miner)
-add_subdirectory(engine)
-add_subdirectory(apps)
+add_subdirectory(core/engine)
+add_subdirectory(tools/miner)
+add_subdirectory(tools/cli)
 
 if (GAR_BUILD_EXAMPLES)
     add_subdirectory(examples)

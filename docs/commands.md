@@ -386,3 +386,169 @@ fb15k 全规则集 1,652/1,652 全 PASS（同一图上挖掘值与重算值完�
 | `dbpedia/rules_enriched` | 166 | 带 X 谓词（supp500/conf0.3） |
 
 根路径均为 `/ssd_data/zhuxk/graphs/KG/`。
+
+## 7. 神经链接预测 baseline（NBFNet / A*Net）
+
+实现位于 `baselines/path_reasoning/`，只依赖现有 PyTorch，不需要 TorchDrug、
+torch-scatter 或 PyG。输入目录包含标准 `train.txt`、`valid.txt`、`test.txt`，每行
+`head<TAB>relation<TAB>tail`。模型使用训练边和逆关系，支持负采样 BCE、验证集选模、
+filtered MR/MRR/Hits@K。它们输出链接预测分数，不是精确 GAR 派生，不能与 Chase 的
+逻辑闭包或 goal recall 混为同一指标。
+
+```bash
+python3 -m baselines.path_reasoning.cli train \
+  --model nbfnet \
+  --data /ssd_data/zhuxk/graphs/KG/fb15k-237/Release \
+  --out .work_hdcv/nbfnet_fb15k --device auto \
+  --epochs 20 --batch-size 4 --eval-batch-size 4
+
+python3 -m baselines.path_reasoning.cli train \
+  --model astarnet \
+  --data /ssd_data/zhuxk/graphs/KG/fb15k-237/Release \
+  --out .work_hdcv/astarnet_fb15k --device auto \
+  --epochs 20 --batch-size 4 --eval-batch-size 4 \
+  --node-ratio 0.1 --degree-ratio 1.0
+```
+
+论文默认结构为 6 层、32 维、DistMult 消息和 PNA 聚合。默认 batch=4 是当前原生
+PyTorch 实现的资源设置，不是论文的官方融合内核性能配置。加载检查点评估：
+
+```bash
+python3 -m baselines.path_reasoning.cli eval \
+  --checkpoint .work_hdcv/nbfnet_fb15k/best.pt \
+  --split test --device auto --eval-batch-size 4
+```
+
+开发验证可使用 `--limit-train N --limit-eval N`；正式实验不得保留这两个限制。
+
+## 8. GAR 链接预测管线
+
+正式对照使用标准 FB15K-237 划分和完整 test split。规则挖掘、规则派生和神经模型
+训练都只能读取 train；valid 只用于调参与选模，test 只用于最终评估。现有从
+train+valid 图挖出的 rules640 不属于这个协议。数据冻结与 train-only CSR 构建：
+
+```bash
+python3 experiments/link_prediction/prepare_fb15k.py
+```
+
+默认输出 `.work_hdcv/fb15k_link_prediction/`，其中 `manifest.json` 保存三分割哈希、
+计数和使用约束。挖掘与完整派生：
+
+```bash
+./build/bin/mine_rules \
+  --csr .work_hdcv/fb15k_link_prediction/immutable_csr_train \
+  --out .work_hdcv/fb15k_link_prediction/rules_train \
+  --min-supp 50 --min-conf 0.3 \
+  --min-body-len 1 --max-body-len 2 --print 0
+
+./build/bin/gar_reason --mode full --engine cpu \
+  --csr .work_hdcv/fb15k_link_prediction/immutable_csr_train \
+  --rules .work_hdcv/fb15k_link_prediction/rules_train \
+  --out .work_hdcv/fb15k_link_prediction/chase_train \
+  --threads 4 --max-rounds 1000 \
+  --max-derivations 1000000000 --max-matches 1000000000 \
+  --no-matches --print 0
+```
+
+将完整闭包转为候选排名（`first-proof-confidence` 是首个可用评分，不是多证明最优
+评分）：
+
+```bash
+python3 experiments/link_prediction/evaluate_gar_closure.py \
+  --data .work_hdcv/fb15k_link_prediction/data \
+  --rules .work_hdcv/fb15k_link_prediction/rules_train \
+  --closure .work_hdcv/fb15k_link_prediction/chase_train/closure_edges.tsv \
+  --out .work_hdcv/fb15k_link_prediction/gar_prediction
+```
+
+输出 `ranking.tsv` 与 `summary.json`，指标为 filtered MR/MRR/Hits@1/3/10。评估器拒绝
+非 fixpoint 或 capped 的部分闭包，因为部分闭包不能用于完整候选排名。该管线与
+NBFNet/A*Net 不共享模型代码，只共享标准数据划分和指标定义。
+
+## 9. 规则蒸馏数据生成
+
+此实验研究神经学生模仿 GAR 教师，不把教师派生标签称为独立的现实 ground truth。
+生成器读取可观察图和完整教师闭包，输出 `observed.txt`、按 `(head,relation)` 查询组
+隔离的 `train/valid/test.txt` 以及带教师规则的 `provenance.tsv`：
+
+```bash
+python3 experiments/rule_distillation/generate_dataset.py \
+  --observed .work_hdcv/fb15k_link_prediction/data/train.txt \
+  --closure .work_hdcv/fb15k_link_prediction/chase_train/closure_edges.tsv \
+  --out .work_hdcv/fb15k_rule_distillation --seed 42
+```
+
+`manifest.json` 明确记录标签语义、拆分、输入哈希和 `development_limit`。学生模型读取
+`observed.txt` 作为消息传递图，只把对应 split 的教师派生事实作为训练/评估标签：
+
+```bash
+python3 -m baselines.path_reasoning.cli train \
+  --model nbfnet --data .work_hdcv/fb15k_rule_distillation \
+  --out .work_hdcv/fb15k_rule_distillation/nbfnet \
+  --device auto --epochs 20 --batch-size 4 --eval-batch-size 4
+
+python3 -m baselines.path_reasoning.cli train \
+  --model astarnet --data .work_hdcv/fb15k_rule_distillation \
+  --out .work_hdcv/fb15k_rule_distillation/astarnet \
+  --device auto --epochs 20 --batch-size 4 --eval-batch-size 4 \
+  --node-ratio 0.1 --degree-ratio 1.0
+```
+
+评估指标解释为学生对教师答案的 agreement / imitation MRR、Hits@K，不与标准
+FB15K-237 真实测试集准确率混合报告。`--limit` 仅用于开发数据量截断，正式生成不使用。
+
+## 10. 原图测试 + 规则教师正负训练数据
+
+这是独立的数据协议：在原图上用 `rules/` 做 rule deduction，默认最多取 100 万条派生
+正样本；按 1:1 随机破坏头或尾生成负样本，并排除原图及全部派生事实。每个数据集输出到
+`/ssd_data/zhuxk/graphs/KG/<dataset>/train/`：
+
+- `train.txt`：`head<TAB>relation<TAB>tail<TAB>label`，label=1 为派生正例、0 为随机负例；
+- `test.txt`：原图全部三元组，三列无标签；
+- `positives.txt` / `negatives.txt`：三列正负样本；
+- `provenance.tsv`：正例的派生轮次与教师规则；
+- `rules`：指向该数据集原始规则目录的只读复用链接；
+- `manifest.json`：输入哈希、样本数、seed、语义与开发截断记录。
+
+串行完成 FB15K-237、ogbl-biokg、FinReflectKG 和 DBpedia：
+
+```bash
+python3 experiments/rule_distillation/run_kg_train.py --phase all
+```
+
+也可指定单个数据集：
+
+```bash
+python3 experiments/rule_distillation/run_kg_train.py \
+  --datasets fb15k-237 --phase all --seed 42 --negative-ratio 1
+```
+
+每数据集外部上限 1000 秒、进程树及整机已用内存上限 256GiB。派生在自然 fixpoint
+或 `--max-positive`（默认 100 万）处停止；后者在 manifest 中明确记录
+`data_status=capped_partial_closure` 和 `closure_complete=false`，不得写成完整闭包。
+
+NBFNet/A*Net 可直接读取该目录：第四列存在时使用已有 0/1 标签做 BCE，只用 label=1
+的三元组构建消息传递图；`test.txt` 的全图三元组只作为评估标签，不作为输入图。没有
+`valid.txt` 时跳过验证并使用 `last.pt`，不会根据 test 选模型。
+
+```bash
+python3 -m baselines.path_reasoning.cli train \
+  --model nbfnet --data /ssd_data/zhuxk/graphs/KG/fb15k-237/train \
+  --out .work_hdcv/fb15k_generated/nbfnet --device auto \
+  --epochs 20 --batch-size 4 --eval-batch-size 4
+
+python3 -m baselines.path_reasoning.cli train \
+  --model astarnet --data /ssd_data/zhuxk/graphs/KG/fb15k-237/train \
+  --out .work_hdcv/fb15k_generated/astarnet --device auto \
+  --epochs 20 --batch-size 4 --eval-batch-size 4 \
+  --node-ratio 0.1 --degree-ratio 1.0
+```
+
+用已有检查点对完整原图测试集评估（不要加 `--limit-eval`）：
+
+```bash
+python3 -m baselines.path_reasoning.cli eval \
+  --checkpoint .work_hdcv/fb15k_generated/nbfnet/last.pt \
+  --data /ssd_data/zhuxk/graphs/KG/fb15k-237/train \
+  --split test --device auto --eval-batch-size 4
+```
