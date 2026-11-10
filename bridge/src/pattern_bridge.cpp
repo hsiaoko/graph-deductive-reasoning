@@ -17,7 +17,7 @@ sics::matrixgraph::core::data_structures::GARPatternArrays ToPatternArrays(
       rule.node_labels.empty()
           ? nullptr
           : reinterpret_cast<const std::int32_t*>(rule.node_labels.data());
-  out.n_nodes = static_cast<int>(rule.pattern.num_vertices());
+  out.n_nodes = static_cast<int>(rule.num_vertices());
   out.edge_src = rule.edge_src.data();
   out.edge_dst = rule.edge_dst.data();
   out.edge_label_idx = rule.edge_labels.data();

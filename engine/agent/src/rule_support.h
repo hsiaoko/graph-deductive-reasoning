@@ -23,8 +23,8 @@ namespace agent {
 // predicates (no oracle in this engine), unresolved edge-predicate labels,
 // non-edge or unresolved consequent.
 inline bool RuleSupported(const GARule& r, RuleHead* head_out) {
-  const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
-  if (n < 2 || r.pattern.num_edges() < 1 || !r.pattern.has_edge_labels()) {
+  const auto n = static_cast<std::uint32_t>(r.num_vertices());
+  if (n < 2 || r.num_edges() < 1 || !r.has_edge_labels()) {
     return false;
   }
   *head_out = ResolveRuleHead(r);
@@ -52,13 +52,13 @@ inline bool RuleReachesGoal(const GARule& r,
 
 inline graph::PatternSpec BuildSpec(const GARule& r) {
   graph::PatternSpec spec;
-  const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+  const auto n = static_cast<std::uint32_t>(r.num_vertices());
   spec.num_vertices = n;
-  for (std::uint32_t s = 0; s < n; ++s) {
-    for (gar::EdgeIndex e = r.pattern.offsets[s];
-         e < r.pattern.offsets[s + 1]; ++e) {
-      spec.edges.push_back({s, r.pattern.indices[e], r.pattern.edge_labels[e]});
-    }
+  for (std::size_t e = 0; e < r.edge_src.size(); ++e) {
+    spec.edges.push_back(
+        {static_cast<std::uint32_t>(r.edge_src[e]),
+         static_cast<std::uint32_t>(r.edge_dst[e]),
+         static_cast<gar::LabelID>(r.edge_labels[e])});
   }
   return spec;
 }
@@ -67,7 +67,7 @@ inline graph::PatternSpec BuildSpec(const GARule& r) {
 inline bool VertexLabelsOk(const GARule& r, const graph::TripleGraph& g,
                            const std::uint32_t* emb) {
   if (!g.has_vertex_labels()) return true;
-  const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+  const auto n = static_cast<std::uint32_t>(r.num_vertices());
   for (std::uint32_t u = 0; u < n; ++u) {
     if (u < r.node_labels.size() && r.node_labels[u] != gar::kWildcardLabel &&
         g.VertexLabel(emb[u]) != r.node_labels[u]) {

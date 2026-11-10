@@ -5,6 +5,8 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "gar/csr.h"
+
 namespace gar {
 
 namespace {
@@ -138,55 +140,28 @@ Predicate ParsePredicate(const YAML::Node& node, const LabelDict& dict,
   return p;
 }
 
-// Builds CSR topology from inline pattern edges.
-CSRTopology BuildCSR(const std::vector<std::tuple<VertexID, VertexID, LabelID,
-                                                  bool>>& edges,
-                     std::size_t num_vertices) {
-  std::vector<EdgeIndex> offsets(num_vertices + 1, 0);
+// Builds the flat edge arrays from inline pattern edges (in the YAML edge
+// order, which is stable for a given rule.yaml).
+void BuildFlatEdges(
+    const std::vector<std::tuple<VertexID, VertexID, LabelID, bool>>& edges,
+    std::size_t num_vertices, GARule& rule) {
+  rule.n_vertices = static_cast<std::uint32_t>(num_vertices);
+  rule.edge_src.clear();
+  rule.edge_dst.clear();
+  rule.edge_labels.clear();
+  rule.edge_src.reserve(edges.size());
+  rule.edge_dst.reserve(edges.size());
+  rule.edge_labels.reserve(edges.size());
   for (const auto& [src, dst, l, has_l] : edges) {
     if (src >= num_vertices || dst >= num_vertices) {
       throw std::runtime_error("rule yaml [pattern.edges]: endpoint out of "
                                "range");
     }
-    offsets[src + 1]++;
-  }
-  for (std::size_t i = 1; i < offsets.size(); ++i) offsets[i] += offsets[i - 1];
-
-  std::vector<VertexID> indices(offsets.back());
-  std::vector<LabelID> labels;
-  bool any_label = false;
-  for (const auto& e : edges) any_label |= std::get<3>(e);
-  if (any_label) labels.assign(offsets.back(), kWildcardLabel);
-
-  std::vector<EdgeIndex> cursor(offsets.begin(), offsets.end());
-  for (const auto& [src, dst, l, has_l] : edges) {
-    const auto pos = cursor[src]++;
-    indices[pos] = dst;
-    if (any_label && has_l) labels[pos] = l;
-  }
-  return CSRTopology(std::move(offsets), std::move(indices),
-                     std::move(labels));
-}
-
-// Fills GARule's flat edge arrays (GARPatternArrays-compatible int32
-// src/dst/label) from the CSR topology, in CSR order (grouped by source).
-void FillFlatEdges(GARule& rule) {
-  const auto& p = rule.pattern;
-  rule.edge_src.clear();
-  rule.edge_dst.clear();
-  rule.edge_labels.clear();
-  rule.edge_src.reserve(p.num_edges());
-  rule.edge_dst.reserve(p.num_edges());
-  rule.edge_labels.reserve(p.num_edges());
-  for (std::size_t s = 0; s < p.num_vertices(); ++s) {
-    for (EdgeIndex e = p.offsets[s]; e < p.offsets[s + 1]; ++e) {
-      rule.edge_src.push_back(static_cast<std::int32_t>(s));
-      rule.edge_dst.push_back(static_cast<std::int32_t>(p.indices[e]));
-      rule.edge_labels.push_back(
-          p.has_edge_labels()
-              ? static_cast<std::int32_t>(p.edge_labels[e])
-              : static_cast<std::int32_t>(kWildcardLabel));
-    }
+    rule.edge_src.push_back(static_cast<std::int32_t>(src));
+    rule.edge_dst.push_back(static_cast<std::int32_t>(dst));
+    rule.edge_labels.push_back(has_l
+                                   ? static_cast<std::int32_t>(l)
+                                   : static_cast<std::int32_t>(kWildcardLabel));
   }
 }
 
@@ -262,14 +237,13 @@ GARule ParseRuleNode(const YAML::Node& r) {
                               pat["num_vertices"].as<std::size_t>());
     }
   }
-  if (!edges.empty()) {
-    rule.pattern = BuildCSR(edges, num_vertices);
+  if (!edges.empty() || num_vertices > 0) {
+    BuildFlatEdges(edges, num_vertices, rule);
   }
-  if (rule.node_labels.empty() && !rule.pattern.offsets.empty()) {
-    rule.node_labels.assign(rule.pattern.num_vertices(), kWildcardLabel);
-    rule.node_label_names.assign(rule.pattern.num_vertices(), "");
+  if (rule.node_labels.empty() && rule.n_vertices > 0) {
+    rule.node_labels.assign(rule.n_vertices, kWildcardLabel);
+    rule.node_label_names.assign(rule.n_vertices, "");
   }
-  FillFlatEdges(rule);
 
   // ---- predicates / consequent ----
   if (r["predicates"]) {
@@ -323,22 +297,38 @@ GARule RuleLoader::LoadYaml(const std::filesystem::path& yaml_path) {
                              e.what());
   }
   GARule rule = ParseRuleNode(root["rule"] ? root["rule"] : root);
-  if (!rule.pattern.offsets.empty()) rule.Validate();
+  if (rule.n_vertices > 0) rule.Validate();
   return rule;
 }
 
 GARule RuleLoader::Load(const std::filesystem::path& rule_dir) {
   GARule rule = LoadYaml(rule_dir / "rule.yaml");
 
-  // CSR binaries override inline edges when present.
+  // CSR binaries override inline edges when present; convert to flat.
   if (std::filesystem::exists(rule_dir / "csr_offsets.bin")) {
-    rule.pattern = CSRTopology::LoadBin(rule_dir);
+    const CSRTopology topo = CSRTopology::LoadBin(rule_dir);
+    rule.n_vertices = static_cast<std::uint32_t>(topo.num_vertices());
+    rule.edge_src.clear();
+    rule.edge_dst.clear();
+    rule.edge_labels.clear();
+    rule.edge_src.reserve(topo.num_edges());
+    rule.edge_dst.reserve(topo.num_edges());
+    rule.edge_labels.reserve(topo.num_edges());
+    for (std::size_t s = 0; s < topo.num_vertices(); ++s) {
+      for (EdgeIndex e = topo.offsets[s]; e < topo.offsets[s + 1]; ++e) {
+        rule.edge_src.push_back(static_cast<std::int32_t>(s));
+        rule.edge_dst.push_back(static_cast<std::int32_t>(topo.indices[e]));
+        rule.edge_labels.push_back(
+            topo.has_edge_labels()
+                ? static_cast<std::int32_t>(topo.edge_labels[e])
+                : static_cast<std::int32_t>(kWildcardLabel));
+      }
+    }
     if (rule.node_labels.empty()) {
-      rule.node_labels.assign(rule.pattern.num_vertices(), kWildcardLabel);
-      rule.node_label_names.assign(rule.pattern.num_vertices(), "");
+      rule.node_labels.assign(rule.n_vertices, kWildcardLabel);
+      rule.node_label_names.assign(rule.n_vertices, "");
     }
   }
-  FillFlatEdges(rule);
   rule.Validate();
   return rule;
 }

@@ -486,21 +486,15 @@ std::vector<GARule> PatternMiner::Mine() {
         rule.name += " → " + g_.SlotName(rh) + "(x0,x" +
                      std::to_string(new_id[v]) + ")";
 
-        std::vector<EdgeIndex> offsets(p.n + 1, 0);
-        std::vector<VertexID> indices(norm.size());
-        std::vector<LabelID> labels(norm.size());
-        for (std::size_t i = 0; i < norm.size(); ++i) ++offsets[norm[i][0] + 1];
-        for (std::uint32_t vtx = 1; vtx <= p.n; ++vtx) {
-          offsets[vtx] += offsets[vtx - 1];
-        }
-        std::vector<EdgeIndex> cursor(offsets.begin(), offsets.end());
+        rule.n_vertices = p.n;
+        rule.edge_src.resize(norm.size());
+        rule.edge_dst.resize(norm.size());
+        rule.edge_labels.resize(norm.size());
         for (std::size_t i = 0; i < norm.size(); ++i) {
-          const auto pos = cursor[norm[i][0]]++;
-          indices[pos] = norm[i][1];
-          labels[pos] = norm[i][2];
+          rule.edge_src[i] = static_cast<std::int32_t>(norm[i][0]);
+          rule.edge_dst[i] = static_cast<std::int32_t>(norm[i][1]);
+          rule.edge_labels[i] = static_cast<std::int32_t>(norm[i][2]);
         }
-        rule.pattern = CSRTopology(std::move(offsets), std::move(indices),
-                                   std::move(labels));
         rule.node_labels.assign(p.n, kWildcardLabel);
         rule.node_label_names.assign(p.n, "");
         rule.pivot = {0, new_id[v]};

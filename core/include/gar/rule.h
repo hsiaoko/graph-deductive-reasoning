@@ -7,7 +7,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "gar/csr.h"
 #include "gar/predicate.h"
 #include "gar/types.h"
 
@@ -39,19 +38,16 @@ struct GARule {
   std::string name;
   std::string description;
 
-  // Pattern topology Q (dependency graph of pattern nodes).
-  CSRTopology pattern;
-
-  // Flat edge list mirroring `pattern` (GARPatternArrays-compatible: int32
-  // src/dst/label), filled by the loader. Kept in CSR order (grouped by
-  // source vertex). This is the MatrixGraph-facing view; `pattern` (CSR)
-  // remains for the in-repo consumers until Phase 2 finishes the switch.
+  // Pattern topology Q: flat edge list (GARPatternArrays-compatible: int32
+  // src/dst/label), in CSR order (grouped by source vertex). This is the
+  // MatrixGraph-facing representation.
+  std::uint32_t n_vertices = 0;
   std::vector<std::int32_t> edge_src;
   std::vector<std::int32_t> edge_dst;
   std::vector<std::int32_t> edge_labels;
 
-  // Per-node label constraints (size == pattern.num_vertices(),
-  // kWildcardLabel for unconstrained).
+  // Per-node label constraints (size == n_vertices, kWildcardLabel for
+  // unconstrained).
   std::vector<LabelID> node_labels;
   std::vector<std::string> node_label_names;  // optional, parallel to above
 
@@ -70,6 +66,9 @@ struct GARule {
   // Mining results / provenance, filled by the mining stage.
   RuleQuality quality;
 
+  [[nodiscard]] std::uint32_t num_vertices() const { return n_vertices; }
+  [[nodiscard]] std::size_t num_edges() const { return edge_src.size(); }
+  [[nodiscard]] bool has_edge_labels() const { return !edge_labels.empty(); }
   [[nodiscard]] bool IsQuery() const { return !consequent.has_value(); }
 
   // Checks consistency between topology, labels, pivot and predicates.

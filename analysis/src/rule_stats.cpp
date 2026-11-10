@@ -25,8 +25,8 @@ RuleSetStats ComputeRuleSetStats(const std::vector<gar::GARule>& rules,
   std::vector<double> confidences;
   for (const auto& r : rules) {
     if (r.IsQuery()) ++st.num_queries;
-    ++st.pattern_vertices_hist[r.pattern.num_vertices()];
-    ++st.pattern_edges_hist[r.pattern.num_edges()];
+    ++st.pattern_vertices_hist[r.num_vertices()];
+    ++st.pattern_edges_hist[r.num_edges()];
     supports.push_back(r.quality.support);
     confidences.push_back(r.quality.confidence);
     for (const auto& p : r.antecedent) {

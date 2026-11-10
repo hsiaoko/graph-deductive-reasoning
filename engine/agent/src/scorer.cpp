@@ -32,8 +32,8 @@ double RelFam(const GARule& rule, const ScoringContext& ctx, double gamma) {
     }
     if (sum != std::numeric_limits<double>::infinity()) sum += d[id];
   };
-  for (std::uint32_t e = 0; e < rule.pattern.num_edges(); ++e) {
-    add(analysis::LabelNameOf(rule.pattern.edge_labels[e], rule));
+  for (std::uint32_t e = 0; e < rule.num_edges(); ++e) {
+    add(analysis::LabelNameOf(static_cast<LabelID>(rule.edge_labels[e]), rule));
   }
   for (const auto& pred : rule.antecedent) {
     add(analysis::PredicateIdOf(pred, rule));

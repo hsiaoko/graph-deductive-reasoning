@@ -283,9 +283,8 @@ std::vector<std::uint32_t> FilterActive(const RuleContext& ctx,
 // pair. Returns false when the enumeration hit the match cap (rule skipped).
 bool EnumerateMatches(const gar::graph::TripleGraph& g, const gar::GARule& rule,
                       std::uint64_t max_matches, RuleContext* ctx) {
-  const auto& topo = rule.pattern;
-  const auto n = static_cast<std::uint32_t>(topo.num_vertices());
-  if (n < 2 || topo.num_edges() < 1 || !topo.has_edge_labels() ||
+  const auto n = static_cast<std::uint32_t>(rule.num_vertices());
+  if (n < 2 || rule.num_edges() < 1 || !rule.has_edge_labels() ||
       !rule.consequent || rule.consequent->kind != gar::PredKind::kEdge) {
     return false;
   }
@@ -302,13 +301,14 @@ bool EnumerateMatches(const gar::graph::TripleGraph& g, const gar::GARule& rule,
   }
   if (pu >= n || pv >= n) return false;
 
-  // Expand the CSR pattern into an edge list for the generic matcher.
+  // Expand the flat edge list for the generic matcher.
   gar::graph::PatternSpec spec;
   spec.num_vertices = n;
-  for (std::uint32_t s = 0; s < n; ++s) {
-    for (gar::EdgeIndex e = topo.offsets[s]; e < topo.offsets[s + 1]; ++e) {
-      spec.edges.push_back({s, topo.indices[e], topo.edge_labels[e]});
-    }
+  for (std::size_t e = 0; e < rule.edge_src.size(); ++e) {
+    spec.edges.push_back(
+        {static_cast<std::uint32_t>(rule.edge_src[e]),
+         static_cast<std::uint32_t>(rule.edge_dst[e]),
+         static_cast<gar::LabelID>(rule.edge_labels[e])});
   }
 
   const gar::graph::PatternMatcher matcher(g);

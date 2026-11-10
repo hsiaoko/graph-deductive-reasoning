@@ -118,14 +118,14 @@ ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
     const gar::GARule& r = rules[i];
     PreparedRule& q = pp[i];
     auto& st = result.rules[i];
-    const auto pn = static_cast<std::uint32_t>(r.pattern.num_vertices());
+    const auto pn = static_cast<std::uint32_t>(r.num_vertices());
     auto skip = [&](const char* note) {
       st.skipped = true;
       st.note = note;
       skipped[i] = true;
     };
-    if (pn < 2 || r.pattern.num_edges() < 1 ||
-        !r.pattern.has_edge_labels()) {
+    if (pn < 2 || r.num_edges() < 1 ||
+        !r.has_edge_labels()) {
       skip("pattern missing or unlabeled");
       continue;
     }
@@ -161,24 +161,22 @@ ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
       }
     }
     bool bad_edge = false;
-    for (std::uint32_t s = 0; s < pn && !bad_edge; ++s) {
-      for (gar::EdgeIndex e = r.pattern.offsets[s];
-           e < r.pattern.offsets[s + 1]; ++e) {
-        const gar::LabelID l = r.pattern.edge_labels[e];
-        if (l == gar::kWildcardLabel) {
-          bad_edge = true;
-          break;
-        }
-        const auto d = static_cast<std::int32_t>(r.pattern.indices[e]);
-        if (l >= num_rel) {  // inverse slot: r^-1(s,d) == r(d,s)
-          q.e_src.push_back(d);
-          q.e_dst.push_back(static_cast<std::int32_t>(s));
-          q.e_label.push_back(static_cast<std::int32_t>(l - num_rel));
-        } else {
-          q.e_src.push_back(static_cast<std::int32_t>(s));
-          q.e_dst.push_back(d);
-          q.e_label.push_back(static_cast<std::int32_t>(l));
-        }
+    for (std::size_t e = 0; e < r.edge_src.size() && !bad_edge; ++e) {
+      const gar::LabelID l = static_cast<gar::LabelID>(r.edge_labels[e]);
+      if (l == gar::kWildcardLabel) {
+        bad_edge = true;
+        break;
+      }
+      const auto s = static_cast<std::int32_t>(r.edge_src[e]);
+      const auto d = static_cast<std::int32_t>(r.edge_dst[e]);
+      if (l >= num_rel) {  // inverse slot: r^-1(s,d) == r(d,s)
+        q.e_src.push_back(d);
+        q.e_dst.push_back(s);
+        q.e_label.push_back(static_cast<std::int32_t>(l - num_rel));
+      } else {
+        q.e_src.push_back(s);
+        q.e_dst.push_back(d);
+        q.e_label.push_back(static_cast<std::int32_t>(l));
       }
     }
     if (bad_edge) {

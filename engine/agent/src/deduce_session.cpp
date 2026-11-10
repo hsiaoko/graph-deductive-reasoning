@@ -135,7 +135,7 @@ std::array<double, 11> DeduceSession::ActionFeatures(
     const deduce::ActionRecord& rec) const {
   const GARule& rule = state_->rules()[rec.motif.rule];
   return {rec.score.price,
-          static_cast<double>(rule.pattern.num_edges()),
+          static_cast<double>(rule.num_edges()),
           std::log1p(rule.quality.support),
           rec.score.rel_fam,
           rec.score.rel_evd,
@@ -263,7 +263,7 @@ void DeduceSession::AddPartials(
     const std::uint32_t* se = embs.data() + t * ns;
     std::vector<std::uint32_t> full =
         deduce::ExpandPartial(de, se, static_cast<std::uint32_t>(
-                                            r.pattern.num_vertices()));
+                                            r.num_vertices()));
     if (!VertexLabelsOk(r, g_, full.data())) continue;
     // Deferred edge satisfaction on current Γ.
     const std::uint32_t eu = full[de.pu], ev = full[de.pv];

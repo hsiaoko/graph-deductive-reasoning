@@ -127,8 +127,7 @@ int main(int argc, char** argv) {
 
     // ---- GARPatternArrays from the rule (inverse slots folded back to
     // base relations with swapped endpoints) ----
-    const auto& topo = rule.pattern;
-    const auto pn = static_cast<int>(topo.num_vertices());
+    const auto pn = static_cast<int>(rule.num_vertices());
     const std::uint32_t num_rel = g.num_relations();
     std::vector<std::int32_t> p_node_label(pn, 0);
     for (int i = 0; i < pn; ++i) {
@@ -145,29 +144,22 @@ int main(int argc, char** argv) {
       }
     }
     std::vector<std::int32_t> p_src, p_dst, p_label;
-    for (int u = 0; u < pn; ++u) {
-      const auto nbrs = topo.neighbors(static_cast<gar::VertexID>(u));
-      for (std::size_t e = 0; e < nbrs.size(); ++e) {
-        if (!topo.has_edge_labels()) {
-          std::cerr << "error: pattern edges carry no labels\n";
-          return 1;
-        }
-        const gar::LabelID l = topo.edge_labels[topo.offsets[u] + e];
-        if (l == gar::kWildcardLabel) {
-          std::cerr << "error: pattern edge x" << u << "->x" << nbrs[e]
-                    << " has a wildcard label\n";
-          return 1;
-        }
-        const auto w = static_cast<int>(nbrs[e]);
-        if (l >= num_rel) {  // inverse slot: r^-1(u,w) == r(w,u)
-          p_src.push_back(w);
-          p_dst.push_back(u);
-          p_label.push_back(static_cast<std::int32_t>(l - num_rel));
-        } else {
-          p_src.push_back(u);
-          p_dst.push_back(w);
-          p_label.push_back(static_cast<std::int32_t>(l));
-        }
+    for (std::size_t e = 0; e < rule.edge_src.size(); ++e) {
+      const gar::LabelID l = static_cast<gar::LabelID>(rule.edge_labels[e]);
+      if (l == gar::kWildcardLabel) {
+        std::cerr << "error: pattern edge has a wildcard label\n";
+        return 1;
+      }
+      const auto u = static_cast<int>(rule.edge_src[e]);
+      const auto w = static_cast<int>(rule.edge_dst[e]);
+      if (l >= num_rel) {  // inverse slot: r^-1(u,w) == r(w,u)
+        p_src.push_back(w);
+        p_dst.push_back(u);
+        p_label.push_back(static_cast<std::int32_t>(l - num_rel));
+      } else {
+        p_src.push_back(u);
+        p_dst.push_back(w);
+        p_label.push_back(static_cast<std::int32_t>(l));
       }
     }
     GARPatternArrays gp{p_node_label.data(), pn, p_src.data(), p_dst.data(),

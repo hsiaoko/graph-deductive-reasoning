@@ -43,16 +43,14 @@ void GroundPremises(const gar::GARule& rule, const Motif& mu,
 
   // Pattern edges; inverse slots are normalized to the base relation with
   // swapped endpoints (r^-1(u,v) is the data edge r(v,u)).
-  for (std::uint32_t s = 0; s < rule.pattern.num_vertices(); ++s) {
-    for (gar::EdgeIndex e = rule.pattern.offsets[s];
-         e < rule.pattern.offsets[s + 1]; ++e) {
-      const gar::LabelID l = rule.pattern.edge_labels[e];
-      const std::uint32_t d = rule.pattern.indices[e];
-      if (l >= num_rel) {
-        out->push_back(MakeEdgeFact(l - num_rel, emb[d], emb[s]));
-      } else {
-        out->push_back(MakeEdgeFact(l, emb[s], emb[d]));
-      }
+  for (std::size_t e = 0; e < rule.edge_src.size(); ++e) {
+    const gar::LabelID l = static_cast<gar::LabelID>(rule.edge_labels[e]);
+    const std::uint32_t s = static_cast<std::uint32_t>(rule.edge_src[e]);
+    const std::uint32_t d = static_cast<std::uint32_t>(rule.edge_dst[e]);
+    if (l >= num_rel) {
+      out->push_back(MakeEdgeFact(l - num_rel, emb[d], emb[s]));
+    } else {
+      out->push_back(MakeEdgeFact(l, emb[s], emb[d]));
     }
   }
 

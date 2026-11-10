@@ -5,8 +5,7 @@
 namespace gar {
 
 void GARule::Validate() const {
-  pattern.Validate();
-  const auto n = pattern.num_vertices();
+  const std::uint32_t n = n_vertices;
 
   if (!node_labels.empty() && node_labels.size() != n) {
     throw std::runtime_error("GARule '" + name +
@@ -16,8 +15,16 @@ void GARule::Validate() const {
     throw std::runtime_error("GARule '" + name +
                              "': node_label_names size != num_vertices");
   }
+  for (std::size_t e = 0; e < edge_src.size(); ++e) {
+    if (edge_src[e] < 0 || edge_dst[e] < 0 ||
+        static_cast<std::uint32_t>(edge_src[e]) >= n ||
+        static_cast<std::uint32_t>(edge_dst[e]) >= n) {
+      throw std::runtime_error("GARule '" + name +
+                               "': pattern edge endpoint out of range");
+    }
+  }
 
-  auto in_range = [n](VertexID v) { return static_cast<std::size_t>(v) < n; };
+  auto in_range = [n](VertexID v) { return v < n; };
   auto check_node = [this, in_range](VertexID v, const char* where) {
     if (!in_range(v)) {
       throw std::runtime_error("GARule '" + name + "': " + where +
@@ -75,18 +82,21 @@ void GARule::Print(std::ostream& os) const {
   // Q: pattern graph, rendered in the style of MatrixGraph's
   // ImmutableCSR::PrintGraph (per-vertex header + in/out adjacency, edges
   // annotated with their label names).
-  const auto nv = static_cast<std::uint32_t>(pattern.num_vertices());
+  const auto nv = n_vertices;
   std::vector<EdgeIndex> indeg(nv, 0);
-  for (VertexID v : pattern.indices) {
-    if (v < nv) ++indeg[v];
+  std::vector<EdgeIndex> outdeg(nv, 0);
+  for (std::size_t e = 0; e < edge_src.size(); ++e) {
+    const auto s = static_cast<std::uint32_t>(edge_src[e]);
+    const auto d = static_cast<std::uint32_t>(edge_dst[e]);
+    if (d < nv) ++indeg[d];
+    if (s < nv) ++outdeg[s];
   }
-  os << "  Q (pattern CSR):\n";
-  os << "    ### num_vertices: " << nv << ", num_edges: " << pattern.num_edges()
+  os << "  Q (pattern):\n";
+  os << "    ### num_vertices: " << nv << ", num_edges: " << edge_src.size()
      << " ###\n";
   for (std::uint32_t u = 0; u < nv; ++u) {
     os << "    ===vid: x" << u << ", indegree: " << indeg[u]
-       << ", outdegree: " << (pattern.offsets[u + 1] - pattern.offsets[u])
-       << ", label: ";
+       << ", outdegree: " << outdeg[u] << ", label: ";
     if (u < node_labels.size() && node_labels[u] != kWildcardLabel) {
       if (u < node_label_names.size() && !node_label_names[u].empty()) {
         os << node_label_names[u];
@@ -97,32 +107,27 @@ void GARule::Print(std::ostream& os) const {
       os << "*";
     }
     os << "===\n";
-    if (indeg[u] != 0) {
-      os << "      Incoming edges: ";
-      for (std::uint32_t s = 0; s < nv; ++s) {
-        for (EdgeIndex e = pattern.offsets[s]; e < pattern.offsets[s + 1]; ++e) {
-          if (pattern.indices[e] != u) continue;
-          os << "x" << s;
-          if (pattern.has_edge_labels()) {
-            os << "[" << label_of(pattern.edge_labels[e]) << "]";
-          }
-          os << ", ";
-        }
+    {
+      bool first = true;
+      for (std::size_t e = 0; e < edge_src.size(); ++e) {
+        if (static_cast<std::uint32_t>(edge_dst[e]) != u) continue;
+        os << (first ? "      Incoming edges: " : "");
+        os << "x" << edge_src[e] << "["
+           << label_of(static_cast<LabelID>(edge_labels[e])) << "], ";
+        first = false;
       }
-      os << "\n";
+      if (!first) os << "\n";
     }
-    const auto nbrs = pattern.neighbors(u);
-    if (!nbrs.empty()) {
-      os << "      Outgoing edges: ";
-      for (std::size_t e = 0; e < nbrs.size(); ++e) {
-        os << "x" << nbrs[e];
-        if (pattern.has_edge_labels()) {
-          os << "[" << label_of(pattern.edge_labels[pattern.offsets[u] + e])
-             << "]";
-        }
-        os << ", ";
+    {
+      bool first = true;
+      for (std::size_t e = 0; e < edge_src.size(); ++e) {
+        if (static_cast<std::uint32_t>(edge_src[e]) != u) continue;
+        os << (first ? "      Outgoing edges: " : "");
+        os << "x" << edge_dst[e] << "["
+           << label_of(static_cast<LabelID>(edge_labels[e])) << "], ";
+        first = false;
       }
-      os << "\n";
+      if (!first) os << "\n";
     }
     os << "    ****************************************\n";
   }

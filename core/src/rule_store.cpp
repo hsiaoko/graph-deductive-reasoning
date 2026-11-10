@@ -6,9 +6,29 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "gar/csr.h"
+
 namespace gar {
 
 namespace {
+
+// Rebuilds the CSR topology from the flat edge arrays (for the legacy
+// csr_*.bin serialization).
+CSRTopology ToCsr(const GARule& rule) {
+  std::vector<EdgeIndex> offsets(rule.num_vertices() + 1, 0);
+  for (auto s : rule.edge_src) ++offsets[static_cast<std::size_t>(s) + 1];
+  for (std::size_t i = 1; i < offsets.size(); ++i) offsets[i] += offsets[i - 1];
+  std::vector<VertexID> indices(offsets.back());
+  std::vector<LabelID> labels(offsets.back(), kWildcardLabel);
+  std::vector<EdgeIndex> cursor(offsets.begin(), offsets.end());
+  for (std::size_t e = 0; e < rule.edge_src.size(); ++e) {
+    const auto pos = cursor[static_cast<std::size_t>(rule.edge_src[e])]++;
+    indices[pos] = static_cast<VertexID>(rule.edge_dst[e]);
+    labels[pos] = static_cast<LabelID>(rule.edge_labels[e]);
+  }
+  return CSRTopology(std::move(offsets), std::move(indices),
+                     std::move(labels));
+}
 
 using RevLabels = std::unordered_map<LabelID, std::string>;
 
@@ -77,7 +97,7 @@ YAML::Node EmitRule(const GARule& rule, bool inline_edges) {
   }
 
   YAML::Node pat;
-  for (std::size_t v = 0; v < rule.pattern.num_vertices(); ++v) {
+  for (std::size_t v = 0; v < rule.num_vertices(); ++v) {
     YAML::Node n;
     n["id"] = static_cast<VertexID>(v);
     if (v < rule.node_label_names.size() && !rule.node_label_names[v].empty()) {
@@ -89,19 +109,17 @@ YAML::Node EmitRule(const GARule& rule, bool inline_edges) {
     pat["nodes"].push_back(n);
   }
   if (inline_edges) {
-    const auto& topo = rule.pattern;
-    for (std::size_t v = 0; v < topo.num_vertices(); ++v) {
-      for (EdgeIndex e = topo.offsets[v]; e < topo.offsets[v + 1]; ++e) {
-        YAML::Node edge;
-        edge["src"] = static_cast<VertexID>(v);
-        edge["dst"] = topo.indices[e];
-        if (topo.has_edge_labels()) {
-          const auto it = rev.find(topo.edge_labels[e]);
-          edge["label"] = it != rev.end() ? YAML::Node(it->second)
-                                          : YAML::Node(topo.edge_labels[e]);
-        }
-        pat["edges"].push_back(edge);
+    for (std::size_t e = 0; e < rule.edge_src.size(); ++e) {
+      YAML::Node edge;
+      edge["src"] = static_cast<VertexID>(rule.edge_src[e]);
+      edge["dst"] = static_cast<VertexID>(rule.edge_dst[e]);
+      if (rule.edge_labels[e] != static_cast<std::int32_t>(kWildcardLabel)) {
+        const auto lid = static_cast<LabelID>(rule.edge_labels[e]);
+        const auto it = rev.find(lid);
+        edge["label"] = it != rev.end() ? YAML::Node(it->second)
+                                        : YAML::Node(lid);
       }
+      pat["edges"].push_back(edge);
     }
   }
   for (VertexID v : rule.pivot) pat["pivot"].push_back(v);
@@ -141,7 +159,7 @@ void RuleStore::SaveDir(const std::vector<GARule>& rules,
     std::filesystem::create_directories(dir);
 
     // Topology goes to the CSR binaries; the YAML carries no inline edges.
-    rule.pattern.SaveBin(dir);
+    ToCsr(rule).SaveBin(dir);
 
     YAML::Node root;
     root["rule"] = EmitRule(rule, /*inline_edges=*/false);

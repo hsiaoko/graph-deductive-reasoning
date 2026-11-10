@@ -57,20 +57,19 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
   for (std::size_t i = 0; i < rules.size(); ++i) {
     const GARule& r = rules[i];
     Prepared& p = pp[i];
-    const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
-    if (n < 2 || r.pattern.num_edges() < 1 || !r.pattern.has_edge_labels()) {
+    const auto n = static_cast<std::uint32_t>(r.num_vertices());
+    if (n < 2 || r.num_edges() < 1 || !r.has_edge_labels()) {
       result.rules[i].skipped = true;
       result.rules[i].note = "pattern missing or unlabeled";
       p.skip = true;
       continue;
     }
     p.spec.num_vertices = n;
-    for (std::uint32_t s = 0; s < n; ++s) {
-      for (EdgeIndex e = r.pattern.offsets[s]; e < r.pattern.offsets[s + 1];
-           ++e) {
-        p.spec.edges.push_back({s, r.pattern.indices[e],
-                                r.pattern.edge_labels[e]});
-      }
+    for (std::size_t e = 0; e < r.edge_src.size(); ++e) {
+      p.spec.edges.push_back(
+          {static_cast<std::uint32_t>(r.edge_src[e]),
+           static_cast<std::uint32_t>(r.edge_dst[e]),
+           static_cast<LabelID>(r.edge_labels[e])});
     }
     for (const auto& pred : r.antecedent) {
       if (pred.kind == PredKind::kMl) {

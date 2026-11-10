@@ -153,13 +153,13 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < rules.size(); ++i) {
       const gar::GARule& r = rules[i];
       RuleReport& rep = reports[i];
-      const auto n = static_cast<std::uint32_t>(r.pattern.num_vertices());
+      const auto n = static_cast<std::uint32_t>(r.num_vertices());
       auto skip = [&](const char* note) {
         rep.verdict = Verdict::kSkip;
         rep.note = note;
       };
-      if (n < 2 || r.pattern.num_edges() < 1 ||
-          !r.pattern.has_edge_labels()) {
+      if (n < 2 || r.num_edges() < 1 ||
+          !r.has_edge_labels()) {
         skip("pattern missing or unlabeled");
         ++n_skip;
         continue;
@@ -185,12 +185,11 @@ int main(int argc, char** argv) {
 
       gar::graph::PatternSpec spec;
       spec.num_vertices = n;
-      for (std::uint32_t s = 0; s < n; ++s) {
-        for (gar::EdgeIndex e = r.pattern.offsets[s];
-             e < r.pattern.offsets[s + 1]; ++e) {
-          spec.edges.push_back({s, r.pattern.indices[e],
-                                r.pattern.edge_labels[e]});
-        }
+      for (std::size_t e = 0; e < r.edge_src.size(); ++e) {
+        spec.edges.push_back(
+            {static_cast<std::uint32_t>(r.edge_src[e]),
+             static_cast<std::uint32_t>(r.edge_dst[e]),
+             static_cast<gar::LabelID>(r.edge_labels[e])});
       }
       bool has_head = false;
       std::uint32_t head_slot = 0, pu = 0, pv = 0;

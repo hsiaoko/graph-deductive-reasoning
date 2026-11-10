@@ -135,16 +135,15 @@ void ChainMiner::EmitRulesForChain(
     rule.name += " → " + g_.SlotName(rh) + "(" + tag(0) + "," + tag(k) + ")";
 
     // Pattern: chain x0 -> x1 -> ... -> xk with slot labels.
-    std::vector<EdgeIndex> offsets(k + 2);
-    std::vector<VertexID> indices(k);
-    std::vector<LabelID> labels(k);
-    for (VertexID i = 0; i <= k + 1; ++i) offsets[i] = std::min(i, k);
+    rule.n_vertices = k + 1;
+    rule.edge_src.resize(k);
+    rule.edge_dst.resize(k);
+    rule.edge_labels.resize(k);
     for (VertexID i = 0; i < k; ++i) {
-      indices[i] = i + 1;
-      labels[i] = chain[i];
+      rule.edge_src[i] = static_cast<std::int32_t>(i);
+      rule.edge_dst[i] = static_cast<std::int32_t>(i + 1);
+      rule.edge_labels[i] = static_cast<std::int32_t>(chain[i]);
     }
-    rule.pattern = CSRTopology(std::move(offsets), std::move(indices),
-                               std::move(labels));
     rule.node_labels.assign(k + 1, kWildcardLabel);
     rule.node_label_names.assign(k + 1, "");
     if (sig) {

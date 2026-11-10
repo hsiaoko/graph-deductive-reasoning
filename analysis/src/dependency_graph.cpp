@@ -156,8 +156,9 @@ void DependencyGraph::Build(const std::vector<gar::GARule>& rules,
     if (!r.consequent) continue;  // query rule: derives nothing
     const std::uint32_t p = table->Intern(PredicateIdOf(*r.consequent, r));
     // Pattern edges: each distinct edge label is an edge predicate.
-    for (std::uint32_t e = 0; e < r.pattern.num_edges(); ++e) {
-      add_arc(table->Intern(LabelNameOf(r.pattern.edge_labels[e], r)), p, i);
+    for (std::uint32_t e = 0; e < r.num_edges(); ++e) {
+      add_arc(table->Intern(LabelNameOf(static_cast<LabelID>(r.edge_labels[e]), r)),
+              p, i);
     }
     // Antecedent predicates (const/var/exists/edge/ml).
     for (const auto& pred : r.antecedent) {
