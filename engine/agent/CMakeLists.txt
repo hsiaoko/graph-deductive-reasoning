@@ -38,3 +38,11 @@ target_compile_features(gar_engine_agent PUBLIC cxx_std_20)
 target_include_directories(gar_engine_agent PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/nlohmann
 )
+
+# MatrixGraph HomMatch (CPU homomorphism matcher): the agent's matching
+# primitive. Host-only header + pure-host symbols inside matrixgraph_core.
+if (GAR_ENABLE_MATRIXGRAPH)
+    target_link_libraries(gar_engine_agent PRIVATE
+        matrixgraph_core CUDA::cudart
+    )
+endif ()

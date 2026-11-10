@@ -21,8 +21,8 @@
 #include "precondition_cache.h"
 #include "producer_tracker.h"
 #include "working_set.h"
+#include "core/task/cpu_task/hom_match.cuh"
 #include "gar/engine/agent/executor.h"
-#include "gar/graph/pattern_matcher.h"
 
 namespace gar {
 namespace engine {
@@ -40,7 +40,6 @@ class DeduceSession {
         cfg_(cfg),
         kit_(kit),
         g_(state->graph()),
-        matcher_(g_),
         sctx_{&ctx.distances, ctx.table, witness, state} {}
 
   AgentResult Run();
@@ -62,6 +61,15 @@ class DeduceSession {
   };
 
   void BuildPlans();
+  // Rebuilds the matching index from the current graph (after each derived
+  // fact is merged) so the HomMatcher always sees the latest G∪Γ.
+  void RebuildIndex();
+  // Homomorphism enumeration through the MatrixGraph HomMatcher: converts
+  // the PatternSpec to GARPatternArrays and runs the pinned matcher.
+  std::uint64_t Enumerate(
+      const graph::PatternSpec& spec, std::uint64_t cap,
+      std::vector<std::uint32_t>* out, bool* capped,
+      const std::unordered_map<std::uint32_t, std::uint32_t>& pins);
   std::unordered_map<std::uint32_t, std::uint32_t> GoalPins(
       const deduce::RulePlan& pl) const;
   std::unordered_map<std::uint32_t, std::uint32_t> GoalSubPins(
@@ -108,7 +116,7 @@ class DeduceSession {
   const ExecConfig& cfg_;
   const ExecKit& kit_;
   const graph::TripleGraph& g_;
-  const graph::PatternMatcher matcher_;
+  std::optional<sics::matrixgraph::core::task::cpu_task::HomMatchIndex> idx_;
   const ScoringContext sctx_;
 
   AgentResult res_;

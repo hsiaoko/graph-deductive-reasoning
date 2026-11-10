@@ -17,6 +17,9 @@ namespace gar {
 namespace engine {
 namespace agent {
 
+namespace mg = sics::matrixgraph::core;
+namespace mg_cpu = sics::matrixgraph::core::task::cpu_task;
+
 bool DeduceSession::ActionIndex::Insert(std::uint32_t rule,
                                           const std::vector<std::uint32_t>& e) {
   return Insert(rule, std::vector<std::uint32_t>(e));
@@ -255,7 +258,7 @@ void DeduceSession::AddPartials(
   const GARule& r = state_->rules()[pl.rule];
   std::vector<std::uint32_t> embs;
   bool capped = false;
-  const std::uint64_t n_emb = matcher_.Enumerate(
+  const std::uint64_t n_emb = Enumerate(
       de.sub_spec, cfg_.match_cap_per_rule, &embs, &capped, sub_pins);
   if (capped) ++res_.stats->candidate_caps;
   const auto ns = de.sub_spec.num_vertices;
@@ -326,7 +329,7 @@ void DeduceSession::VerifyGeneration() {
     const GARule& r = state_->rules()[pl.rule];
     std::vector<std::uint32_t> embs;
     bool capped = false;
-    const std::uint64_t n_emb = matcher_.Enumerate(pl.spec, UINT64_MAX, &embs,
+    const std::uint64_t n_emb = Enumerate(pl.spec, UINT64_MAX, &embs,
                                                    &capped, GoalPins(pl));
     const auto n = pl.spec.num_vertices;
     for (std::uint64_t t = 0; t < n_emb; ++t) {
@@ -353,7 +356,7 @@ void DeduceSession::GenerateStar(std::uint32_t pi) {
   const deduce::RulePlan& pl = plans_[pi];
   std::vector<std::uint32_t> embs;
   bool capped = false;
-  const std::uint64_t n_emb = matcher_.Enumerate(
+  const std::uint64_t n_emb = Enumerate(
       pl.spec, cfg_.match_cap_per_rule, &embs, &capped, GoalPins(pl));
   if (capped) ++res_.stats->candidate_caps;
   const auto n = pl.spec.num_vertices;
@@ -398,7 +401,7 @@ void DeduceSession::CompleteDeltas(const graph::DerivedEdge& d,
         pins[e[1]] = pd;
         std::vector<std::uint32_t> embs;
         bool capped = false;
-        const std::uint64_t n_emb = matcher_.Enumerate(
+        const std::uint64_t n_emb = Enumerate(
             pl.spec, cfg_.match_cap_per_rule, &embs, &capped, pins);
         if (capped) ++res_.stats->candidate_caps;
         const auto n = pl.spec.num_vertices;
@@ -612,6 +615,7 @@ graph::DerivedEdge DeduceSession::Derive(const deduce::ActionRecord& rec) {
       emb[rec.head.pu], emb[rec.head.pv], rec.head.slot, rec.motif.rule,
       static_cast<std::uint32_t>(res_.chain.size() + 1)};
   state_->ApplyDerivation(d);
+  RebuildIndex();
   std::vector<Fact> premises;
   GroundPremises(r, rec.motif, g_, *ctx_.table, &premises);
   for (const Fact& f : premises) RecordWitness(f);
@@ -802,6 +806,44 @@ deduce::ActionRecord* DeduceSession::SelectReady() {
   return chosen;
 }
 
+void DeduceSession::RebuildIndex() {
+  std::vector<std::uint32_t> v_id, e_src, e_dst, e_id;
+  std::vector<std::int32_t> e_label;
+  v_id.reserve(g_.num_entities());
+  for (std::uint32_t i = 0; i < g_.num_entities(); ++i) v_id.push_back(i);
+  for (std::uint32_t slot = 0; slot < g_.num_relations(); ++slot) {
+    for (auto p : g_.RelationPairs(slot)) {
+      e_src.push_back(static_cast<std::uint32_t>(p >> 32));
+      e_dst.push_back(static_cast<std::uint32_t>(p));
+      e_id.push_back(static_cast<std::uint32_t>(e_id.size()));
+      e_label.push_back(static_cast<std::int32_t>(slot));
+    }
+  }
+  mg::data_structures::GARGraphArrays gg{
+      v_id.data(), nullptr, static_cast<int>(v_id.size()), e_src.data(),
+      e_dst.data(), e_id.data(), e_label.data(), static_cast<int>(e_src.size())};
+  idx_ = mg_cpu::HomMatchIndex(gg, static_cast<int>(g_.num_relations()));
+}
+
+std::uint64_t DeduceSession::Enumerate(
+    const graph::PatternSpec& spec, std::uint64_t cap,
+    std::vector<std::uint32_t>* out, bool* capped,
+    const std::unordered_map<std::uint32_t, std::uint32_t>& pins) {
+  std::vector<std::int32_t> src, dst, label;
+  src.reserve(spec.edges.size());
+  dst.reserve(spec.edges.size());
+  label.reserve(spec.edges.size());
+  for (const auto& e : spec.edges) {
+    src.push_back(static_cast<std::int32_t>(e[0]));
+    dst.push_back(static_cast<std::int32_t>(e[1]));
+    label.push_back(static_cast<std::int32_t>(e[2]));
+  }
+  mg::data_structures::GARPatternArrays gp{
+      nullptr, static_cast<int>(spec.num_vertices), src.data(), dst.data(),
+      label.data(), static_cast<int>(src.size())};
+  return mg_cpu::HomMatcher().Enumerate(*idx_, gp, cap, out, capped, pins);
+}
+
 AgentResult DeduceSession::Run() {
   res_.stats.emplace();
   t0_ = std::chrono::steady_clock::now();
@@ -816,6 +858,7 @@ AgentResult DeduceSession::Run() {
 
   const auto prepared_at = std::chrono::steady_clock::now();
   BuildPlans();
+  RebuildIndex();
   res_.stats->prepare_wall_ms +=
       std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - prepared_at)
