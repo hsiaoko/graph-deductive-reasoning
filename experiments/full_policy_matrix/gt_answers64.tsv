@@ -1,6 +1,0 @@
-# goal	gt_answers	base_answers	derived_answers	max_round	degenerate
-g1	5	4	1	1	no
-g2	6	0	6	1	no
-g3	8	8	0	0	yes
-g4	0	0	0	0	yes
-g5	2737	2273	464	5	no
