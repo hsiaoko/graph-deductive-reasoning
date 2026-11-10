@@ -11,14 +11,14 @@
 //                            [--goal 'rel(src,dst)']
 //   gar_analyze verify       --run --csr <dir> --rules <root> --goal 'rel(src,dst)'
 //                            [--budget B] [--policy ..] [--scorer ..]
-//                            [--executor greedy|bnb] [--top-k N] [--gpu]
-//                            [--seed S] [--hdc-dim N] [--max-candidates-per-rule N]
+//                            [--gpu] [--seed S] [--hdc-dim N]
+//                            [--max-candidates-per-rule N]
 //                            [--alpha..--nu2 F] [--tau-hdc F] [--no-confidence]
 //                            [--report verify_report.yaml]
 //   gar_analyze verify       --from-dirs <agent_dir> <cpu_dir> [<gpu_dir>]
 //                            --goal 'rel(src,dst)' [--report F]
 //   gar_analyze verify       --tasks tasks.tsv --csr <dir> --rules <root>
-//                            [--policy ..] [--scorer ..] [--executor ..] [--gpu]
+//                            [--policy ..] [--scorer ..] [--gpu]
 //                            [--report F]
 //
 // gen-goals follows the paper's workload construction (§7): hold out the
@@ -63,11 +63,11 @@ namespace deduction = gar::core::engine::chase;
          "[--goal 'rel(src,dst)']\n"
          "  gar_analyze verify --run --csr <dir> --rules <root> --goal "
          "'rel(src,dst)' [--budget B] [--policy ..] [--scorer ..] "
-         "[--executor greedy|bnb] [--top-k N] [--gpu] [--report F]\n"
+         "[--gpu] [--report F]\n"
          "  gar_analyze verify --from-dirs <agent> <cpu> [<gpu>] --goal "
          "'rel(src,dst)' [--report F]\n"
          "  gar_analyze verify --tasks tasks.tsv --csr <dir> --rules <root> "
-         "[--policy ..] [--scorer ..] [--executor ..] [--gpu] [--report F]\n";
+         "[--policy ..] [--scorer ..] [--gpu] [--report F]\n";
   std::exit(2);
 }
 
