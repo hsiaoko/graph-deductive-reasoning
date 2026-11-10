@@ -3,18 +3,18 @@ project(gar_engine_deduction LANGUAGES CXX)
 
 #######################
 # gar_engine_deduction: deduction engine family (full-closure chase).
-# Levelized on gar::graph + gar::core; the GPU engine additionally touches
+# Levelized on gar::core::graph + gar::core::rule; the GPU engine additionally touches
 # MatrixGraph — the sanctioned contact point inside this module.
 #######################
 add_library(gar_engine_deduction STATIC
     src/cpu_chase_engine.cpp
 )
-add_library(gar::engine::deduction ALIAS gar_engine_deduction)
+add_library(gar::core::engine::chase ALIAS gar_engine_deduction)
 
 target_include_directories(gar_engine_deduction PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(gar_engine_deduction PUBLIC gar::graph gar::core)
+target_link_libraries(gar_engine_deduction PUBLIC gar::core::graph gar::core::rule)
 target_compile_features(gar_engine_deduction PUBLIC cxx_std_20)
 
 # oneTBB (bundled with MatrixGraph) for rule-level parallelism in the chase;

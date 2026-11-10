@@ -3,7 +3,7 @@ project(gar_engine_agent LANGUAGES CXX)
 
 #######################
 # gar_engine_agent: policy-guided deduction (agent engine).
-# Layering: gar::graph + gar::analysis + gar::hdc + gar::core ONLY —
+# Layering: gar::core::graph + gar::core::analysis + gar::core::hdc + gar::core::rule ONLY —
 # the sibling deduction engine is never visible here (the closure
 # cross-check is composed at the app layer).
 #######################
@@ -21,13 +21,13 @@ add_library(gar_engine_agent STATIC
     src/policy.cpp
     src/value_model.cpp
 )
-add_library(gar::engine::agent ALIAS gar_engine_agent)
+add_library(gar::core::engine::agent ALIAS gar_engine_agent)
 
 target_include_directories(gar_engine_agent PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(gar_engine_agent PUBLIC
-    gar::graph gar::analysis gar::hdc gar::core
+    gar::core::graph gar::core::analysis gar::core::hdc gar::core::rule
 )
 target_compile_features(gar_engine_agent PUBLIC cxx_std_20)
 

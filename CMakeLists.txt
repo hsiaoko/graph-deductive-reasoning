@@ -57,7 +57,7 @@ endif ()
 #######################
 # Project Components
 #######################
-# Everything (except third_party) lives under core/ (the gar::core library
+# Everything (except third_party) lives under core/ (the gar::core::rule library
 # tree) and tools/ (executables and scripts). See docs/refactor_plan.md.
 add_subdirectory(core)
 add_subdirectory(core/hdc)
@@ -69,6 +69,14 @@ endif ()
 add_subdirectory(core/engine)
 add_subdirectory(tools/miner)
 add_subdirectory(tools/cli)
+
+# The single gar::core library: everything under core/ + tools/miner, one
+# target to link for downstream consumers.
+add_library(gar_core INTERFACE)
+target_link_libraries(gar_core INTERFACE
+    gar_rule gar_hdc gar_graph gar_analysis gar_bridge
+    gar_engine_deduction gar_engine_agent gar_miner)
+add_library(gar::core ALIAS gar_core)
 
 if (GAR_BUILD_EXAMPLES)
     add_subdirectory(examples)

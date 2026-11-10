@@ -11,12 +11,12 @@ add_library(gar_graph STATIC
     src/predicate_evaluator.cpp
     src/fact_merger.cpp
 )
-add_library(gar::graph ALIAS gar_graph)
+add_library(gar::core::graph ALIAS gar_graph)
 
 target_include_directories(gar_graph PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(gar_graph PUBLIC gar::core)
+target_link_libraries(gar_graph PUBLIC gar::core::rule)
 target_compile_features(gar_graph PUBLIC cxx_std_20)
 
 # oneTBB (bundled with MatrixGraph) for parallel edge-absence marking;
