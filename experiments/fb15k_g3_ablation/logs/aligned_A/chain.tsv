@@ -1,2 +1,0 @@
-# step	rule_id	rule_name	embedding	success	cost	cum_cost	derived_fact
-1	gar_000018	/military/military_combatant/military_conflicts./military/military_combatant_group/combatants^-1(x0,x1) → /military/military_combatant/military_conflicts./military/military_combatant_group/combatants(x0,x1)	/m/09c7w0,/m/07ssc	1	1	1	/military/military_combatant/military_conflicts./military/military_combatant_group/combatants(/m/09c7w0,/m/07ssc)

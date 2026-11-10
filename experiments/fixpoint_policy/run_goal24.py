@@ -120,7 +120,7 @@ def run(name, command):
 def agent_command(goal, output):
     return ["./build/bin/gar_reason", "--mode", "agent", "--csr", CSR,
             "--rules", str(RULES), "--goal", goal["spec"], "--out", output,
-            "--print", "0", "--executor", "fixpoint", "--fixpoint-star-order",
+            "--print", "0", "--star-order",
             "goal", "--scorer", "exact", "--budget", "1000000000",
             "--wall-limit", "900", "--max-candidates-per-rule", "100000"]
 

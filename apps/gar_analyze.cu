@@ -639,7 +639,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
     ec.utility_gamma = agent_args.score.gamma;
     ec.wall_limit_sec = agent_args.wall_limit_sec;
     ec.fair_interval = agent_args.fair_interval;
-    ec.fixpoint_star_order = agent_args.fixpoint_star_order;
+    ec.star_order = agent_args.star_order;
     ec.seed = agent_args.PolicySeed();
     *agent_out = rag.Run(&state, goal, ec);
   }
@@ -878,7 +878,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
         ec.utility_gamma = task_args.score.gamma;
         ec.wall_limit_sec = task_args.wall_limit_sec;
         ec.fair_interval = task_args.fair_interval;
-        ec.fixpoint_star_order = task_args.fixpoint_star_order;
+        ec.star_order = task_args.star_order;
         ec.seed = task_args.PolicySeed();
         agent_res = rag.Run(&state, goal, ec);
       }

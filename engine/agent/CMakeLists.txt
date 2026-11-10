@@ -11,12 +11,12 @@ add_library(gar_engine_agent STATIC
     src/motif.cpp
     src/witness.cpp
     src/scorer.cpp
-    src/fixpoint_executor.cpp
-    src/fixpoint_session.cpp
-    src/fixpoint_matcher.cpp
-    src/fixpoint_working_set.cpp
-    src/fixpoint_preconditions.cpp
-    src/fixpoint_producers.cpp
+    src/ada_deduce_executor.cpp
+    src/deduce_session.cpp
+    src/partial_matcher.cpp
+    src/working_set.cpp
+    src/precondition_cache.cpp
+    src/producer_tracker.cpp
     src/jev_client.cpp
     src/policy.cpp
     src/value_model.cpp

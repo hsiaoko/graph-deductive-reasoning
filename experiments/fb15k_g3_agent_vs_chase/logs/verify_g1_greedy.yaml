@@ -1,9 +1,0 @@
-goal: "/education/university/local_tuition./measurement_unit/dated_money_value/currency(/m/01y8zd,/m/02l6h)"
-goal_in_cpu_closure: true
-agent_goal_derived: false
-agent_total_cost: 10
-agent_steps: 10
-budget: 10
-bstar_dg: 1
-subset_ok: true
-verdict: BUDGET-LIMITED

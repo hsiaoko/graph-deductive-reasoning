@@ -11,12 +11,7 @@ WORK = ROOT / ".work_hdcv/fixpoint_policy"
 OUT = WORK / "runs_v1"
 CSR = "/ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr"
 RULES512 = ROOT / ".work_hdcv/full_policy_matrix/rules512"
-RULES1652 = "/ssd_data/zhuxk/graphs/KG/fb15k-237/rules"
 BOUNDED = ROOT / "experiments/fixpoint_policy/run_bounded.py"
-BNB_GOALS = {
-    "r2c_4": "/music/genre/artists(/m/0fd3y,/m/01vvycq)",
-    "r2c_8": "/film/film/runtime./film/film_cut/film_release_region(/m/04v8x9,/m/02w7gg)",
-}
 
 
 def run(name, command):
@@ -55,7 +50,7 @@ def chase():
 
 
 def fixpoint(goals, single_pass=False, star_order="input"):
-    common = ["--executor", "fixpoint", "--fixpoint-star-order", star_order,
+    common = ["--star-order", star_order,
               "--scorer", "exact", "--budget", "1000000000", "--wall-limit",
               "900", "--max-candidates-per-rule", "100000"]
     repetitions = (1,) if single_pass else (1, 2, 3)
@@ -77,32 +72,15 @@ def fixpoint(goals, single_pass=False, star_order="input"):
                 ["--policy", "deterministic", "--policy-seed", "42"])
 
 
-def bnb():
-    for goal_id, goal in BNB_GOALS.items():
-        for arm in ("utility", "hdc", "numeric"):
-            name = f"bnb/{goal_id}/{arm}"
-            priority = {"utility": "utility", "hdc": "hdc-value",
-                        "numeric": "numeric-value"}[arm]
-            command = agent_command(goal, OUT / name, RULES1652) + [
-                "--executor", "bnb", "--bnb-priority", priority, "--budget", "2",
-                "--max-candidates-per-rule", "64", "--top-k", "0",
-                "--policy", "hybrid", "--scorer", "exact"]
-            if arm == "hdc":
-                command += ["--value-model", str(ROOT / f".work_hdcv/models/{goal_id}.meta")]
-            elif arm == "numeric":
-                command += ["--value-model", str(ROOT / f".work_hdcv/hdc_hard_goals/models/{goal_id}.meta")]
-            run(name, command)
-
-
 def main():
     global OUT
     parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", choices=("chase", "fixpoint", "bnb", "all"),
+    parser.add_argument("--phase", choices=("chase", "fixpoint", "all"),
                         default="all")
     parser.add_argument("--single-pass", action="store_true",
                         help="Run only the first not-yet-run repetition of each configuration.")
     parser.add_argument("--output-root", type=Path, default=OUT)
-    parser.add_argument("--fixpoint-star-order", choices=("input", "goal"),
+    parser.add_argument("--star-order", choices=("input", "goal"),
                         default="input")
     args = parser.parse_args()
     OUT = args.output_root.resolve()
@@ -112,9 +90,7 @@ def main():
         chase()
     if args.phase in ("fixpoint", "all"):
         fixpoint(goals, single_pass=args.single_pass,
-                 star_order=args.fixpoint_star_order)
-    if args.phase in ("bnb", "all"):
-        bnb()
+                 star_order=args.star_order)
 
 
 if __name__ == "__main__":

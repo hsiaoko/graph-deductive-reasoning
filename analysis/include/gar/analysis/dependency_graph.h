@@ -149,5 +149,14 @@ class DependencyGraph {
 [[nodiscard]] std::vector<char> BaseAnchoredPredicates(
     const DependencyGraph& dg, const graph::TripleGraph& g);
 
+// Returns the indices of rules whose consequent predicate can reach
+// `goal_predicate` in the dependency graph — the goal's dependency cone.
+// Pattern queries (no consequent) are always dropped. Builds the dependency
+// graph internally; `goal_predicate` must be a predicate name as interned
+// by PredicateIdOf / LabelNameOf (i.e., a relation name). An unknown goal
+// predicate (no rule derives it) yields an empty cone.
+[[nodiscard]] std::vector<std::size_t> GoalConeRuleIndices(
+    const std::vector<gar::GARule>& rules, const std::string& goal_predicate);
+
 }  // namespace analysis
 }  // namespace gar

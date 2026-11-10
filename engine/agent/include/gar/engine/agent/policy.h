@@ -236,7 +236,7 @@ class HybridNeuroSymbolicPolicy final : public Policy {
   }
 };
 
-// Learned action-conditioned cost-to-go ordering for Fixpoint. The model is
+// Learned action-conditioned cost-to-go ordering for AdaDeduce. The model is
 // ordering-only; symbolic admissibility and exact predicate evaluation stay
 // in the executor. Non-owning pointer: ReasoningAgent owns the model.
 class LearnedQPolicy final : public Policy {
@@ -284,7 +284,7 @@ struct JevConfig {
 // once on stderr and falls back to plain argmax-total over ALL candidates
 // (exactly DeterministicPolicy's selection).
 //
-// NOTE: the agent has a single executor (FixpointExecutor / Algorithm 6);
+// NOTE: the agent has a single executor (AdaDeduceExecutor / Algorithm 6);
 // Jev ranks candidates inside its ready-set selection, which is the §5.1
 // policy point.
 class JevPolicy final : public Policy {

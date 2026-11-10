@@ -190,14 +190,14 @@ double LearnedQPolicy::SelectionPriorityWithFeatures(
 std::optional<std::size_t> LearnedQPolicy::Select(
     const std::vector<ScoredMotif>& cands) {
   (void)cands;
-  throw std::logic_error("LearnedQPolicy requires Fixpoint feature selection");
+  throw std::logic_error("LearnedQPolicy requires AdaDeduce feature selection");
 }
 
 std::optional<std::size_t> LearnedQPolicy::SelectScores(
     const std::vector<double>& totals, const std::vector<char>& admissible) {
   (void)totals;
   (void)admissible;
-  throw std::logic_error("LearnedQPolicy requires Fixpoint feature selection");
+  throw std::logic_error("LearnedQPolicy requires AdaDeduce feature selection");
 }
 
 }  // namespace agent

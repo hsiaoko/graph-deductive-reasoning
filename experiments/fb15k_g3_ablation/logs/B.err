@@ -1,8 +1,0 @@
-[gar_analyze] |V|=14513 |R|=237 |E|=289650
-[gar_analyze] 81683 rules
-[gar_analyze] 0 numeric attribute columns
-[gar_analyze] shared hold-out: removed 20 goal edges from Γ0
-[chase] round 1: enumerate 10.7s, merge 5.1s, +1488637 facts
-[chase] round 2: enumerate 114.6s, merge 60.8s, +21993932 facts
-[gar_analyze] report written to experiments/fb15k_g3_ablation/reports/B.tsv
-B wall=485.21s maxrss=48037196KB

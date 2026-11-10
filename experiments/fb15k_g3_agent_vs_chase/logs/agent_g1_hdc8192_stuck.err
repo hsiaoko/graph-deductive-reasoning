@@ -1,6 +1,0 @@
-[gar_reason] |V|=14513 |R|=237 |E|=289650
-[gar_reason] 81683 rules
-[gar_reason] 0 numeric attribute columns
-[gar_reason] goal: /education/university/local_tuition./measurement_unit/dated_money_value/currency(/m/01y8zd,/m/02l6h) (slot 128)
-[gar_reason] dependency graph: 236 predicates, 221090 arcs (built in 0.148597s)
-[gar_reason] running: policy=deterministic scorer=hdc executor=greedy budget=10 hdc_dim=8192 seed=42

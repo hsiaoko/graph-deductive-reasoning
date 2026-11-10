@@ -29,7 +29,7 @@ class ReasoningAgent {
     std::unique_ptr<Policy> policy;
     std::unique_ptr<Executor> executor;
     std::unique_ptr<CostModel> cost_model;
-    // Optional value model for Fixpoint action ordering.
+    // Optional value model for AdaDeduce action ordering.
     std::shared_ptr<ValueModel> value_model;
   };
 

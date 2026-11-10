@@ -1,7 +1,7 @@
 #pragma once
 
 // Executor: the agent loop driver. Exactly one executor implements the
-// paper's Algorithm 6 (AdaDeduce): FixpointExecutor. It drives the two
+// paper's Algorithm 6 (AdaDeduce): AdaDeduceExecutor. It drives the two
 // working sets — ready R (policy-scheduled) and suspended W (revival-only)
 // — over the goal cone. The interface passes everything it needs
 // (ExecKit collaborators, per-goal AgentContext).
@@ -54,10 +54,10 @@ struct ExecConfig {
   // "input" preserves rule-path order; "goal" stable-sorts stars by
   // consequent-to-goal DG distance. Both expand every cone star unless the
   // goal, a cap, or a budget/wall limit stops the run.
-  std::string fixpoint_star_order = "input";
+  std::string star_order = "input";
   // Optional per-evaluated-action trace for offline cost-to-go training.
   // Empty disables all tracing overhead; labels are finite only on goal hits.
-  std::string fixpoint_q_trace_path;
+  std::string q_trace_path;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its
@@ -67,7 +67,7 @@ struct ExecKit {
   const Scorer* scorer;
   Policy* policy;
   const CostModel* cost_model;
-  // Optional value model for BNB branch or Fixpoint action ordering.
+  // Optional value model for BNB branch or AdaDeduce action ordering.
   const ValueModel* value_model = nullptr;
 };
 
@@ -88,14 +88,14 @@ struct AgentResult {
   std::string termination;  // "goal" | "no_candidates" | "budget" |
                             // "timeout" | "candidate_cap" | "fixpoint"
 
-  // FixpointExecutor instrumentation (only set by it): event trace
+  // AdaDeduceExecutor instrumentation (only set by it): event trace
   // (select/fair_select/evaluate/suspend/revive/prune/derive, one text row
-  // per event, written by the app to fixpoint_trace.tsv) and counters.
+  // per event, written by the app to deduce_trace.tsv) and counters.
   // Cost separation (the backward cost-semantics lesson): proof_cost =
   // cost of the successful derivation chain; search_cost = every charged
   // evaluation (incl. failed/suspended); selection/evaluation event counts
   // are separate counters; wall is wall.
-  struct FixpointStats {
+  struct DeduceStats {
     std::uint64_t select_events = 0;
     std::uint64_t fair_select_events = 0;
     std::uint64_t evaluate_events = 0;   // == search_cost charged
@@ -128,7 +128,7 @@ struct AgentResult {
     double revival_wall_ms = 0.0;
     std::vector<std::string> trace;
   };
-  std::optional<FixpointStats> fx_stats;
+  std::optional<DeduceStats> stats;
 };
 
 class Executor {
@@ -140,16 +140,16 @@ class Executor {
                           const ExecKit& kit) = 0;
 };
 
-// FixpointExecutor (docs/fixpoint_implementation_plan.md): two working sets
+// AdaDeduceExecutor (docs/fixpoint_implementation_plan.md): two working sets
 // and two loops. The MAIN loop generates actions for goal-cone rules
 // (complete matches on G∪Γ plus partial matches that defer one dynamic
 // pattern edge), schedules only R via the injected Policy, and evaluates
 // every precondition (collecting all misses): full pass derives, static
 // failure prunes (shared via the precondition cache), dynamic absence
-// suspends into W. The FIXPOINT loop revives W entries whose missing facts
+// suspends into W. The revival loop revives W entries whose missing facts
 // arrived (or whose partial wait completed on a delta) and prunes dead
 // waits (no live producer). policy never schedules W.
-class FixpointExecutor final : public Executor {
+class AdaDeduceExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
                   FailureRegistry* failures, const AgentContext& ctx,

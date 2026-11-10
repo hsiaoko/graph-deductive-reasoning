@@ -29,6 +29,9 @@ struct FullDeduceArgs {
   std::string csr_dir;
   std::string rules_root;
   std::string out_root = "closure";
+  // Optional goal spec "rel(src,dst)": filters the rule set to the goal's
+  // dependency cone before chasing (GoalChase = cone-restricted closure).
+  std::string goal;
   gar::engine::deduction::ChaseConfig cfg;
   std::size_t print_n = 20;
 };

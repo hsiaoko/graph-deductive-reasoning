@@ -100,7 +100,7 @@ def select_goals():
 def agent_command(goal, output):
     return ["./build/bin/gar_reason", "--mode", "agent", "--csr", CSR,
             "--rules", str(RULES), "--goal", goal["spec"], "--out", output,
-            "--print", "0", "--executor", "fixpoint", "--fixpoint-star-order", "goal",
+            "--print", "0", "--star-order", "goal",
             "--scorer", "exact", "--budget", "1000000000", "--wall-limit", "900",
             "--max-candidates-per-rule", "100000"]
 
@@ -114,7 +114,7 @@ def trace():
             output = WORK / "traces" / name
             command = agent_command(goal, output) + [
                 "--policy", policy, "--policy-seed", "7",
-                "--fixpoint-q-trace", output / "q_trace.tsv"]
+                "--q-trace", output / "q_trace.tsv"]
             run(name, command, WORK / "traces")
 
 

@@ -2,6 +2,10 @@
 
 #include <stdexcept>
 
+#if defined(__AVX512VPOPCNTDQ__)
+#include <immintrin.h>
+#endif
+
 namespace gar {
 namespace hdc {
 
@@ -87,13 +91,31 @@ Hypervector Hypervector::Permute(const Hypervector& a, std::uint32_t shift) {
 std::uint64_t Hypervector::Hamming(const Hypervector& a,
                                    const Hypervector& b) {
   RequireSameDim(a, b);
+  const std::uint64_t* aw = a.words_.data();
+  const std::uint64_t* bw = b.words_.data();
+  const std::size_t n = a.words_.size();
   std::uint64_t h = 0;
-  // Anchor for an AVX2 path: accumulate per-word popcounts of a^b here
-  // (e.g. via _mm256_popcnt_epi64 over 4 words at a time); the scalar loop
-  // below stays as the portable fallback.
-  for (std::size_t w = 0; w < a.words_.size(); ++w) {
-    h += static_cast<std::uint64_t>(
-        __builtin_popcountll(a.words_[w] ^ b.words_[w]));
+  std::size_t w = 0;
+#if defined(__AVX512VPOPCNTDQ__)
+  // Four words at a time: VPOPCNTDQ counts the set bits of each 64-bit lane
+  // of a^b in one instruction; sum the four lane counts. The scalar loop
+  // below stays as the portable POPCNT fallback.
+  for (; w + 4 <= n; w += 4) {
+    const __m256i xa =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(aw + w));
+    const __m256i xb =
+        _mm256_loadu_si256(reinterpret_cast<const __m256i*>(bw + w));
+    const __m256i pc = _mm256_popcnt_epi64(_mm256_xor_si256(xa, xb));
+    const __m128i lo = _mm256_castsi256_si128(pc);
+    const __m128i hi = _mm256_extracti128_si256(pc, 1);
+    const __m128i s = _mm_add_epi64(lo, hi);
+    alignas(16) std::uint64_t lanes[2];
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(lanes), s);
+    h += lanes[0] + lanes[1];
+  }
+#endif
+  for (; w < n; ++w) {
+    h += static_cast<std::uint64_t>(__builtin_popcountll(aw[w] ^ bw[w]));
   }
   return h;
 }

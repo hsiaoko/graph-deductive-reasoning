@@ -60,7 +60,7 @@ void PrintUsage() {
          "[--max-candidates-per-rule N] [--value-model PATH] "
          "[--hdc-value-backend original|simd|bit-lut] "
          "[--wall-limit S] [--fair-interval N] "
-         "[--fixpoint-star-order input|goal] [--fixpoint-q-trace PATH] "
+         "[--star-order input|goal] [--q-trace PATH] "
          "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
          "[--tau-hdc F] [--no-confidence] [--out <dir>] "
          "[--verify-against-closure] [--print N]\n"
@@ -81,6 +81,12 @@ Args ParseArgs(int argc, char** argv) {
     };
     if (k == "--mode") a.mode = next();
     else if (k == "--engine") a.engine = next();
+    else if (k == "--goal") {
+      // Routed by mode (--mode precedes --goal in every invocation): full
+      // mode uses it as a goal-cone filter, agent mode as the goal fact.
+      if (a.mode == "agent") a.agent.goal_spec = next();
+      else a.full.goal = next();
+    }
     else if (gar_apps::ParseFullDeduceOption(k, next, &a.full,
                                              /*allow_threads=*/true)) {
     } else if (!gar_apps::ParseAgentModeOption(k, next, &a.agent)) {
@@ -122,6 +128,28 @@ int RunFullMode(const Args& args) {
 
   gar_apps::FullDeduceInputs in =
       gar_apps::LoadFullDeduceInputs(args.full, log_tag);
+
+  // GoalChase: restrict the rule set to the goal's dependency cone, then
+  // run the plain chase to fixpoint on that subset (no goal early stop).
+  if (!args.full.goal.empty()) {
+    const std::string goal_pred =
+        args.full.goal.substr(0, args.full.goal.find('('));
+    const auto kept = gar::analysis::GoalConeRuleIndices(in.rules, goal_pred);
+    std::vector<gar::GARule> filtered_rules;
+    std::vector<std::string> filtered_ids;
+    filtered_rules.reserve(kept.size());
+    filtered_ids.reserve(kept.size());
+    for (std::size_t i : kept) {
+      filtered_rules.push_back(in.rules[i]);
+      filtered_ids.push_back(in.rule_ids[i]);
+    }
+    std::cerr << "[" << log_tag << "] goal-cone filter (" << goal_pred
+              << "): " << filtered_rules.size() << " / " << in.rules.size()
+              << " rules\n";
+    in.rules = std::move(filtered_rules);
+    in.rule_ids = std::move(filtered_ids);
+  }
+
   const gar::graph::VertexAttrs* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
 

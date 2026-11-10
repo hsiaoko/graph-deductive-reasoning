@@ -1,3 +1,0 @@
-[gar_analyze] verify --tasks: experiments/fb15k_g3_ablation/tasks.tsv
-  CONSISTENT=0 BUDGET-LIMITED=20 DIVERGENT=0 INFEASIBLE=0
-  success rate (derived/feasible): 0/20

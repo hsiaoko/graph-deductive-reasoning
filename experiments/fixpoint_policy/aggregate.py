@@ -115,12 +115,12 @@ def main():
                 "internal_wall_sec": internal_time(run), "expected": expected,
                 "hit": int(hit), "correct": int(settled and hit == expected),
                 "unresolved": int(not settled), "derived": derived_count,
-                "evaluations": int(number(meta, "fx_evaluate_events")),
-                "expansions": "", "caps": int(number(meta, "fx_candidate_caps")),
+                "evaluations": int(number(meta, "evaluate_events")),
+                "expansions": "", "caps": int(number(meta, "candidate_caps")),
                 "termination": termination,
                 "peak_rss_gib": resource["peak_tree_rss_bytes"] / (1 << 30),
                 "soundness": "" if soundness is None else int(soundness),
-                "certified": "", "proof_cost": number(meta, "fx_proof_cost"),
+                "certified": "", "proof_cost": number(meta, "proof_cost"),
             }
             rows.append(row)
             fixpoint.setdefault((goal_id, arm), []).append(row)

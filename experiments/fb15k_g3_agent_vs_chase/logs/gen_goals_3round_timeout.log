@@ -1,2 +1,0 @@
-[chase] round 1: enumerate 19.7s, merge 12.6s, +1816518 facts
-(then round 2 never completed; killed at the 3600s task timeout — same OOM trajectory as chase_r2_uncapped_oom.log)

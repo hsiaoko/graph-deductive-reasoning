@@ -1,3 +1,0 @@
-[chase] round 1: enumerate 19.9s, merge 11.0s, +1818708 facts
-Command terminated by signal 9 (OOM)
-chase-2round wall=433.56s maxrss=225630436KB

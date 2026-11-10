@@ -49,12 +49,12 @@ def aggregate():
             "hit": int(meta.get("goal_derived") == "true"),
             "termination": meta.get("termination", resource["status"]),
             "sound": int(produced <= gt_facts),
-            "branches": int(number(meta, "fx_select_events")),
-            "matches": int(number(meta, "fx_match_embeddings")),
-            "ready": int(number(meta, "fx_ready_insertions")),
-            "evaluations": int(number(meta, "fx_evaluate_events")),
+            "branches": int(number(meta, "select_events")),
+            "matches": int(number(meta, "match_embeddings")),
+            "ready": int(number(meta, "ready_insertions")),
+            "evaluations": int(number(meta, "evaluate_events")),
             "derived": int(number(meta, "derived")),
-            "caps": int(number(meta, "fx_candidate_caps")),
+            "caps": int(number(meta, "candidate_caps")),
             "rss": resource["peak_tree_rss_bytes"] / (1 << 30),
         })
     report = {

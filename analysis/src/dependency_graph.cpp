@@ -444,5 +444,26 @@ void DependencyGraph::WriteYaml(const std::filesystem::path& out) const {
   }
 }
 
+std::vector<std::size_t> GoalConeRuleIndices(
+    const std::vector<gar::GARule>& rules, const std::string& goal_predicate) {
+  PredicateTable table;
+  DependencyGraph dg;
+  dg.Build(rules, &table);
+  const std::uint32_t goal = table.Find(goal_predicate);
+  if (goal == kInvalidPredicate) return {};  // no rule derives this predicate
+  const std::vector<std::uint32_t> distances = dg.DistancesTo(goal);
+  std::vector<std::size_t> indices;
+  indices.reserve(rules.size());
+  for (std::size_t i = 0; i < rules.size(); ++i) {
+    if (!rules[i].consequent) continue;  // pattern queries derive nothing
+    const std::uint32_t p =
+        table.Find(PredicateIdOf(*rules[i].consequent, rules[i]));
+    if (p != kInvalidPredicate && distances[p] != kUnreachable) {
+      indices.push_back(i);
+    }
+  }
+  return indices;
+}
+
 }  // namespace analysis
 }  // namespace gar
