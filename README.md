@@ -54,7 +54,7 @@ MatrixGraph        ←  gar::core::bridge / gar::core::engine（唯一外部依�
 
 ## 构建
 
-完整的挖掘/查看命令参考见 **[docs/commands.md](docs/commands.md)**。
+完整的挖掘/查看命令参考见下方「最小闭环」示例。
 
 依赖：CMake ≥ 3.20，GCC 12，CUDA ≥ 12（MatrixGraph 需要）。
 

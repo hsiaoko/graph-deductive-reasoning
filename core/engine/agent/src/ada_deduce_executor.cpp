@@ -1,5 +1,5 @@
 // AdaDeduceExecutor: policy-guided deduction with suspension and revival
-// (docs/fixpoint_implementation_plan.md; approved semantics: per-star
+// (approved semantics: per-star
 // expansion + dynamic-atom suspension + delta completion — NOT "complete Q
 // match on the initial graph only").
 //

@@ -139,7 +139,7 @@ class Executor {
                           const ExecKit& kit) = 0;
 };
 
-// AdaDeduceExecutor (docs/fixpoint_implementation_plan.md): two working sets
+// AdaDeduceExecutor: two working sets
 // and two loops. The MAIN loop generates actions for goal-cone rules
 // (complete matches on G∪Γ plus partial matches that defer one dynamic
 // pattern edge), schedules only R via the injected Policy, and evaluates

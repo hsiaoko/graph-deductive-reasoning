@@ -9,8 +9,7 @@
 2. 除 third_party 外，推理相关代码收敛为单一 `gar::core` 库；图/模式数据结构
    直接复用 MatrixGraph，删除自建 `TripleGraph`/`VertexAttrs`/`CSRTopology`/`bridge`。
 3. 结果与论文 AdaDeduce（Algorithm 6）语义一致——尤其保留代码已落地的
-   G∪Γ + delta generation + partial action 挂起语义（见
-   `docs/fixpoint_implementation_plan.md` 的「通用 GAR 方案」）。
+   G∪Γ + delta generation + partial action 挂起语义（通用 GAR 方案，已落地）。
 
 ## 1. 冻结决策
 
@@ -137,7 +136,7 @@ Google style：类型/函数 PascalCase，变量 snake_case（类成员尾下划
   goal 可达）、定理 6 终止（(rule,embedding) 去重）。
 
 ### Phase 5 — 文档同步
-- 重写 README / `docs/agent_design.md` / `docs/commands.md` 的目录与分层描述。
+- 重写 README 的目录与分层描述。
 
 ## 3. 风险与已知影响
 
@@ -148,4 +147,4 @@ Google style：类型/函数 PascalCase，变量 snake_case（类成员尾下划
 - **实验失效**：现有实验（TripleGraph 输入）需在 Phase 4 后重跑锚点，不承诺
   全矩阵复现。
 - **论文算法语义**：保留代码已落地的「通用 GAR 方案」，不倒退到「只在静态 G
-  匹配一次」的旧伪代码（见 `docs/fixpoint_implementation_plan.md` §3）。
+  匹配一次」的旧伪代码。
