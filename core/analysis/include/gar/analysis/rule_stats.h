@@ -12,8 +12,7 @@
 #include "gar/analysis/dependency_graph.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 struct RuleSetStats {
   std::uint64_t num_rules = 0;
@@ -50,5 +49,4 @@ RuleSetStats ComputeRuleSetStats(const std::vector<gar::GARule>& rules,
 void PrintRuleSetStats(std::ostream& os, const RuleSetStats& stats,
                        const DependencyGraph& dg);
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

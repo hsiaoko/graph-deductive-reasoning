@@ -7,8 +7,7 @@
 #include "gar/graph/fact.h"
 #include "gar/graph/triple_graph.h"
 
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 struct RoundMerge {
   std::uint64_t new_facts = 0;
@@ -34,5 +33,4 @@ void MarkAbsentEdges(const TripleGraph& g,
                      const std::uint32_t* src, const std::uint32_t* dst,
                      std::uint32_t slot, std::size_t n, char* keep);
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

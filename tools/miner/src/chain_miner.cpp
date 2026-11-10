@@ -6,11 +6,10 @@
 #include <mutex>
 #include <thread>
 
-namespace gar {
-namespace miner {
+namespace gar::tools::miner {
 
-using graph::PackPair;
-using graph::TripleGraph;
+using gar::core::graph::PackPair;
+using gar::core::graph::TripleGraph;
 
 ChainMiner::ChainMiner(const TripleGraph& graph, MinerConfig config)
     : g_(graph), cfg_(std::move(config)) {}
@@ -335,5 +334,4 @@ std::vector<GARule> ChainMiner::Mine() {
   return rules;
 }
 
-}  // namespace miner
-}  // namespace gar
+}  // namespace gar::tools::miner

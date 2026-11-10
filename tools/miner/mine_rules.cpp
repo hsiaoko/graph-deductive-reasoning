@@ -30,7 +30,7 @@ struct Args {
   std::string csr_dir;
   std::string out_root = "rules";
   std::size_t print_n = 20;
-  gar::miner::MinerConfig cfg;
+  gar::tools::miner::MinerConfig cfg;
 };
 
 Args ParseArgs(int argc, char** argv) {
@@ -82,11 +82,11 @@ Args ParseArgs(int argc, char** argv) {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::graph::TripleGraph g =
+    gar::core::graph::TripleGraph g =
         args.graph_dir.empty()
-            ? gar::bridge::LoadTripleGraph(args.csr_dir,
+            ? gar::core::bridge::LoadTripleGraph(args.csr_dir,
                                            args.cfg.with_inverses)
-            : gar::graph::TripleGraph::Load(args.graph_dir,
+            : gar::core::graph::TripleGraph::Load(args.graph_dir,
                                             args.cfg.with_inverses);
     std::cerr << "[mine_rules] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges();
@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
     }
     std::cerr << "\n";
 
-    gar::miner::ChainMiner miner(g, args.cfg);
+    gar::tools::miner::ChainMiner miner(g, args.cfg);
     auto rules = miner.Mine();
     const auto& st = miner.stats();
     std::cerr << "[mine_rules] chains evaluated: " << st.chains_evaluated

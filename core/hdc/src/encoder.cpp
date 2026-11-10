@@ -2,8 +2,7 @@
 
 #include <vector>
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 namespace {
 
@@ -106,5 +105,4 @@ Hypervector HdcEncoder::EncodeFact(std::uint64_t pred_symbol,
   return Hypervector::Bind(vp, BundleMajority(ops, tie));
 }
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

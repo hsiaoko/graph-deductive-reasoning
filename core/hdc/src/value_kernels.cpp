@@ -4,8 +4,7 @@
 #include <immintrin.h>
 #endif
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 void AddBipolar(std::int16_t* accumulator, const std::int8_t* vector,
                 std::uint32_t dim) {
@@ -85,5 +84,4 @@ double DotPackedBipolar(const std::uint64_t* words, const double* weights,
   return weight_sum - 2.0 * negative_sum;
 }
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

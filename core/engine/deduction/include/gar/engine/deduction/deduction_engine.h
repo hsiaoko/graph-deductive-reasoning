@@ -10,11 +10,10 @@
 // DeductionEngine: full-closure deduction over a knowledge graph (the chase).
 // Two engines share the same semantics and output contract: CpuChaseEngine
 // (oneTBB) and GpuDeduceEngine (MatrixGraph task::GARDeduce). Levelized: this
-// module depends on gar::graph and gar::core only (the GPU engine additionally
+// module depends on gar::core::graph and gar::core only (the GPU engine additionally
 // on MatrixGraph, the sanctioned contact point).
-namespace gar {
-namespace engine {
-namespace deduction {
+namespace gar::core::engine {
+namespace chase {
 
 struct ChaseConfig {
   std::uint64_t max_matches_per_rule = 1'000'000;  // embedding cap per rule
@@ -47,7 +46,7 @@ struct RuleMatches {
 struct ChaseResult {
   std::vector<RuleChaseStats> rules;
   std::vector<RuleMatches> matches;
-  std::vector<graph::DerivedEdge> derived;  // all new facts, in derivation order
+  std::vector<gar::core::graph::DerivedEdge> derived;  // all new facts, in derivation order
   // Materialized work over ALL rounds. Per-rule embeddings/x_satisfied above
   // remain final-round values; these totals make batch exploration comparable
   // with goal-directed executors without redefining branches as derivations.
@@ -65,6 +64,5 @@ class DeductionEngine {
                           const ChaseConfig& cfg) = 0;
 };
 
-}  // namespace deduction
-}  // namespace engine
-}  // namespace gar
+}  // namespace chase
+}  // namespace gar::core::engine

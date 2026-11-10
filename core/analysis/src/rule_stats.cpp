@@ -3,8 +3,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 namespace {
 
@@ -118,5 +117,4 @@ void PrintRuleSetStats(std::ostream& os, const RuleSetStats& st,
   (void)dg;
 }
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

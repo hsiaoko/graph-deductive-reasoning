@@ -18,8 +18,7 @@
 #include "gar/hdc/const.h"
 #include "gar/hdc/hypervector.h"
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 class HdcEncoder {
  public:
@@ -48,5 +47,4 @@ class HdcEncoder {
   Config cfg_;
 };
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

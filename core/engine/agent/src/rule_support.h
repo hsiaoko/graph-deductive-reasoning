@@ -14,8 +14,7 @@
 #include "gar/graph/triple_graph.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 // Skips exactly the rule shapes the chase marks unsupported
@@ -43,15 +42,15 @@ inline bool RuleSupported(const GARule& r, RuleHead* head_out) {
 // goal in the dependency graph.
 inline bool RuleReachesGoal(const GARule& r,
                             const std::vector<std::uint32_t>& distances,
-                            const analysis::PredicateTable& table) {
+                            const gar::core::analysis::PredicateTable& table) {
   const std::uint32_t p0 =
-      table.Find(analysis::PredicateIdOf(*r.consequent, r));
-  return p0 != analysis::kInvalidPredicate &&
-         distances[p0] != analysis::kUnreachable;
+      table.Find(gar::core::analysis::PredicateIdOf(*r.consequent, r));
+  return p0 != gar::core::analysis::kInvalidPredicate &&
+         distances[p0] != gar::core::analysis::kUnreachable;
 }
 
-inline graph::PatternSpec BuildSpec(const GARule& r) {
-  graph::PatternSpec spec;
+inline gar::core::graph::PatternSpec BuildSpec(const GARule& r) {
+  gar::core::graph::PatternSpec spec;
   const auto n = static_cast<std::uint32_t>(r.num_vertices());
   spec.num_vertices = n;
   for (std::size_t e = 0; e < r.edge_src.size(); ++e) {
@@ -64,7 +63,7 @@ inline graph::PatternSpec BuildSpec(const GARule& r) {
 }
 
 // Vertex-label post-filter, the chase's convention.
-inline bool VertexLabelsOk(const GARule& r, const graph::TripleGraph& g,
+inline bool VertexLabelsOk(const GARule& r, const gar::core::graph::TripleGraph& g,
                            const std::uint32_t* emb) {
   if (!g.has_vertex_labels()) return true;
   const auto n = static_cast<std::uint32_t>(r.num_vertices());
@@ -78,5 +77,4 @@ inline bool VertexLabelsOk(const GARule& r, const graph::TripleGraph& g,
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

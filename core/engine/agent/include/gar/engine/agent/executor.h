@@ -22,16 +22,15 @@
 #include "gar/engine/agent/witness.h"
 #include "gar/hdc/encoder.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 // Per-goal run context, built by ReasoningAgent.
 struct AgentContext {
-  const analysis::DependencyGraph* dg;
+  const gar::core::analysis::DependencyGraph* dg;
   std::vector<std::uint32_t> distances;  // d(.) toward the goal predicate
-  const analysis::PredicateTable* table;
-  hdc::HdcEncoder encoder;
+  const gar::core::analysis::PredicateTable* table;
+  gar::core::hdc::HdcEncoder encoder;
 };
 
 struct ExecConfig {
@@ -75,12 +74,12 @@ struct AgentStep {
   Motif motif;
   bool success = false;
   double cost = 0.0;
-  std::optional<graph::DerivedEdge> derived;
+  std::optional<gar::core::graph::DerivedEdge> derived;
 };
 
 struct AgentResult {
   std::vector<AgentStep> chain;
-  std::vector<graph::DerivedEdge> derived;  // every fact derived, in order
+  std::vector<gar::core::graph::DerivedEdge> derived;  // every fact derived, in order
   double total_cost = 0.0;
   double utility = 0.0;       // sum of w_q over derived facts (§3.2)
   bool goal_derived = false;
@@ -157,5 +156,4 @@ class AdaDeduceExecutor final : public Executor {
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

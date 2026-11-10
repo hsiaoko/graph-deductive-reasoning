@@ -9,8 +9,7 @@
 #include "gar/engine/agent/witness.h"
 #include "gar/hdc/evidence.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 namespace {
@@ -26,29 +25,29 @@ double RelFam(const GARule& rule, const ScoringContext& ctx, double gamma) {
   auto add = [&](const std::string& name) {
     if (!seen.insert(name).second) return;
     const std::uint32_t id = table.Find(name);
-    if (id == analysis::kInvalidPredicate || d[id] == analysis::kUnreachable) {
+    if (id == gar::core::analysis::kInvalidPredicate || d[id] == gar::core::analysis::kUnreachable) {
       sum = std::numeric_limits<double>::infinity();
       return;
     }
     if (sum != std::numeric_limits<double>::infinity()) sum += d[id];
   };
   for (std::uint32_t e = 0; e < rule.num_edges(); ++e) {
-    add(analysis::LabelNameOf(static_cast<LabelID>(rule.edge_labels[e]), rule));
+    add(gar::core::analysis::LabelNameOf(static_cast<LabelID>(rule.edge_labels[e]), rule));
   }
   for (const auto& pred : rule.antecedent) {
-    add(analysis::PredicateIdOf(pred, rule));
+    add(gar::core::analysis::PredicateIdOf(pred, rule));
   }
-  if (rule.consequent) add(analysis::PredicateIdOf(*rule.consequent, rule));
+  if (rule.consequent) add(gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
   if (sum == std::numeric_limits<double>::infinity()) return 0.0;
   return std::pow(gamma, sum);
 }
 
 // d(p0): distance of the consequent's predicate to the goal.
 std::uint32_t HeadDistance(const GARule& rule, const ScoringContext& ctx) {
-  if (!rule.consequent) return analysis::kUnreachable;
+  if (!rule.consequent) return gar::core::analysis::kUnreachable;
   const std::uint32_t id =
-      ctx.predicates->Find(analysis::PredicateIdOf(*rule.consequent, rule));
-  if (id == analysis::kInvalidPredicate) return analysis::kUnreachable;
+      ctx.predicates->Find(gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
+  if (id == gar::core::analysis::kInvalidPredicate) return gar::core::analysis::kUnreachable;
   return (*ctx.distances)[id];
 }
 
@@ -58,12 +57,12 @@ void FillPriceAdmissible(const GARule& rule, const Motif& mu,
                          ScoredMotif* out) {
   const std::uint32_t dp0 = HeadDistance(rule, ctx);
   const double w0 = cost.RuleLowerBound(rule);
-  out->price = dp0 == analysis::kUnreachable
+  out->price = dp0 == gar::core::analysis::kUnreachable
                    ? std::numeric_limits<double>::infinity()
                    : w0 + dp0;
   const RuleHead head = ResolveRuleHead(rule);
   out->admissible =
-      head.valid && dp0 != analysis::kUnreachable &&
+      head.valid && dp0 != gar::core::analysis::kUnreachable &&
       !ctx.state->ContainsEdge(head.slot, mu.embedding[head.pu],
                                mu.embedding[head.pv]);
 }
@@ -98,7 +97,7 @@ void FillScoredRule(const HandcraftedConfig& cfg, const CostModel& cost,
   out->rel_fam = RelFam(rule, ctx, cfg.gamma);
   out->confidence = cfg.use_confidence ? rule.quality.confidence : 0.0;
   const std::uint32_t dp0 = HeadDistance(rule, ctx);
-  out->price = dp0 == analysis::kUnreachable
+  out->price = dp0 == gar::core::analysis::kUnreachable
                    ? std::numeric_limits<double>::infinity()
                    : cost.RuleLowerBound(rule) + dp0;
   out->priority = cfg.alpha * (out->rel_fam + cfg.nu2 * out->confidence);
@@ -112,7 +111,7 @@ void NullScorer::Score(const GARule& rule, const Motif& mu,
   const std::uint32_t dp0 = HeadDistance(rule, ctx);
   const RuleHead head = ResolveRuleHead(rule);
   out->admissible =
-      head.valid && dp0 != analysis::kUnreachable &&
+      head.valid && dp0 != gar::core::analysis::kUnreachable &&
       !ctx.state->ContainsEdge(head.slot, mu.embedding[head.pu],
                                mu.embedding[head.pv]);
 }
@@ -163,7 +162,7 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
   // Encode each premise fact ONCE (memoized; identical vectors by
   // construction) and reuse for both the v_mu bundle and the per-premise
   // witness-hit probes.
-  std::vector<const hdc::Hypervector*> pvecs;
+  std::vector<const gar::core::hdc::Hypervector*> pvecs;
   pvecs.reserve(premises.size());
   for (const auto& p : premises) {
     const FactVecKey key{
@@ -189,12 +188,12 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
   } else {
     // v_mu = bundle of the encoded premise facts; PackedHdc is the cached
     // sign-packed evidence vector (re-packed only on new witness events).
-    const hdc::Hypervector& packed_e = ctx.witness->PackedHdc();
-    hdc::EvidenceVector v_mu(enc_.dim());
-    for (const hdc::Hypervector* v : pvecs) v_mu.Witness(*v);
-    out->rel_evd = hdc::Hypervector::Cosine(packed_e, v_mu.Packed());
+    const gar::core::hdc::Hypervector& packed_e = ctx.witness->PackedHdc();
+    gar::core::hdc::EvidenceVector v_mu(enc_.dim());
+    for (const gar::core::hdc::Hypervector* v : pvecs) v_mu.Witness(*v);
+    out->rel_evd = gar::core::hdc::Hypervector::Cosine(packed_e, v_mu.Packed());
     for (std::size_t i = 0; i < premises.size(); ++i) {
-      hits[i] = hdc::Hypervector::Cosine(packed_e, *pvecs[i]) >= cfg_.tau_hdc;
+      hits[i] = gar::core::hdc::Hypervector::Cosine(packed_e, *pvecs[i]) >= cfg_.tau_hdc;
     }
   }
   std::uint32_t n_hits = 0;
@@ -206,5 +205,4 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

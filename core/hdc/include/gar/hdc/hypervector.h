@@ -8,8 +8,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 // splitmix64 stream step: the hash primitive behind symbol generation and
 // deterministic tie-breaking. Each call yields the next 64 pseudorandom
@@ -69,5 +68,4 @@ class Hypervector {
   std::vector<std::uint64_t> words_;
 };
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

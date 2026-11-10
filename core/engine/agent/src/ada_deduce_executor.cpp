@@ -15,8 +15,7 @@
 
 #include "deduce_session.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 AgentResult AdaDeduceExecutor::Run(const Goal& goal, AgentState* state,
@@ -30,5 +29,4 @@ AgentResult AdaDeduceExecutor::Run(const Goal& goal, AgentState* state,
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

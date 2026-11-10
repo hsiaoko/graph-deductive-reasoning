@@ -2,8 +2,7 @@
 
 #include <cstdint>
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 // Dense bipolar-vector kernels used by the agent's value model. The online
 // accumulator is int16; binding is coordinate-wise multiplication.
@@ -20,5 +19,4 @@ double DotInt16Double(const std::int16_t* vector, const double* weights,
 double DotPackedBipolar(const std::uint64_t* words, const double* weights,
                         std::uint32_t dim, double weight_sum);
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

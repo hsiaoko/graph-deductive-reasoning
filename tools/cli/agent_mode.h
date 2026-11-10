@@ -3,7 +3,7 @@
 // gar_reason --mode agent: policy-guided goal deduction (paper §3-§5).
 // Argument parsing, execution and output
 // live here; the engine itself is engine/agent/. The
-// --verify-against-closure cross-check composes engine::deduction at the
+// --verify-against-closure cross-check composes gar::core::engine::deduction at the
 // app layer — the agent library never sees its sibling engine.
 
 #include <algorithm>
@@ -35,7 +35,7 @@ struct AgentModeArgs {
   // Longest-waiting fair scheduling interval (0=off).
   std::uint32_t fair_interval = 0;
   std::string star_order = "input";  // input|goal
-  std::uint32_t hdc_dim = gar::hdc::kHdcDefaultDim;
+  std::uint32_t hdc_dim = gar::core::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
   // Seed decoupling (--policy-seed / --hdc-seed; both fall back to --seed).
   // The HDC encoder uses the hdc seed; every policy-side RNG
@@ -47,7 +47,7 @@ struct AgentModeArgs {
   }
   [[nodiscard]] std::uint64_t HdcSeed() const { return hdc_seed.value_or(seed); }
   std::uint32_t max_candidates_per_rule = 256;
-  gar::engine::agent::HandcraftedConfig score;
+  gar::core::engine::agent::HandcraftedConfig score;
   bool verify_against_closure = false;
   // Ablation: --no-dg removes dependency-graph guidance (d(.) table all
   // zeros: no candidate hard-filter, rel_fam neutral, price = w0). The DG
@@ -55,12 +55,12 @@ struct AgentModeArgs {
   bool no_dg = false;
   // Jev (LLM decision model) policy knobs; --jev-mock swaps the HTTP client
   // for the network-free MockJevClient (development/regression support).
-  gar::engine::agent::JevConfig jev;
+  gar::core::engine::agent::JevConfig jev;
   bool jev_mock = false;
   double wall_limit_sec = 0.0;
   std::string value_model;
-  gar::engine::agent::HdcBackend hdc_value_backend =
-      gar::engine::agent::HdcBackend::kBitLut;
+  gar::core::engine::agent::HdcBackend hdc_value_backend =
+      gar::core::engine::agent::HdcBackend::kBitLut;
   std::string q_trace_path;
 };
 
@@ -107,11 +107,11 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
   else if (k == "--hdc-value-backend") {
     const std::string backend = next();
     if (backend == "original") {
-      a->hdc_value_backend = gar::engine::agent::HdcBackend::kOriginal;
+      a->hdc_value_backend = gar::core::engine::agent::HdcBackend::kOriginal;
     } else if (backend == "simd") {
-      a->hdc_value_backend = gar::engine::agent::HdcBackend::kSimd;
+      a->hdc_value_backend = gar::core::engine::agent::HdcBackend::kSimd;
     } else if (backend == "bit-lut") {
-      a->hdc_value_backend = gar::engine::agent::HdcBackend::kBitLut;
+      a->hdc_value_backend = gar::core::engine::agent::HdcBackend::kBitLut;
     } else {
       throw std::invalid_argument(
           "unknown --hdc-value-backend: " + backend +
@@ -128,8 +128,8 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
 // Parses "rel_name(src,dst)": the relation name resolves to a base slot
 // through the graph's relation dictionary; arguments are entity names
 // resolved through the entity dictionary, or '_' for an open variable.
-inline gar::engine::agent::Goal ParseGoalSpec(const std::string& spec,
-                                              const gar::graph::TripleGraph& g) {
+inline gar::core::engine::agent::Goal ParseGoalSpec(const std::string& spec,
+                                              const gar::core::graph::TripleGraph& g) {
   const auto lp = spec.find('(');
   const auto rp = spec.rfind(')');
   if (lp == std::string::npos || rp == std::string::npos || rp < lp) {
@@ -145,7 +145,7 @@ inline gar::engine::agent::Goal ParseGoalSpec(const std::string& spec,
   const std::string a0 = args.substr(0, comma);
   const std::string a1 = args.substr(comma + 1);
 
-  gar::engine::agent::Goal goal;
+  gar::core::engine::agent::Goal goal;
   bool found = false;
   for (std::uint32_t r = 0; r < g.num_relations(); ++r) {
     if (g.RelationName(r) == rel) {
@@ -174,15 +174,15 @@ inline gar::engine::agent::Goal ParseGoalSpec(const std::string& spec,
 // wiring in both). When args.policy == "jev", a JevPolicy is built from
 // `jev_ctx` (goal/graph/rules/rule_ids — the policy needs them for the
 // state text) and *jev_out is set for control-overhead reporting.
-inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
-    const AgentModeArgs& args, const gar::analysis::DependencyGraph* dg,
-    const gar::engine::agent::Goal* goal = nullptr,
-    const gar::graph::TripleGraph* graph = nullptr,
+inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
+    const AgentModeArgs& args, const gar::core::analysis::DependencyGraph* dg,
+    const gar::core::engine::agent::Goal* goal = nullptr,
+    const gar::core::graph::TripleGraph* graph = nullptr,
     const std::vector<gar::GARule>* rules = nullptr,
     const std::vector<std::string>* rule_ids = nullptr,
-    gar::engine::agent::JevPolicy** jev_out = nullptr) {
-  namespace agent = gar::engine::agent;
-  const gar::hdc::HdcEncoder encoder({args.hdc_dim, args.HdcSeed()});
+    gar::core::engine::agent::JevPolicy** jev_out = nullptr) {
+  namespace agent = gar::core::engine::agent;
+  const gar::core::hdc::HdcEncoder encoder({args.hdc_dim, args.HdcSeed()});
   agent::ReasoningAgent::Components comps;
   comps.cost_model = std::make_unique<agent::UnitCostModel>();
   if (args.scorer == "exact") {
@@ -251,18 +251,18 @@ inline gar::engine::agent::ReasoningAgent MakeReasoningAgent(
 }
 
 // Renders a derived fact as "rel(src,dst)" with entity names.
-inline std::string FormatFact(const gar::graph::TripleGraph& g,
-                              const gar::graph::DerivedEdge& e) {
+inline std::string FormatFact(const gar::core::graph::TripleGraph& g,
+                              const gar::core::graph::DerivedEdge& e) {
   return g.SlotName(e.slot) + "(" + g.EntityName(e.src) + "," +
          g.EntityName(e.dst) + ")";
 }
 
 inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
-  namespace agent = gar::engine::agent;
+  namespace agent = gar::core::engine::agent;
 
   // ---- load (same sources as the full mode) ----
-  gar::graph::TripleGraph g =
-      gar::bridge::LoadTripleGraph(io.csr_dir, /*with_inverses=*/true);
+  gar::core::graph::TripleGraph g =
+      gar::core::bridge::LoadTripleGraph(io.csr_dir, /*with_inverses=*/true);
   std::cerr << "[gar_reason] |V|=" << g.num_entities()
             << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
             << "\n";
@@ -281,7 +281,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
     rule_ids.push_back(d.filename().string());
   }
   std::cerr << "[gar_reason] " << rules.size() << " rules\n";
-  gar::graph::VertexAttrs attrs = gar::bridge::LoadVertexAttrs(io.csr_dir);
+  gar::core::graph::VertexAttrs attrs = gar::core::bridge::LoadVertexAttrs(io.csr_dir);
   std::cerr << "[gar_reason] " << attrs.columns.size()
             << " numeric attribute columns\n";
 
@@ -290,8 +290,8 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << goal.slot << ")\n";
 
   // ---- dependency graph (once per rule set; d(.) is per goal) ----
-  gar::analysis::PredicateTable table;
-  gar::analysis::DependencyGraph dg;
+  gar::core::analysis::PredicateTable table;
+  gar::core::analysis::DependencyGraph dg;
   const auto dg_t0 = std::chrono::steady_clock::now();
   dg.Build(rules, &table);
   std::cerr << "[gar_reason] dependency graph: " << dg.NumPredicates()
@@ -344,19 +344,19 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << " termination=" << res.termination << " wall=" << wall << "s\n";
 
   // ---- optional soundness cross-check against the full closure (L4
-  // composition: the agent library itself never sees engine::deduction) ----
+  // composition: the agent library itself never sees gar::core::engine::deduction) ----
   bool sound = true;
   if (args.verify_against_closure) {
     const auto v_t0 = std::chrono::steady_clock::now();
-    gar::graph::TripleGraph g2 =
-        gar::bridge::LoadTripleGraph(io.csr_dir, /*with_inverses=*/true);
-    gar::engine::deduction::CpuChaseEngine closure_engine(
+    gar::core::graph::TripleGraph g2 =
+        gar::core::bridge::LoadTripleGraph(io.csr_dir, /*with_inverses=*/true);
+    gar::core::engine::chase::CpuChaseEngine closure_engine(
         g2, attrs.columns.empty() ? nullptr : &attrs);
-    const gar::engine::deduction::ChaseConfig closure_cfg;
+    const gar::core::engine::chase::ChaseConfig closure_cfg;
     const auto closure = closure_engine.Run(rules, closure_cfg);
     for (const auto& e : res.derived) {
       if (g2.RelationPairSet(e.slot)
-              .count(gar::graph::PackPair(e.src, e.dst)) == 0) {
+              .count(gar::core::graph::PackPair(e.src, e.dst)) == 0) {
         sound = false;
         std::cerr << "[gar_reason] SOUNDNESS VIOLATION: "
                   << FormatFact(g, e) << " not in closure\n";
@@ -410,7 +410,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "star_order: " << args.star_order << "\n"
       << "hdc_dim: " << args.hdc_dim << "\n"
       << "hdc_value_backend: "
-      << gar::engine::agent::HdcBackendName(args.hdc_value_backend) << "\n"
+      << gar::core::engine::agent::HdcBackendName(args.hdc_value_backend) << "\n"
       << "seed: " << args.seed << "\n"
       << "policy_seed: " << args.PolicySeed() << "\n"
       << "hdc_seed: " << args.HdcSeed() << "\n"

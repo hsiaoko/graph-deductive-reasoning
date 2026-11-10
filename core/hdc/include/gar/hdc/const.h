@@ -7,8 +7,7 @@
 #include <array>
 #include <cstdint>
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 inline constexpr std::array<std::uint32_t, 8> kHdcDimPresets = {
     128, 256, 512, 1024, 2048, 4096, 8192, 16384};
@@ -31,5 +30,4 @@ inline std::uint32_t ChooseDim(std::uint64_t max_bundle_size) {
   return kHdcDimPresets.back();
 }
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

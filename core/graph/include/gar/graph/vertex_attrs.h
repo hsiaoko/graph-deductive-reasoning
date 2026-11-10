@@ -8,8 +8,7 @@
 // table. The bridge module converts MatrixGraph AttributesIO columns
 // (Int / Float64, with valid mask) into these; the graph kernel never sees
 // MatrixGraph types.
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 struct AttrColumn {
   std::string name;
@@ -36,5 +35,4 @@ struct VertexAttrs {
   }
 };
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

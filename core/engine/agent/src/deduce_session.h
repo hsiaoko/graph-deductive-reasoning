@@ -24,8 +24,7 @@
 #include "core/task/cpu_task/hom_match.cuh"
 #include "gar/engine/agent/executor.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 class DeduceSession {
@@ -67,7 +66,7 @@ class DeduceSession {
   // Homomorphism enumeration through the MatrixGraph HomMatcher: converts
   // the PatternSpec to GARPatternArrays and runs the pinned matcher.
   std::uint64_t Enumerate(
-      const graph::PatternSpec& spec, std::uint64_t cap,
+      const gar::core::graph::PatternSpec& spec, std::uint64_t cap,
       std::vector<std::uint32_t>* out, bool* capped,
       const std::unordered_map<std::uint32_t, std::uint32_t>& pins);
   std::unordered_map<std::uint32_t, std::uint32_t> GoalPins(
@@ -94,15 +93,15 @@ class DeduceSession {
   bool WallExceeded() const;
   bool BudgetHit() const;
 
-  void OnDerivation(const graph::DerivedEdge& d);
-  void CompleteDeltas(const graph::DerivedEdge& d, std::uint32_t mirror);
-  void CompletePartials(const graph::DerivedEdge& d, std::uint32_t mirror);
-  void GrowPartials(const graph::DerivedEdge& d, std::uint32_t mirror);
+  void OnDerivation(const gar::core::graph::DerivedEdge& d);
+  void CompleteDeltas(const gar::core::graph::DerivedEdge& d, std::uint32_t mirror);
+  void CompletePartials(const gar::core::graph::DerivedEdge& d, std::uint32_t mirror);
+  void GrowPartials(const gar::core::graph::DerivedEdge& d, std::uint32_t mirror);
 
   // 2 = all present (derive), 1 = dynamic missing (suspended),
   // 0 = static false (prune), 3 = static false answered from H.
   int Evaluate(const deduce::ActionRecord& rec);
-  graph::DerivedEdge Derive(const deduce::ActionRecord& rec);
+  gar::core::graph::DerivedEdge Derive(const deduce::ActionRecord& rec);
   bool RevivalPass();  // true iff W made progress (revive or prune)
   deduce::ActionRecord* SelectReady();
 
@@ -115,7 +114,7 @@ class DeduceSession {
   const AgentContext& ctx_;
   const ExecConfig& cfg_;
   const ExecKit& kit_;
-  const graph::TripleGraph& g_;
+  const gar::core::graph::TripleGraph& g_;
   std::optional<sics::matrixgraph::core::task::cpu_task::HomMatchIndex> idx_;
   const ScoringContext sctx_;
 
@@ -148,5 +147,4 @@ class DeduceSession {
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

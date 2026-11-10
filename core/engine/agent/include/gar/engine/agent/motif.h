@@ -12,12 +12,11 @@
 #include "gar/graph/triple_graph.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 class PredicateTable;
 }  // namespace analysis
 
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 struct Motif {
@@ -73,10 +72,9 @@ std::uint64_t MotifHash(std::uint32_t rule, const std::uint32_t* emb,
 // antecedent predicate. The conclusion is NOT a premise. Used by the
 // scorers (rel_evd / dcost) and by the executor (witness on application).
 void GroundPremises(const gar::GARule& rule, const Motif& mu,
-                    const graph::TripleGraph& g,
-                    const analysis::PredicateTable& table,
+                    const gar::core::graph::TripleGraph& g,
+                    const gar::core::analysis::PredicateTable& table,
                     std::vector<Fact>* out);
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

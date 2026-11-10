@@ -87,8 +87,8 @@ Args ParseArgs(int argc, char** argv) {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::graph::TripleGraph g =
-        gar::bridge::LoadTripleGraph(args.csr_dir,
+    gar::core::graph::TripleGraph g =
+        gar::core::bridge::LoadTripleGraph(args.csr_dir,
                                      /*with_inverses=*/false);
     gar::GARule rule = gar::RuleLoader::Load(args.rule_dir);
     std::cerr << "[match_pattern] graph |V|=" << g.num_entities()

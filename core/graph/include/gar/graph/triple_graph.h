@@ -8,20 +8,19 @@
 #include <unordered_set>
 #include <vector>
 
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 class TripleGraph;
-}  // namespace graph
+}  // namespace gar::core::graph
 
-namespace bridge {
-// Defined in gar/bridge/graph_loader.h; forward-declared here so that
+namespace gar::core::bridge {
+// Defined in core/bridge/graph_loader.h; forward-declared here so that
 // TripleGraph can friend it (the loader fills the vertex-label fields
 // directly after building the graph).
-graph::TripleGraph LoadTripleGraph(
+gar::core::graph::TripleGraph LoadTripleGraph(
     const std::filesystem::path& immutable_csr_dir, bool with_inverses);
-}  // namespace bridge
+}  // namespace gar::core::bridge
 
-namespace graph {
+namespace gar::core::graph {
 
 // TripleGraph: an in-memory triple store (src, relation, dst) for rule
 // mining and reasoning. Entities and relations are dictionary-encoded to
@@ -200,8 +199,8 @@ class TripleGraph {
  private:
   // The bridge-module ImmutableCSR loader fills the vertex-label fields
   // after Build().
-  friend TripleGraph bridge::LoadTripleGraph(const std::filesystem::path&,
-                                             bool);
+  friend TripleGraph gar::core::bridge::LoadTripleGraph(
+      const std::filesystem::path&, bool);
 
   // Rebuilds all_out_* from rel_pairs_ (after bulk edge insertion).
   void RebuildOutAdjacency();
@@ -247,5 +246,4 @@ class TripleGraph {
   bool has_vertex_labels_ = false;
 };
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

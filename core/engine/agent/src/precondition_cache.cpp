@@ -2,8 +2,7 @@
 
 #include <cstring>
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -81,7 +80,7 @@ GroundPreconditionKey MakePreconditionKey(const gar::Predicate& pred,
 }
 
 bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
-                    const graph::TripleGraph& g, Fact* out) {
+                    const gar::core::graph::TripleGraph& g, Fact* out) {
   if (pred.kind != gar::PredKind::kEdge) return false;
   const std::uint32_t u = emb[pred.src], v = emb[pred.dst];
   const std::uint32_t num_rel = g.num_relations();
@@ -96,10 +95,10 @@ bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
 PrecondState ClassifyPredicate(const gar::Predicate& pred,
                                const gar::GARule& rule,
                                const std::uint32_t* emb,
-                               const graph::VertexAttrs* attrs,
-                               const graph::TripleGraph& g,
+                               const gar::core::graph::VertexAttrs* attrs,
+                               const gar::core::graph::TripleGraph& g,
                                const AgentContext& ctx) {
-  const bool ok = graph::EvalAntecedent({pred}, emb, attrs, g);
+  const bool ok = gar::core::graph::EvalAntecedent({pred}, emb, attrs, g);
   const bool dyn = IsDynamicPredicate(pred, rule, ctx);
   if (dyn) {
     return ok ? PrecondState::kDynamicPresent : PrecondState::kDynamicMissing;
@@ -134,5 +133,4 @@ void PreconditionCache::Record(const GroundPreconditionKey& k, bool value,
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

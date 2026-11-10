@@ -6,7 +6,7 @@
 // the dependency graph of the rule set, and per Run computes the goal's
 // d(.) table and wires the chain-level witness + failure registry.
 //
-// Layering: the agent engine knows gar::graph / gar::analysis / gar::hdc /
+// Layering: the agent engine knows gar::core::graph / gar::core::analysis / gar::core::hdc /
 // gar::core only. It never sees the sibling deduction engine; composing
 // agent output with a full closure (--verify-against-closure) happens at
 // the app layer.
@@ -18,8 +18,7 @@
 #include "gar/engine/agent/executor.h"
 #include "gar/hdc/encoder.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 class ReasoningAgent {
@@ -33,8 +32,8 @@ class ReasoningAgent {
     std::shared_ptr<ValueModel> value_model;
   };
 
-  ReasoningAgent(Components comps, const analysis::DependencyGraph* dg,
-                 hdc::HdcEncoder encoder, bool guide_with_dg = true)
+  ReasoningAgent(Components comps, const gar::core::analysis::DependencyGraph* dg,
+                 gar::core::hdc::HdcEncoder encoder, bool guide_with_dg = true)
       : comps_(std::move(comps)),
         dg_(dg),
         encoder_(encoder),
@@ -47,7 +46,7 @@ class ReasoningAgent {
     AgentContext ctx{dg_, {}, &dg_->table(), encoder_};
     const std::string& goal_name = state->graph().RelationName(goal.slot);
     const std::uint32_t gp = ctx.table->Find(goal_name);
-    if (gp == analysis::kInvalidPredicate) {
+    if (gp == gar::core::analysis::kInvalidPredicate) {
       throw std::invalid_argument("goal predicate not derivable by any "
                                   "rule: " +
                                   goal_name);
@@ -74,11 +73,10 @@ class ReasoningAgent {
 
  private:
   Components comps_;
-  const analysis::DependencyGraph* dg_;
-  hdc::HdcEncoder encoder_;
+  const gar::core::analysis::DependencyGraph* dg_;
+  gar::core::hdc::HdcEncoder encoder_;
   bool guide_with_dg_ = true;
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

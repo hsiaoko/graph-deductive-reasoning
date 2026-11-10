@@ -2,8 +2,7 @@
 
 #include <algorithm>
 
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 namespace {
 
@@ -82,5 +81,4 @@ bool EvalAntecedent(const std::vector<Predicate>& antecedent,
   return true;
 }
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

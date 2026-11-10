@@ -1,6 +1,6 @@
 // src-local: shared motif-application failure classification of the
 // executor. Applying a motif uses the exact chase semantics
-// (graph::EvalAntecedent) and classifies failures as static (permanent) or
+// (gar::core::graph::EvalAntecedent) and classifies failures as static (permanent) or
 // dynamic (waits for missing facts).
 #pragma once
 
@@ -11,8 +11,7 @@
 #include "gar/engine/agent/executor.h"
 #include "gar/graph/predicate_evaluator.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 struct FailureInfo {
@@ -38,20 +37,20 @@ inline bool IsDynamicPredicate(const gar::Predicate& pred,
                                const AgentContext& ctx) {
   if (pred.kind != gar::PredKind::kEdge) return false;
   const std::uint32_t id =
-      ctx.table->Find(analysis::PredicateIdOf(pred, rule));
-  return id != analysis::kInvalidPredicate && ctx.dg->InDegree(id) > 0;
+      ctx.table->Find(gar::core::analysis::PredicateIdOf(pred, rule));
+  return id != gar::core::analysis::kInvalidPredicate && ctx.dg->InDegree(id) > 0;
 }
 
 inline FailureInfo ClassifyFailure(const gar::GARule& rule,
                                    const std::uint32_t* emb,
-                                   const graph::VertexAttrs* attrs,
-                                   const graph::TripleGraph& g,
+                                   const gar::core::graph::VertexAttrs* attrs,
+                                   const gar::core::graph::TripleGraph& g,
                                    const AgentContext& ctx) {
   FailureInfo fi;
   fi.fail_idx = rule.antecedent.size();
   for (std::size_t j = 0; j < rule.antecedent.size(); ++j) {
     const gar::Predicate& pred = rule.antecedent[j];
-    if (!graph::EvalAntecedent({pred}, emb, attrs, g)) {
+    if (!gar::core::graph::EvalAntecedent({pred}, emb, attrs, g)) {
       fi.fail_idx = j;
       fi.dynamic = IsDynamicPredicate(pred, rule, ctx);
       break;
@@ -61,5 +60,4 @@ inline FailureInfo ClassifyFailure(const gar::GARule& rule,
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

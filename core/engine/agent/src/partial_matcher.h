@@ -20,8 +20,7 @@
 #include "gar/graph/pattern_matcher.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -30,21 +29,21 @@ struct DeferrableEdge {
   std::uint32_t slot = 0;     // pattern slot (may be an inverse slot)
   std::uint32_t pu = 0, pv = 0;  // ORIGINAL vertex ids of the endpoints
   bool both_bound = false;    // both endpoints covered by sub_spec edges
-  graph::PatternSpec sub_spec;             // spec minus this edge (remapped)
+  gar::core::graph::PatternSpec sub_spec;             // spec minus this edge (remapped)
   std::vector<std::uint32_t> to_orig;    // sub vertex id -> original id
 };
 
 struct RulePlan {
   std::uint32_t rule = 0;
   RuleHead head;
-  graph::PatternSpec spec;             // full pattern (original vertices)
+  gar::core::graph::PatternSpec spec;             // full pattern (original vertices)
   std::vector<DeferrableEdge> defers;  // deferrable pattern edges
 };
 
 // Builds the plan; returns false for rules the chase convention skips
 // (RuleSupported) or that cannot reach the goal in the DG.
 bool BuildRulePlan(const GARule& rule, std::uint32_t rule_idx,
-                   const AgentContext& ctx, const graph::TripleGraph& g,
+                   const AgentContext& ctx, const gar::core::graph::TripleGraph& g,
                    RulePlan* out);
 
 // Expand a sub-spec embedding (sub vertex space) into the original vertex
@@ -55,5 +54,4 @@ std::vector<std::uint32_t> ExpandPartial(const DeferrableEdge& de,
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

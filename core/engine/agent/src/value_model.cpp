@@ -8,8 +8,7 @@
 
 #include "gar/hdc/value_kernels.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 const char* HdcBackendName(HdcBackend backend) {
@@ -169,13 +168,13 @@ bool ValueModel::PrepareBitLut() {
     for (std::uint32_t d = 0; d < dim_; ++d) {
       if (v[d] < 0) words[d >> 6] |= std::uint64_t{1} << (d & 63);
     }
-    packed_vecs_.push_back(hdc::Hypervector::FromWords(dim_, std::move(words)));
+    packed_vecs_.push_back(gar::core::hdc::Hypervector::FromWords(dim_, std::move(words)));
   }
   weight_sum_ = 0.0;
   for (std::uint32_t d = 0; d < dim_; ++d) weight_sum_ += w_[d];
   base_lut_.resize(keys_.size());
   for (std::size_t k = 0; k < keys_.size(); ++k) {
-    base_lut_[k] = hdc::DotPackedBipolar(packed_vecs_[k].words().data(),
+    base_lut_[k] = gar::core::hdc::DotPackedBipolar(packed_vecs_[k].words().data(),
                                          w_.data(), dim_, weight_sum_);
   }
   const std::uint32_t nb = bin_cap_ + 1;
@@ -186,9 +185,9 @@ bool ValueModel::PrepareBitLut() {
       for (std::uint32_t bb = 0; bb < nb; ++bb) {
         const auto& va = packed_vecs_[a * nb + ba];
         const auto& vb = packed_vecs_[b * nb + bb];
-        const auto bound = hdc::Hypervector::Bind(va, vb);
+        const auto bound = gar::core::hdc::Hypervector::Bind(va, vb);
         conj_lut_[(c * nb + ba) * nb + bb] =
-            hdc::DotPackedBipolar(bound.words().data(), w_.data(), dim_,
+            gar::core::hdc::DotPackedBipolar(bound.words().data(), w_.data(), dim_,
                                   weight_sum_);
       }
     }
@@ -221,17 +220,17 @@ double ValueModel::PredictHdcSimd(const std::array<double, 11>& raw) const {
   thread_local std::vector<std::int16_t> hv;
   hv.assign(dim_, 0);
   auto add = [&](std::uint32_t k) {
-    hdc::AddBipolar(hv.data(),
+    gar::core::hdc::AddBipolar(hv.data(),
                     vecs_.data() + static_cast<std::size_t>(k) * dim_, dim_);
   };
   for (std::size_t j = 0; j < names_.size(); ++j) add(idx[j]);
   for (const auto& [a, b] : conj_) {
-    hdc::AddBoundBipolar(
+    gar::core::hdc::AddBoundBipolar(
         hv.data(), vecs_.data() + static_cast<std::size_t>(idx[a]) * dim_,
         vecs_.data() + static_cast<std::size_t>(idx[b]) * dim_, dim_);
   }
   add(static_cast<std::uint32_t>(keys_.size()) - 1);
-  return w_.back() + hdc::DotInt16Double(hv.data(), w_.data(), dim_);
+  return w_.back() + gar::core::hdc::DotInt16Double(hv.data(), w_.data(), dim_);
 }
 
 double ValueModel::PredictHdcBitLut(const std::array<double, 11>& raw) const {
@@ -281,5 +280,4 @@ double ValueModel::PredictRemaining(const std::array<double, 11>& raw) const {
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

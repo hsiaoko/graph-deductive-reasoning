@@ -10,8 +10,7 @@
 
 #include "gar/graph/fact.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 struct Goal {
@@ -20,7 +19,7 @@ struct Goal {
 };
 
 // A derived edge satisfies the goal when slot and all bound arguments match.
-inline bool GoalSatisfied(const Goal& g, const graph::DerivedEdge& e) {
+inline bool GoalSatisfied(const Goal& g, const gar::core::graph::DerivedEdge& e) {
   if (e.slot != g.slot) return false;
   if (g.args[0] && *g.args[0] != e.src) return false;
   if (g.args[1] && *g.args[1] != e.dst) return false;
@@ -28,5 +27,4 @@ inline bool GoalSatisfied(const Goal& g, const graph::DerivedEdge& e) {
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

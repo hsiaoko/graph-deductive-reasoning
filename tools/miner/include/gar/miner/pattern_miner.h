@@ -30,8 +30,7 @@
 // distinct pairs (an Apriori-safe criterion). Rules are emitted on pivot
 // pairs at maximal pattern distance — for chains these are exactly the two
 // endpoint orders ChainMiner uses.
-namespace gar {
-namespace miner {
+namespace gar::tools::miner {
 
 struct PatternMinerConfig {
   std::uint32_t max_body_edges = 3;    // body edges k = 1..max_body_edges
@@ -55,7 +54,7 @@ struct PatternMinerStats {
 
 class PatternMiner {
  public:
-  PatternMiner(const graph::TripleGraph& graph, PatternMinerConfig config);
+  PatternMiner(const gar::core::graph::TripleGraph& graph, PatternMinerConfig config);
 
   // Runs the mining pass and returns the rules (quality fields filled).
   std::vector<GARule> Mine();
@@ -69,10 +68,9 @@ class PatternMiner {
     std::vector<std::array<std::uint32_t, 3>> edges;  // (src, dst, slot)
   };
 
-  const graph::TripleGraph& g_;
+  const gar::core::graph::TripleGraph& g_;
   PatternMinerConfig cfg_;
   PatternMinerStats stats_;
 };
 
-}  // namespace miner
-}  // namespace gar
+}  // namespace gar::tools::miner

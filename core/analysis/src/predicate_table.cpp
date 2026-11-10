@@ -2,8 +2,7 @@
 
 #include <algorithm>
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 std::uint32_t PredicateTable::Intern(const std::string& name) {
   const auto it = ids_.find(name);
@@ -65,5 +64,4 @@ std::string PredicateIdOf(const gar::Predicate& pred,
   return "<unknown>";
 }
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

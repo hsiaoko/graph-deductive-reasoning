@@ -17,8 +17,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 class FailureRegistry {
@@ -47,5 +46,4 @@ class FailureRegistry {
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

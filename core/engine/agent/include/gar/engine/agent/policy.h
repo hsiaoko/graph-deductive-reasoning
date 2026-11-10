@@ -23,8 +23,7 @@
 #include "gar/graph/triple_graph.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 class ValueModel;
@@ -290,8 +289,8 @@ struct JevConfig {
 class JevPolicy final : public Policy {
  public:
   JevPolicy(JevConfig cfg, std::unique_ptr<JevClient> client,
-            const Goal* goal, const graph::TripleGraph* g,
-            const analysis::DependencyGraph* dg,
+            const Goal* goal, const gar::core::graph::TripleGraph* g,
+            const gar::core::analysis::DependencyGraph* dg,
             const std::vector<GARule>* rules,
             const std::vector<std::string>* rule_ids, double budget)
       : cfg_(std::move(cfg)),
@@ -321,8 +320,8 @@ class JevPolicy final : public Policy {
   JevConfig cfg_;
   std::unique_ptr<JevClient> client_;
   const Goal* goal_;
-  const graph::TripleGraph* g_;
-  const analysis::DependencyGraph* dg_;
+  const gar::core::graph::TripleGraph* g_;
+  const gar::core::analysis::DependencyGraph* dg_;
   const std::vector<GARule>* rules_;
   const std::vector<std::string>* rule_ids_;
   double remaining_;
@@ -335,10 +334,9 @@ class JevPolicy final : public Policy {
 
   // Lazily computed per-goal tables (d(.) for the dossier text).
   std::vector<std::uint32_t> distances_;
-  std::uint32_t goal_pred_ = analysis::kInvalidPredicate;
+  std::uint32_t goal_pred_ = gar::core::analysis::kInvalidPredicate;
   void EnsureGoalTables();
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

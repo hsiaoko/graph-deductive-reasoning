@@ -8,11 +8,9 @@
 // into MatrixGraph's GAR matching kernels (apps/gar_match.cu).
 //
 // The returned struct holds pointers INTO `rule`; the rule must outlive it.
-namespace gar {
-namespace bridge {
+namespace gar::core::bridge {
 
 sics::matrixgraph::core::data_structures::GARPatternArrays ToPatternArrays(
     const GARule& rule);
 
-}  // namespace bridge
-}  // namespace gar
+}  // namespace gar::core::bridge

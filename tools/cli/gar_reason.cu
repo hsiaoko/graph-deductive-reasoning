@@ -1,11 +1,11 @@
 // gar_reason: unified entry point for the reasoning engine family.
 //
 // --mode full  runs the whole rule set to a (capped) fixpoint, on the CPU
-//     chase (engine::deduction::CpuChaseEngine, oneTBB) or the GPU engine
-//     (engine::deduction::GpuDeduceEngine, MatrixGraph task::GARDeduce);
+//     chase (gar::core::engine::deduction::CpuChaseEngine, oneTBB) or the GPU engine
+//     (gar::core::engine::deduction::GpuDeduceEngine, MatrixGraph task::GARDeduce);
 //     both share the semantics and the output layout of the legacy
 //     deduce / deduce_gpu apps.
-// --mode agent runs policy-guided deduction (engine::agent): a single
+// --mode agent runs policy-guided deduction (gar::core::engine::agent): a single
 //     greedy chain toward a goal fact under a budget, with pluggable
 //     policy / scorer / executor.
 //
@@ -134,7 +134,7 @@ int RunFullMode(const Args& args) {
   if (!args.full.goal.empty()) {
     const std::string goal_pred =
         args.full.goal.substr(0, args.full.goal.find('('));
-    const auto kept = gar::analysis::GoalConeRuleIndices(in.rules, goal_pred);
+    const auto kept = gar::core::analysis::GoalConeRuleIndices(in.rules, goal_pred);
     std::vector<gar::GARule> filtered_rules;
     std::vector<std::string> filtered_ids;
     filtered_rules.reserve(kept.size());
@@ -150,10 +150,10 @@ int RunFullMode(const Args& args) {
     in.rule_ids = std::move(filtered_ids);
   }
 
-  const gar::graph::VertexAttrs* attrs =
+  const gar::core::graph::VertexAttrs* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
 
-  namespace deduction = gar::engine::deduction;
+  namespace deduction = gar::core::engine::chase;
   std::unique_ptr<deduction::DeductionEngine> engine;
   if (cpu) {
     engine = std::make_unique<deduction::CpuChaseEngine>(in.graph, attrs);

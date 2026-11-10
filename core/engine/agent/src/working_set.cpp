@@ -2,8 +2,7 @@
 
 #include <algorithm>
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -153,7 +152,7 @@ SuspendedAction* WorkingSet::FindSuspended(std::uint64_t id) {
 }
 
 std::vector<std::uint64_t> WorkingSet::MatchingPartials(
-    const graph::DerivedEdge& d, std::uint32_t mirror) const {
+    const gar::core::graph::DerivedEdge& d, std::uint32_t mirror) const {
   std::vector<std::uint64_t> matches;
   auto collect = [&](std::uint32_t slot, std::uint32_t src,
                      std::uint32_t dst) {
@@ -183,5 +182,4 @@ std::vector<std::uint64_t> WorkingSet::MatchingPartials(
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

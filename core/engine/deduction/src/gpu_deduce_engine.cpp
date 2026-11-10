@@ -28,9 +28,8 @@
 #include "gar/graph/fact.h"
 #include "gar/graph/fact_merger.h"
 
-namespace gar {
-namespace engine {
-namespace deduction {
+namespace gar::core::engine {
+namespace chase {
 
 namespace {
 
@@ -40,7 +39,7 @@ using sics::matrixgraph::core::data_structures::GARGraphArrays;
 using sics::matrixgraph::core::data_structures::GARPatternArrays;
 using sics::matrixgraph::core::data_structures::GARPredicate;
 
-bool HasEdge(const graph::TripleGraph& g, std::uint32_t s,
+bool HasEdge(const gar::core::graph::TripleGraph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   const auto [b, e] = g.OutEdgeRange(s);
   const std::uint32_t* dsts = g.OutEdgeDsts();
@@ -89,8 +88,8 @@ struct PreparedRule {
 
 ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
                                  const ChaseConfig& cfg) {
-  const graph::VertexAttrs empty_attrs;
-  const graph::VertexAttrs& attrs = attrs_ != nullptr ? *attrs_ : empty_attrs;
+  const gar::core::graph::VertexAttrs empty_attrs;
+  const gar::core::graph::VertexAttrs& attrs = attrs_ != nullptr ? *attrs_ : empty_attrs;
   const std::uint32_t n = g_.num_entities();
   const std::uint32_t num_rel = g_.num_relations();
 
@@ -390,7 +389,7 @@ ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
                       static_cast<int>(e_src.size())};
     task.SetGraph(gg);
 
-    std::vector<std::vector<graph::DerivedEdge>> contribs(
+    std::vector<std::vector<gar::core::graph::DerivedEdge>> contribs(
         rules.size());
     for (std::size_t i = 0; i < rules.size(); ++i) {
       if (skipped[i]) continue;
@@ -449,14 +448,14 @@ ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
         // credit happen in MergeRoundFacts. The filter runs in parallel
         // inside the graph library (capped rules emit 1M heads/round).
         std::vector<char> keep(static_cast<std::size_t>(n_heads));
-        graph::MarkAbsentEdges(g_, head_src.data(), head_dst.data(),
+        gar::core::graph::MarkAbsentEdges(g_, head_src.data(), head_dst.data(),
                                q.head_slot,
                                static_cast<std::size_t>(n_heads),
                                keep.data());
         contribs[i].reserve(static_cast<std::size_t>(n_heads));
         for (int t = 0; t < n_heads; ++t) {
           if (keep[static_cast<std::size_t>(t)]) {
-            contribs[i].push_back(graph::DerivedEdge{
+            contribs[i].push_back(gar::core::graph::DerivedEdge{
                 head_src[t], head_dst[t], q.head_slot,
                 static_cast<std::uint32_t>(i), round});
           }
@@ -496,7 +495,7 @@ ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
 
     const auto merge_t0 = std::chrono::steady_clock::now();
     std::vector<std::uint64_t> rule_derived(rules.size(), 0);
-    const graph::RoundMerge merge = graph::MergeRoundFacts(
+    const gar::core::graph::RoundMerge merge = gar::core::graph::MergeRoundFacts(
         contribs, cfg.max_derivations, g_, &result.derived,
         &rule_derived);
     for (std::size_t i = 0; i < rules.size(); ++i) {
@@ -528,6 +527,5 @@ ChaseResult GpuDeduceEngine::Run(const std::vector<GARule>& rules,
   return result;
 }
 
-}  // namespace deduction
-}  // namespace engine
-}  // namespace gar
+}  // namespace chase
+}  // namespace gar::core::engine

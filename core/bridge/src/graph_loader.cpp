@@ -4,8 +4,7 @@
 #include <fstream>
 #include <stdexcept>
 
-namespace gar {
-namespace bridge {
+namespace gar::core::bridge {
 
 namespace {
 
@@ -32,7 +31,7 @@ std::vector<std::string> ReadNames(const std::filesystem::path& path) {
 
 }  // namespace
 
-graph::TripleGraph LoadTripleGraph(const std::filesystem::path& dir,
+gar::core::graph::TripleGraph LoadTripleGraph(const std::filesystem::path& dir,
                                    bool with_inverses) {
   // meta.yaml: GraphMetadata counts (first occurrence wins; the subgraph
   // block repeats them with identical values for a single-graph store).
@@ -105,7 +104,7 @@ graph::TripleGraph LoadTripleGraph(const std::filesystem::path& dir,
     }
   }
 
-  auto g = graph::TripleGraph::Build(ReadNames(dir / "dict/entities.tsv"),
+  auto g = gar::core::graph::TripleGraph::Build(ReadNames(dir / "dict/entities.tsv"),
                                      ReadNames(dir / "dict/relations.tsv"),
                                      std::move(buf), with_inverses);
 
@@ -147,5 +146,4 @@ graph::TripleGraph LoadTripleGraph(const std::filesystem::path& dir,
   return g;
 }
 
-}  // namespace bridge
-}  // namespace gar
+}  // namespace gar::core::bridge

@@ -11,8 +11,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 namespace {
 
@@ -118,7 +117,7 @@ std::vector<std::uint32_t> DependencyGraph::DerivationDepths(
 }
 
 std::vector<char> BaseAnchoredPredicates(const DependencyGraph& dg,
-                                         const graph::TripleGraph& g) {
+                                         const gar::core::graph::TripleGraph& g) {
   // Name -> base relation id map, built once (the graph has no reverse
   // dictionary).
   std::unordered_map<std::string, std::uint32_t> rel_by_name;
@@ -466,5 +465,4 @@ std::vector<std::size_t> GoalConeRuleIndices(
   return indices;
 }
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

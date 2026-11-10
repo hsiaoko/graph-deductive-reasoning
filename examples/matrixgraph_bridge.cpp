@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
   }
   try {
     gar::GARule rule = gar::RuleLoader::Load(argv[1]);
-    auto p = gar::bridge::ToPatternArrays(rule);
+    auto p = gar::core::bridge::ToPatternArrays(rule);
     p.Print();
   } catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << "\n";

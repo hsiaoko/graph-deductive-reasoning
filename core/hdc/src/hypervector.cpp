@@ -6,8 +6,7 @@
 #include <immintrin.h>
 #endif
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 namespace {
 
@@ -125,5 +124,4 @@ double Hypervector::Cosine(const Hypervector& a, const Hypervector& b) {
   return 1.0 - 2.0 * static_cast<double>(h) / static_cast<double>(a.dim_);
 }
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

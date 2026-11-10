@@ -19,16 +19,15 @@
 #include <tbb/parallel_for.h>
 #endif
 
-namespace gar {
-namespace engine {
-namespace deduction {
+namespace gar::core::engine {
+namespace chase {
 
 namespace {
 
-bool HasEdge(const graph::TripleGraph& g, std::uint32_t s,
+bool HasEdge(const gar::core::graph::TripleGraph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   // O(1) hash point query; always reflects the latest edges.
-  return g.RelationPairSet(slot).count(graph::PackPair(s, d)) != 0;
+  return g.RelationPairSet(slot).count(gar::core::graph::PackPair(s, d)) != 0;
 }
 
 }  // namespace
@@ -51,7 +50,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
 
   // Pre-validate rules and expand their patterns once.
   struct Prepared {
-    graph::PatternSpec spec;
+    gar::core::graph::PatternSpec spec;
     std::uint32_t pu = 0, pv = 0;  // pivot (unused for counting here)
     std::uint32_t head_slot = 0;
     bool has_head = false;
@@ -103,7 +102,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
 
   // X evaluation against one embedding (shared with validate_rules).
   auto eval_x = [&](const GARule& r, const std::uint32_t* emb) {
-    return graph::EvalAntecedent(r.antecedent, emb, attrs_, g_);
+    return gar::core::graph::EvalAntecedent(r.antecedent, emb, attrs_, g_);
   };
   const bool typed = g_.has_vertex_labels();
   auto label_ok = [&](const GARule& r, std::uint32_t node,
@@ -120,7 +119,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
   std::atomic<bool> capped_out{false};
   for (std::uint32_t round = 1; round <= cfg.max_rounds; ++round) {
     const auto round_t0 = std::chrono::steady_clock::now();
-    std::vector<std::vector<graph::DerivedEdge>> contribs(rules.size());
+    std::vector<std::vector<gar::core::graph::DerivedEdge>> contribs(rules.size());
 
     // Rebuild the matching index from the current graph (a read-only
     // snapshot shared by this round's parallel rule processing). HomMatchIndex
@@ -207,7 +206,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
         }
 
         if (x_ok && pp[i].has_head && !head_hit) {
-          contribs[i].push_back(graph::DerivedEdge{emb[pp[i].pu], emb[pp[i].pv],
+          contribs[i].push_back(gar::core::graph::DerivedEdge{emb[pp[i].pu], emb[pp[i].pv],
                                                    pp[i].head_slot,
                                                    static_cast<std::uint32_t>(i),
                                                    round});
@@ -239,8 +238,8 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
 
     const auto merge_t0 = std::chrono::steady_clock::now();
     std::vector<std::uint64_t> rule_derived(rules.size(), 0);
-    const graph::RoundMerge merge =
-        graph::MergeRoundFacts(contribs, cfg.max_derivations, g_,
+    const gar::core::graph::RoundMerge merge =
+        gar::core::graph::MergeRoundFacts(contribs, cfg.max_derivations, g_,
                                &result.derived, &rule_derived);
     for (std::size_t i = 0; i < rules.size(); ++i) {
       result.rules[i].derived += rule_derived[i];
@@ -270,6 +269,5 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
   return result;
 }
 
-}  // namespace deduction
-}  // namespace engine
-}  // namespace gar
+}  // namespace chase
+}  // namespace gar::core::engine

@@ -23,8 +23,7 @@
 #include "gar/graph/triple_graph.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 inline constexpr std::uint32_t kUnreachable = UINT32_MAX;
 
@@ -147,7 +146,7 @@ class DependencyGraph {
 // by that name in the graph) always anchor; a relation anchors iff it has
 // at least one base edge in `g`.
 [[nodiscard]] std::vector<char> BaseAnchoredPredicates(
-    const DependencyGraph& dg, const graph::TripleGraph& g);
+    const DependencyGraph& dg, const gar::core::graph::TripleGraph& g);
 
 // Returns the indices of rules whose consequent predicate can reach
 // `goal_predicate` in the dependency graph — the goal's dependency cone.
@@ -158,5 +157,4 @@ class DependencyGraph {
 [[nodiscard]] std::vector<std::size_t> GoalConeRuleIndices(
     const std::vector<gar::GARule>& rules, const std::string& goal_predicate);
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

@@ -22,8 +22,7 @@
 // slot's array when the bound endpoint is the destination); every other
 // edge to a bound vertex is checked for existence via the unified
 // out-adjacency (OutEdgeRange binary search).
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 struct PatternSpec {
   std::uint32_t num_vertices;
@@ -61,5 +60,4 @@ class PatternMatcher {
   const TripleGraph& g_;
 };
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

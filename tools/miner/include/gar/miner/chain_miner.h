@@ -20,8 +20,7 @@
 // Pair sets are deduplicated at every join step; counting is capped at
 // `pair_cap` pairs (a capped support is reported as a lower bound), which
 // keeps hub-heavy chains tractable.
-namespace gar {
-namespace miner {
+namespace gar::tools::miner {
 
 struct MinerConfig {
   std::uint32_t max_body_len = 2;        // chain length k
@@ -63,7 +62,7 @@ class ChainMiner {
       std::unordered_map<TypeSig, std::unordered_set<std::uint64_t>,
                          TypeSigHash>;
 
-  ChainMiner(const graph::TripleGraph& graph, MinerConfig config);
+  ChainMiner(const gar::core::graph::TripleGraph& graph, MinerConfig config);
 
   // Runs the mining pass and returns the rules (quality fields filled).
   std::vector<GARule> Mine();
@@ -82,10 +81,9 @@ class ChainMiner {
                          const std::unordered_set<std::uint64_t>& body_pairs,
                          const TypeSig* sig, std::vector<GARule>* out);
 
-  const graph::TripleGraph& g_;
+  const gar::core::graph::TripleGraph& g_;
   MinerConfig cfg_;
   MinerStats stats_;
 };
 
-}  // namespace miner
-}  // namespace gar
+}  // namespace gar::tools::miner

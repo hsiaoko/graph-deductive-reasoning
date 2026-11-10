@@ -14,8 +14,7 @@
 #include <array>
 #include <cstdint>
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 enum class FactKind { kEdge, kAttr, kMl };
@@ -78,5 +77,4 @@ inline Fact MakeMlFact(std::uint32_t pred_id, std::uint32_t v0,
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

@@ -7,8 +7,7 @@
 #include "gar/graph/vertex_attrs.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 // Evaluates a rule's antecedent conjunction against one embedding:
 // const (x.A⊕c) / var (x.A⊕y.B) / exists (x.A) against the vertex
@@ -19,5 +18,4 @@ bool EvalAntecedent(const std::vector<Predicate>& antecedent,
                     const std::uint32_t* emb, const VertexAttrs* attrs,
                     const TripleGraph& g);
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

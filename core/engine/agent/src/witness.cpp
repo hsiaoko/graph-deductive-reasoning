@@ -2,8 +2,7 @@
 
 #include "gar/analysis/predicate_table.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 namespace {
@@ -18,24 +17,24 @@ std::uint64_t Fnv1a64(const std::string& s) {
 
 }  // namespace
 
-WitnessLog::WitnessLog(std::uint32_t hdc_dim, const graph::TripleGraph* g,
-                       const analysis::PredicateTable* table, bool use_hdc)
+WitnessLog::WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::TripleGraph* g,
+                       const gar::core::analysis::PredicateTable* table, bool use_hdc)
     : hdc_ev_(hdc_dim),
       packed_cache_(hdc_dim),
       g_(g),
       table_(table),
       use_hdc_(use_hdc) {}
 
-std::uint64_t FactPredicateSymbol(const Fact& f, const graph::TripleGraph& g,
-                                  const analysis::PredicateTable& table) {
+std::uint64_t FactPredicateSymbol(const Fact& f, const gar::core::graph::TripleGraph& g,
+                                  const gar::core::analysis::PredicateTable& table) {
   const std::string& name = f.kind == FactKind::kEdge
                                 ? g.RelationName(f.pred)
                                 : table.Name(f.pred);
   std::uint64_t s = Fnv1a64(name);
-  return hdc::SplitMix64Next(s) | (1ull << 63);
+  return gar::core::hdc::SplitMix64Next(s) | (1ull << 63);
 }
 
-bool WitnessLog::WitnessFact(const Fact& f, const hdc::HdcEncoder& enc) {
+bool WitnessLog::WitnessFact(const Fact& f, const gar::core::hdc::HdcEncoder& enc) {
   const bool inserted = exact_.insert(KeyOf(f)).second;
   if (use_hdc_) {
     const std::uint64_t args[2] = {f.args[0], f.args[1]};
@@ -48,5 +47,4 @@ bool WitnessLog::WitnessFact(const Fact& f, const hdc::HdcEncoder& enc) {
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

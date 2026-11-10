@@ -20,8 +20,7 @@
 #include "gar/analysis/dependency_graph.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -31,7 +30,7 @@ class ProducerTracker {
   // global rule idx). rules: the full rule set (for consequent reads).
   ProducerTracker(const std::vector<RulePlan>& plans,
                   const std::vector<GARule>& rules,
-                  const analysis::PredicateTable* table);
+                  const gar::core::analysis::PredicateTable* table);
 
   // Rule bookkeeping from the executor.
   void MarkGenerated(std::uint32_t plan_idx);
@@ -56,7 +55,7 @@ class ProducerTracker {
 
   const std::vector<RulePlan>& plans_;
   const std::vector<GARule>& rules_;
-  const analysis::PredicateTable* table_;
+  const gar::core::analysis::PredicateTable* table_;
   // base predicate id -> producer plan indices.
   std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> producers_;
   std::vector<char> generated_;
@@ -69,5 +68,4 @@ class ProducerTracker {
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

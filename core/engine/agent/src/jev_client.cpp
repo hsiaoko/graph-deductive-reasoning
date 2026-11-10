@@ -19,8 +19,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 namespace {
@@ -235,5 +234,4 @@ JevChoiceResult MockJevClient::Choice(
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

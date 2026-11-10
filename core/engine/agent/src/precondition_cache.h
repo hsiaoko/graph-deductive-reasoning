@@ -37,8 +37,7 @@
 #include "gar/graph/triple_graph.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -70,7 +69,7 @@ GroundPreconditionKey MakePreconditionKey(const gar::Predicate& pred,
 // (edge facts only: inverse slots normalize to base slot with swapped
 // endpoints) — used for Γ membership checks and W wait keys.
 bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
-                    const graph::TripleGraph& g, Fact* out);
+                    const gar::core::graph::TripleGraph& g, Fact* out);
 
 // Evaluate one grounded antecedent predicate (single-predicate
 // EvalAntecedent, same semantics as the chase's short-circuiting call —
@@ -78,8 +77,8 @@ bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
 PrecondState ClassifyPredicate(const gar::Predicate& pred,
                                const gar::GARule& rule,
                                const std::uint32_t* emb,
-                               const graph::VertexAttrs* attrs,
-                               const graph::TripleGraph& g,
+                               const gar::core::graph::VertexAttrs* attrs,
+                               const gar::core::graph::TripleGraph& g,
                                const AgentContext& ctx);
 
 // H: the precondition cache.
@@ -104,6 +103,5 @@ class PreconditionCache {
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine
 

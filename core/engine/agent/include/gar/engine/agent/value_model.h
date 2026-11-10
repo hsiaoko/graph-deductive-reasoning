@@ -14,8 +14,7 @@
 
 #include "gar/hdc/hypervector.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 enum class HdcBackend {
@@ -69,12 +68,11 @@ class ValueModel {
   std::vector<double> wnum_;
 
   HdcBackend hdc_backend_ = HdcBackend::kBitLut;
-  std::vector<hdc::Hypervector> packed_vecs_;
+  std::vector<gar::core::hdc::Hypervector> packed_vecs_;
   std::vector<double> base_lut_;
   std::vector<double> conj_lut_;
   double weight_sum_ = 0.0;
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

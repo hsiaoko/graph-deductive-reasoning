@@ -10,8 +10,7 @@
 
 #include "gar/hdc/hypervector.h"
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 class EvidenceVector {
  public:
@@ -52,5 +51,4 @@ class EvidenceVector {
   std::vector<std::int16_t> acc_;
 };
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

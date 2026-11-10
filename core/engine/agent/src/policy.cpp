@@ -8,8 +8,7 @@
 
 #include <stdexcept>
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 namespace {
@@ -26,7 +25,7 @@ void JevPolicy::EnsureGoalTables() {
   if (!distances_.empty()) return;
   goal_pred_ =
       dg_->table().Find(g_->RelationName(goal_->slot));
-  if (goal_pred_ != analysis::kInvalidPredicate) {
+  if (goal_pred_ != gar::core::analysis::kInvalidPredicate) {
     distances_ = dg_->DistancesTo(goal_pred_);
   }
 }
@@ -81,22 +80,22 @@ std::optional<std::size_t> JevPolicy::Select(
                                     ? (*rule_ids_)[sm.motif.rule]
                                     : "r" + std::to_string(sm.motif.rule);
     const std::uint32_t p0 = table.Find(
-        analysis::PredicateIdOf(*rule.consequent, rule));
+        gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
     const std::uint32_t dp0 =
-        (p0 != analysis::kInvalidPredicate && !distances_.empty())
+        (p0 != gar::core::analysis::kInvalidPredicate && !distances_.empty())
             ? distances_[p0]
-            : analysis::kUnreachable;
-    const std::string d_str = dp0 == analysis::kUnreachable
+            : gar::core::analysis::kUnreachable;
+    const std::string d_str = dp0 == gar::core::analysis::kUnreachable
                                   ? "inf"
                                   : std::to_string(dp0);
     const std::string path =
-        (p0 != analysis::kInvalidPredicate &&
-         goal_pred_ != analysis::kInvalidPredicate)
+        (p0 != gar::core::analysis::kInvalidPredicate &&
+         goal_pred_ != gar::core::analysis::kInvalidPredicate)
             ? dg_->RenderPath(p0, goal_pred_, rule_ids_)
             : "";
 
     const int fam =
-        p0 != analysis::kInvalidPredicate ? dg_->RecursiveFamilyOf(p0) : -1;
+        p0 != gar::core::analysis::kInvalidPredicate ? dg_->RecursiveFamilyOf(p0) : -1;
 
     state += "- option " + std::to_string(i) + ": rule " + rule_id + " (" +
              rule.name + ")\n";
@@ -171,12 +170,10 @@ std::optional<std::size_t> JevPolicy::Select(
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine
 
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 double LearnedQPolicy::SelectionPriorityWithFeatures(
@@ -201,5 +198,4 @@ std::optional<std::size_t> LearnedQPolicy::SelectScores(
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

@@ -2,7 +2,7 @@
 
 // Shared full-closure deduction CLI for apps/gar_reason.cu and the legacy
 // deduce / deduce_gpu thin shells: argument parsing, input loading
-// (bridge::LoadTripleGraph / bridge::LoadVertexAttrs / RuleLoader) and the
+// (gar::core::bridge::LoadTripleGraph / gar::core::bridge::LoadVertexAttrs / RuleLoader) and the
 // summary/closure/matches reporting. All three apps go through this header
 // so their logs and output layout stay byte-identical.
 //
@@ -32,7 +32,7 @@ struct FullDeduceArgs {
   // Optional goal spec "rel(src,dst)": filters the rule set to the goal's
   // dependency cone before chasing (GoalChase = cone-restricted closure).
   std::string goal;
-  gar::engine::deduction::ChaseConfig cfg;
+  gar::core::engine::chase::ChaseConfig cfg;
   std::size_t print_n = 20;
 };
 
@@ -87,17 +87,17 @@ inline FullDeduceArgs ParseFullDeduceArgs(int argc, char** argv,
 }
 
 struct FullDeduceInputs {
-  gar::graph::TripleGraph graph;
+  gar::core::graph::TripleGraph graph;
   std::vector<gar::GARule> rules;
   std::vector<std::string> rule_ids;
-  gar::graph::VertexAttrs attrs;
+  gar::core::graph::VertexAttrs attrs;
 };
 
 // Loads the graph (with inverse relations), the rule set and the vertex
 // attributes, logging with the "[<log_tag>] " prefix of the legacy apps.
 inline FullDeduceInputs LoadFullDeduceInputs(const FullDeduceArgs& args,
                                              const char* log_tag) {
-  FullDeduceInputs in{gar::bridge::LoadTripleGraph(args.csr_dir,
+  FullDeduceInputs in{gar::core::bridge::LoadTripleGraph(args.csr_dir,
                                                    /*with_inverses=*/true),
                       {}, {}, {}};
   std::cerr << "[" << log_tag << "] |V|=" << in.graph.num_entities()
@@ -119,7 +119,7 @@ inline FullDeduceInputs LoadFullDeduceInputs(const FullDeduceArgs& args,
   }
   std::cerr << "[" << log_tag << "] " << in.rules.size() << " rules\n";
 
-  in.attrs = gar::bridge::LoadVertexAttrs(args.csr_dir);
+  in.attrs = gar::core::bridge::LoadVertexAttrs(args.csr_dir);
   std::cerr << "[" << log_tag << "] " << in.attrs.columns.size()
             << " numeric attribute columns\n";
   return in;
@@ -129,7 +129,7 @@ inline FullDeduceInputs LoadFullDeduceInputs(const FullDeduceArgs& args,
 // to the legacy apps (summary_title is "chase" resp. "chase (GPU)").
 inline void ReportFullDeduce(
     const FullDeduceArgs& args, const FullDeduceInputs& in,
-    const gar::engine::deduction::ChaseResult& res, const char* log_tag,
+    const gar::core::engine::chase::ChaseResult& res, const char* log_tag,
     const char* summary_title) {
   std::cerr << "[" << log_tag << "] rounds=" << res.rounds
             << " derived=" << res.derived.size()

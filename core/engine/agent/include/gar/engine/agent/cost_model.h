@@ -14,8 +14,7 @@
 #include "gar/predicate.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 class CostModel {
@@ -42,5 +41,4 @@ class UnitCostModel final : public CostModel {
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

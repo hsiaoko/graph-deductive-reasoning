@@ -1,8 +1,8 @@
 // validate_rules: re-verifies mined GAR rules on a knowledge graph — the
 // "inference check" counterpart of the mining apps. For every rule it
-// re-enumerates the pattern embeddings (graph::PatternMatcher, homomorphism
+// re-enumerates the pattern embeddings (gar::core::graph::PatternMatcher, homomorphism
 // + vertex-label post-filter, the miners' counting convention), evaluates X
-// (gar::graph::EvalAntecedent), and recomputes the pivot-pair quality:
+// (gar::core::graph::EvalAntecedent), and recomputes the pivot-pair quality:
 //
 //   support    = |{(emb[pu], emb[pv]) : topology ∧ label ∧ X ∧ head ∈ G}|
 //   confidence = support / |{(emb[pu], emb[pv]) : topology ∧ label ∧ X}|
@@ -78,7 +78,7 @@ Args ParseArgs(int argc, char** argv) {
   return a;
 }
 
-bool HasEdge(const gar::graph::TripleGraph& g, std::uint32_t s,
+bool HasEdge(const gar::core::graph::TripleGraph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   const auto [b, e] = g.OutEdgeRange(s);
   const std::uint32_t* dsts = g.OutEdgeDsts();
@@ -116,8 +116,8 @@ struct RuleReport {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::graph::TripleGraph g =
-        gar::bridge::LoadTripleGraph(args.csr_dir,
+    gar::core::graph::TripleGraph g =
+        gar::core::bridge::LoadTripleGraph(args.csr_dir,
                                      /*with_inverses=*/true);
     std::cerr << "[validate_rules] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
@@ -140,12 +140,12 @@ int main(int argc, char** argv) {
     }
     std::cerr << "[validate_rules] " << rules.size() << " rules\n";
 
-    const gar::graph::VertexAttrs attrs =
-        gar::bridge::LoadVertexAttrs(args.csr_dir);
-    const gar::graph::VertexAttrs* attrs_p =
+    const gar::core::graph::VertexAttrs attrs =
+        gar::core::bridge::LoadVertexAttrs(args.csr_dir);
+    const gar::core::graph::VertexAttrs* attrs_p =
         attrs.columns.empty() ? nullptr : &attrs;
 
-    const gar::graph::PatternMatcher matcher(g);
+    const gar::core::graph::PatternMatcher matcher(g);
     const bool typed = g.has_vertex_labels();
     std::vector<RuleReport> reports(rules.size());
     std::size_t n_pass = 0, n_drift = 0, n_skip = 0;
@@ -183,7 +183,7 @@ int main(int argc, char** argv) {
         continue;
       }
 
-      gar::graph::PatternSpec spec;
+      gar::core::graph::PatternSpec spec;
       spec.num_vertices = n;
       for (std::size_t e = 0; e < r.edge_src.size(); ++e) {
         spec.edges.push_back(
@@ -226,12 +226,12 @@ int main(int argc, char** argv) {
         }
         if (!label_ok) continue;
         ++rep.embeddings;
-        if (!gar::graph::EvalAntecedent(r.antecedent, emb, attrs_p, g)) {
+        if (!gar::core::graph::EvalAntecedent(r.antecedent, emb, attrs_p, g)) {
           continue;
         }
         ++rep.x_ok;
         const std::uint64_t key =
-            gar::graph::PackPair(emb[pu], emb[pv]);
+            gar::core::graph::PackPair(emb[pu], emb[pv]);
         if (!body_pairs.insert(key).second) continue;
         if (has_head && HasEdge(g, emb[pu], emb[pv], head_slot)) {
           head_pairs.insert(key);

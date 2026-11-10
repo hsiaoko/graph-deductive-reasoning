@@ -26,8 +26,7 @@
 #include "gar/hdc/encoder.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 class AgentState;
@@ -51,7 +50,7 @@ struct HandcraftedConfig {
 // id mapping), the chain witness and the current state.
 struct ScoringContext {
   const std::vector<std::uint32_t>* distances;
-  const analysis::PredicateTable* predicates;
+  const gar::core::analysis::PredicateTable* predicates;
   const WitnessLog* witness;
   const AgentState* state;
 };
@@ -133,7 +132,7 @@ class NullScorer final : public Scorer {
 class HdcScorer final : public Scorer {
  public:
   HdcScorer(HandcraftedConfig cfg, const CostModel* cost_model,
-            hdc::HdcEncoder encoder)
+            gar::core::hdc::HdcEncoder encoder)
       : cfg_(cfg), cost_(cost_model), enc_(encoder) {}
 
   void Score(const GARule& rule, const Motif& mu, const ScoringContext& ctx,
@@ -167,11 +166,10 @@ class HdcScorer final : public Scorer {
 
   HandcraftedConfig cfg_;
   const CostModel* cost_;
-  hdc::HdcEncoder enc_;
-  mutable std::unordered_map<FactVecKey, hdc::Hypervector, FactVecKeyHash>
+  gar::core::hdc::HdcEncoder enc_;
+  mutable std::unordered_map<FactVecKey, gar::core::hdc::Hypervector, FactVecKeyHash>
       fact_cache_;
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

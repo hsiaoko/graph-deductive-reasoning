@@ -13,8 +13,7 @@
 #include "gar/analysis/dependency_graph.h"
 #include "gar/graph/triple_graph.h"
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 struct GoalCandidate {
   std::uint32_t slot;  // base relation slot (see DerivableSlots note)
@@ -24,7 +23,7 @@ struct GoalCandidate {
 
 class GoalSampler {
  public:
-  GoalSampler(const gar::graph::TripleGraph& g, const DependencyGraph& dg)
+  GoalSampler(const gar::core::graph::TripleGraph& g, const DependencyGraph& dg)
       : g_(g), dg_(dg) {}
 
   // Slots whose base relation is derivable (named by some rule's
@@ -43,9 +42,8 @@ class GoalSampler {
                                                   std::uint64_t seed) const;
 
  private:
-  const gar::graph::TripleGraph& g_;
+  const gar::core::graph::TripleGraph& g_;
   const DependencyGraph& dg_;
 };
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

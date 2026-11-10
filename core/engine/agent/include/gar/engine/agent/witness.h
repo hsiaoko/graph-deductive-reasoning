@@ -25,19 +25,18 @@
 #include "gar/hdc/encoder.h"
 #include "gar/hdc/evidence.h"
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 class PredicateTable;
 }  // namespace analysis
 
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 // Name-based predicate symbol, namespaced by bit 63 (see header comment):
 // splitmix64(FNV-1a(name)) | (1<<63), where the name is the relation name
 // for edge facts resp. the predicate-table name for attr/ml facts.
-std::uint64_t FactPredicateSymbol(const Fact& f, const graph::TripleGraph& g,
-                                  const analysis::PredicateTable& table);
+std::uint64_t FactPredicateSymbol(const Fact& f, const gar::core::graph::TripleGraph& g,
+                                  const gar::core::analysis::PredicateTable& table);
 
 class WitnessLog {
  public:
@@ -46,23 +45,23 @@ class WitnessLog {
   // them is pure cost. The exact set is always maintained (ExactScorer's
   // witnessed-premise share and failure accounting read it). HdcScorer
   // passes true and gets bit-identical HDC numerics.
-  WitnessLog(std::uint32_t hdc_dim, const graph::TripleGraph* g,
-             const analysis::PredicateTable* table, bool use_hdc = true);
+  WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::TripleGraph* g,
+             const gar::core::analysis::PredicateTable* table, bool use_hdc = true);
 
   // Returns true iff the fact is new to the exact witness set. HDC evidence
   // still accumulates every event, including an already witnessed fact.
-  bool WitnessFact(const Fact& f, const hdc::HdcEncoder& enc);
+  bool WitnessFact(const Fact& f, const gar::core::hdc::HdcEncoder& enc);
 
   [[nodiscard]] bool Contains(const Fact& f) const {
     return exact_.count(KeyOf(f)) != 0;
   }
   [[nodiscard]] std::uint64_t Count() const { return count_; }
-  [[nodiscard]] const hdc::EvidenceVector& hdc() const { return hdc_ev_; }
+  [[nodiscard]] const gar::core::hdc::EvidenceVector& hdc() const { return hdc_ev_; }
   // Sign-packed majority of the evidence bundle, cached until the next
   // witnessed fact. Scoring does several cosine readouts per candidate;
   // re-packing per readout is pure waste — identical value by construction
   // (Packed is a pure function of the accumulator).
-  [[nodiscard]] const hdc::Hypervector& PackedHdc() const {
+  [[nodiscard]] const gar::core::hdc::Hypervector& PackedHdc() const {
     if (packed_dirty_) {
       packed_cache_ = hdc_ev_.Packed();
       packed_dirty_ = false;
@@ -72,15 +71,14 @@ class WitnessLog {
 
  private:
   std::unordered_set<FactKey, FactKeyHash> exact_;
-  hdc::EvidenceVector hdc_ev_;
-  mutable hdc::Hypervector packed_cache_;
+  gar::core::hdc::EvidenceVector hdc_ev_;
+  mutable gar::core::hdc::Hypervector packed_cache_;
   mutable bool packed_dirty_ = true;
   std::uint64_t count_ = 0;
-  const graph::TripleGraph* g_;
-  const analysis::PredicateTable* table_;
+  const gar::core::graph::TripleGraph* g_;
+  const gar::core::analysis::PredicateTable* table_;
   bool use_hdc_ = true;
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

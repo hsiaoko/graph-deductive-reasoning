@@ -1,11 +1,11 @@
 // deduce: full logical closure (chase) of a GAR rule set over a KG, CPU.
-// Thin shell over engine::deduction::CpuChaseEngine; argument parsing,
+// Thin shell over gar::core::engine::deduction::CpuChaseEngine; argument parsing,
 // input loading and output reporting are shared with gar_reason and
 // deduce_gpu via full_deduce_cli.h.
 //
 //   G_{i+1} = G_i ∪ { p₀(emb) | rule Q[x̄](X → p₀), emb ∈ Q(G_i), X(emb) }
 //
-// Topology matching reuses graph::PatternMatcher (homomorphism, edge labels,
+// Topology matching reuses gar::core::graph::PatternMatcher (homomorphism, edge labels,
 // vertex-label constraints); X predicates (const/var/exists/edge) are
 // evaluated per embedding against the vertex_attr table and the current
 // graph. Derived edges are merged into the graph after each round, so the
@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
   try {
     gar_apps::FullDeduceInputs in =
         gar_apps::LoadFullDeduceInputs(args, "deduce");
-    gar::engine::deduction::CpuChaseEngine engine(
+    gar::core::engine::chase::CpuChaseEngine engine(
         in.graph, in.attrs.columns.empty() ? nullptr : &in.attrs);
     const auto res = engine.Run(in.rules, args.cfg);
     gar_apps::ReportFullDeduce(args, in, res, "deduce", "chase");

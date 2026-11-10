@@ -2,8 +2,7 @@
 
 #include "gar/analysis/predicate_table.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -11,15 +10,15 @@ namespace {
 
 // Predicate-table id of a slot's relation name (same naming the DG uses).
 std::uint32_t PredOfSlot(std::uint32_t slot, const GARule& rule,
-                         const analysis::PredicateTable& table) {
-  return table.Find(analysis::LabelNameOf(slot, rule));
+                         const gar::core::analysis::PredicateTable& table) {
+  return table.Find(gar::core::analysis::LabelNameOf(slot, rule));
 }
 
 }  // namespace
 
 ProducerTracker::ProducerTracker(const std::vector<RulePlan>& plans,
                                  const std::vector<GARule>& rules,
-                                 const analysis::PredicateTable* table)
+                                 const gar::core::analysis::PredicateTable* table)
     : plans_(plans),
       rules_(rules),
       table_(table),
@@ -29,8 +28,8 @@ ProducerTracker::ProducerTracker(const std::vector<RulePlan>& plans,
     const GARule& r = rules_[plans_[i].rule];
     if (!r.consequent) continue;
     const std::uint32_t p =
-        table_->Find(analysis::PredicateIdOf(*r.consequent, r));
-    if (p != analysis::kInvalidPredicate) producers_[p].push_back(i);
+        table_->Find(gar::core::analysis::PredicateIdOf(*r.consequent, r));
+    if (p != gar::core::analysis::kInvalidPredicate) producers_[p].push_back(i);
   }
 }
 
@@ -87,7 +86,7 @@ void ProducerTracker::Recompute(std::uint64_t version) {
       for (const auto& pred : r.antecedent) {
         if (pred.kind != gar::PredKind::kEdge) continue;
         const std::uint32_t p =
-            table_->Find(analysis::PredicateIdOf(pred, r));
+            table_->Find(gar::core::analysis::PredicateIdOf(pred, r));
         auto it = pred_alive_.find(p);
         if (it != pred_alive_.end() && it->second) {
           any_alive_slot = true;
@@ -124,5 +123,4 @@ bool ProducerTracker::Alive(std::uint32_t pred, std::uint64_t version) {
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

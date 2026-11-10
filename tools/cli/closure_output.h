@@ -19,9 +19,9 @@ namespace gar_apps {
 // closure_edges.tsv writer, shared by the full-closure apps and the agent
 // mode (identical layout: src \t relation \t dst \t round \t rule_id).
 inline void WriteClosureEdges(
-    const std::string& out_root, const gar::graph::TripleGraph& g,
+    const std::string& out_root, const gar::core::graph::TripleGraph& g,
     const std::vector<std::string>& rule_ids,
-    const std::vector<gar::graph::DerivedEdge>& derived) {
+    const std::vector<gar::core::graph::DerivedEdge>& derived) {
   std::ofstream f(out_root + "/closure_edges.tsv");
   f << "# src\trelation\tdst\tround\trule\n";
   for (const auto& e : derived) {
@@ -31,9 +31,9 @@ inline void WriteClosureEdges(
   }
 }
 
-inline void WriteClosureOutputs(const gar::graph::TripleGraph& g,
+inline void WriteClosureOutputs(const gar::core::graph::TripleGraph& g,
                                 const std::vector<std::string>& rule_ids,
-                                const gar::engine::deduction::ChaseResult& res,
+                                const gar::core::engine::chase::ChaseResult& res,
                                 const std::string& out_root,
                                 bool write_matches) {
   std::filesystem::create_directories(out_root);

@@ -13,20 +13,19 @@
 #include "gar/graph/vertex_attrs.h"
 #include "gar/rule.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 class AgentState {
  public:
-  AgentState(graph::TripleGraph& g, const graph::VertexAttrs* attrs,
+  AgentState(gar::core::graph::TripleGraph& g, const gar::core::graph::VertexAttrs* attrs,
              const std::vector<GARule>& rules)
       : g_(g), attrs_(attrs), rules_(rules),
         per_slot_derived_(g.num_slots(), 0) {}
 
-  [[nodiscard]] graph::TripleGraph& graph() { return g_; }
-  [[nodiscard]] const graph::TripleGraph& graph() const { return g_; }
-  [[nodiscard]] const graph::VertexAttrs* attrs() const { return attrs_; }
+  [[nodiscard]] gar::core::graph::TripleGraph& graph() { return g_; }
+  [[nodiscard]] const gar::core::graph::TripleGraph& graph() const { return g_; }
+  [[nodiscard]] const gar::core::graph::VertexAttrs* attrs() const { return attrs_; }
   [[nodiscard]] const std::vector<GARule>& rules() const { return rules_; }
 
   // Gamma growth counter (number of facts derived so far).
@@ -38,32 +37,31 @@ class AgentState {
   // inverse slots alike, since derived edges are mirrored on insertion.
   [[nodiscard]] bool ContainsEdge(std::uint32_t slot, std::uint32_t src,
                                   std::uint32_t dst) const {
-    return g_.RelationPairSet(slot).count(graph::PackPair(src, dst)) != 0;
+    return g_.RelationPairSet(slot).count(gar::core::graph::PackPair(src, dst)) != 0;
   }
 
   // Merges a freshly derived edge into the graph (base + inverse mirror)
   // and journals it. Caller contract: the edge is new (ContainsEdge false);
   // a duplicate is silently dropped without a version bump.
-  void ApplyDerivation(const graph::DerivedEdge& d) {
+  void ApplyDerivation(const gar::core::graph::DerivedEdge& d) {
     if (g_.AddEdges(d.slot, {{d.src, d.dst}}) == 0) return;
     journal_.push_back(d);
     ++per_slot_derived_[d.slot];
     ++version_;
   }
 
-  [[nodiscard]] const std::vector<graph::DerivedEdge>& journal() const {
+  [[nodiscard]] const std::vector<gar::core::graph::DerivedEdge>& journal() const {
     return journal_;
   }
 
  private:
-  graph::TripleGraph& g_;
-  const graph::VertexAttrs* attrs_;
+  gar::core::graph::TripleGraph& g_;
+  const gar::core::graph::VertexAttrs* attrs_;
   const std::vector<GARule>& rules_;
   std::uint64_t version_ = 0;
   std::vector<std::uint64_t> per_slot_derived_;
-  std::vector<graph::DerivedEdge> journal_;
+  std::vector<gar::core::graph::DerivedEdge> journal_;
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

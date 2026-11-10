@@ -3,8 +3,7 @@
 #include "gar/analysis/predicate_table.h"
 #include "gar/hdc/hypervector.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 RuleHead ResolveRuleHead(const gar::GARule& rule) {
@@ -30,12 +29,12 @@ std::uint64_t MotifHash(std::uint32_t rule, const std::uint32_t* emb,
     h ^= emb[i] + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
   }
   std::uint64_t s = h;
-  return hdc::SplitMix64Next(s);
+  return gar::core::hdc::SplitMix64Next(s);
 }
 
 void GroundPremises(const gar::GARule& rule, const Motif& mu,
-                    const graph::TripleGraph& g,
-                    const analysis::PredicateTable& table,
+                    const gar::core::graph::TripleGraph& g,
+                    const gar::core::analysis::PredicateTable& table,
                     std::vector<Fact>* out) {
   out->clear();
   const std::uint32_t num_rel = g.num_relations();
@@ -60,14 +59,14 @@ void GroundPremises(const gar::GARule& rule, const Motif& mu,
       case gar::PredKind::kConst:
       case gar::PredKind::kExists: {
         const std::uint32_t id = table.Find(pred.attr);
-        if (id != analysis::kInvalidPredicate) {
+        if (id != gar::core::analysis::kInvalidPredicate) {
           out->push_back(MakeAttrFact(id, emb[pred.node]));
         }
         break;
       }
       case gar::PredKind::kVar: {
         const std::uint32_t id = table.Find(pred.attr);
-        if (id != analysis::kInvalidPredicate) {
+        if (id != gar::core::analysis::kInvalidPredicate) {
           out->push_back(MakeAttrFact2(id, emb[pred.node],
                                        emb[pred.rhs_node]));
         }
@@ -84,7 +83,7 @@ void GroundPremises(const gar::GARule& rule, const Motif& mu,
       }
       case gar::PredKind::kMl: {
         const std::uint32_t id = table.Find(pred.model);
-        if (id != analysis::kInvalidPredicate && pred.ml_vars.size() >= 2) {
+        if (id != gar::core::analysis::kInvalidPredicate && pred.ml_vars.size() >= 2) {
           out->push_back(MakeMlFact(id, emb[pred.ml_vars[0]],
                                     emb[pred.ml_vars[1]]));
         }
@@ -95,5 +94,4 @@ void GroundPremises(const gar::GARule& rule, const Motif& mu,
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

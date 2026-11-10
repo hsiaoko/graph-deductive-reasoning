@@ -31,8 +31,7 @@
 
 #include "gar/rule.h"
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 inline constexpr std::uint32_t kInvalidPredicate = UINT32_MAX;
 
@@ -60,5 +59,4 @@ std::string LabelNameOf(gar::LabelID label, const gar::GARule& rule);
 // Identity of a predicate per the rules documented above.
 std::string PredicateIdOf(const gar::Predicate& pred, const gar::GARule& rule);
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

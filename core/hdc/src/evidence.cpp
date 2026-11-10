@@ -6,8 +6,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-namespace gar {
-namespace hdc {
+namespace gar::core::hdc {
 
 namespace {
 
@@ -93,5 +92,4 @@ double EvidenceVector::Cosine(const EvidenceVector& other) const {
           std::sqrt(static_cast<double>(nb)));
 }
 
-}  // namespace hdc
-}  // namespace gar
+}  // namespace gar::core::hdc

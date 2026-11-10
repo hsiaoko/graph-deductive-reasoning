@@ -8,7 +8,7 @@
 // with the per-rule match + X-evaluation + head emission running on the GPU
 // (MatrixGraph's task::GARDeduce). The round driver, fact dedup and graph
 // merging stay on the host and are SHARED with the CPU chase
-// (gar::graph::MergeRoundFacts), so both engines produce the same derived
+// (gar::core::graph::MergeRoundFacts), so both engines produce the same derived
 // fact set round by round (row order inside a round may differ: GPU
 // emission is atomicAdd-ordered).
 //
@@ -28,25 +28,23 @@
 //
 // The header stays free of MatrixGraph types; the implementation (.cpp) is
 // the sanctioned MatrixGraph contact point inside this module.
-namespace gar {
-namespace engine {
-namespace deduction {
+namespace gar::core::engine {
+namespace chase {
 
 class GpuDeduceEngine final : public DeductionEngine {
  public:
   // `g` is mutated in place: derived edges are merged into its indexes.
   // `attrs` may be nullptr (treated as zero attribute columns).
-  GpuDeduceEngine(graph::TripleGraph& g, const graph::VertexAttrs* attrs)
+  GpuDeduceEngine(gar::core::graph::TripleGraph& g, const gar::core::graph::VertexAttrs* attrs)
       : g_(g), attrs_(attrs) {}
 
   ChaseResult Run(const std::vector<GARule>& rules,
                   const ChaseConfig& cfg) override;
 
  private:
-  graph::TripleGraph& g_;
-  const graph::VertexAttrs* attrs_;
+  gar::core::graph::TripleGraph& g_;
+  const gar::core::graph::VertexAttrs* attrs_;
 };
 
-}  // namespace deduction
-}  // namespace engine
-}  // namespace gar
+}  // namespace chase
+}  // namespace gar::core::engine

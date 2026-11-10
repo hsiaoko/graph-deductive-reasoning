@@ -2,8 +2,7 @@
 
 #include <random>
 
-namespace gar {
-namespace analysis {
+namespace gar::core::analysis {
 
 std::vector<std::uint32_t> GoalSampler::DerivableSlots() const {
   std::vector<std::uint32_t> out;
@@ -51,5 +50,4 @@ std::vector<GoalCandidate> GoalSampler::Sample(std::uint32_t per_slot,
   return out;
 }
 
-}  // namespace analysis
-}  // namespace gar
+}  // namespace gar::core::analysis

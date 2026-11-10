@@ -1,6 +1,6 @@
 // gar_analyze: the analysis toolchain — one binary, five subcommands.
-// All logic lives in the libraries (analysis / engine::agent /
-// engine::deduction / bridge); this app only composes and does IO.
+// All logic lives in the libraries (analysis / gar::core::engine::agent /
+// gar::core::engine::deduction / bridge); this app only composes and does IO.
 //
 //   gar_analyze rules-stats  --rules <root> [--dot <out.dot>] [--yaml <out.yaml>]
 //   gar_analyze gen-goals    --csr <dir> --rules <root> --per-slot N --seed S
@@ -47,9 +47,9 @@
 
 namespace {
 
-namespace agent = gar::engine::agent;
-namespace analysis = gar::analysis;
-namespace deduction = gar::engine::deduction;
+namespace agent = gar::core::engine::agent;
+namespace analysis = gar::core::analysis;
+namespace deduction = gar::core::engine::chase;
 
 [[noreturn]] void Usage() {
   std::cerr
@@ -171,18 +171,18 @@ std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
   gar_apps::FullDeduceInputs in =
       gar_apps::LoadFullDeduceInputs(io, "gar_analyze");
 
-  analysis::PredicateTable table;
-  analysis::DependencyGraph dg;
+  gar::core::analysis::PredicateTable table;
+  gar::core::analysis::DependencyGraph dg;
   dg.Build(in.rules, &table);
 
-  analysis::GoalSampler sampler(in.graph, dg);
+  gar::core::analysis::GoalSampler sampler(in.graph, dg);
   const auto slots = sampler.DerivableSlots();
   const auto cands = sampler.Sample(per_slot, seed);
   std::cerr << "[gar_analyze] derivable slots: " << slots.size()
             << ", sampled candidates: " << cands.size() << "\n";
 
   // Hold out every candidate (base + inverse mirror) at once.
-  gar::graph::TripleGraph g_held = in.graph;  // clone (vector memcpy)
+  gar::core::graph::TripleGraph g_held = in.graph;  // clone (vector memcpy)
   std::unordered_map<std::uint32_t,
                      std::vector<std::pair<std::uint32_t, std::uint32_t>>>
       by_slot;
@@ -209,7 +209,7 @@ std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
   for (const auto& e : closure.derived) {
     derived_round.emplace(std::make_tuple(e.slot, e.src, e.dst), e.round);
   }
-  const auto anchors = analysis::BaseAnchoredPredicates(dg, g_held);
+  const auto anchors = gar::core::analysis::BaseAnchoredPredicates(dg, g_held);
   const auto depths = dg.DerivationDepths(anchors);
 
   std::vector<SampledGoal> goals;
@@ -226,9 +226,9 @@ std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
     g.dst_name = in.graph.EntityName(c.dst);
     g.bstar_round = it->second;
     const std::uint32_t p = table.Find(g.rel);
-    g.bstar_dg = (p != analysis::kInvalidPredicate)
+    g.bstar_dg = (p != gar::core::analysis::kInvalidPredicate)
                      ? depths[p]
-                     : analysis::kUnreachable;
+                     : gar::core::analysis::kUnreachable;
     goals.push_back(std::move(g));
   }
   std::cerr << "[gar_analyze] reachable goals: " << goals.size() << " / "
@@ -244,7 +244,7 @@ void WriteGoalsTsv(const std::string& path,
   // at which the chase derives g", is approximated by the round under
   // round-based chase); bstar_dg is the dependency-graph derivation depth
   // of the goal's predicate — a lower bound on the shortest chain length
-  // (analysis::DependencyGraph::DerivationDepths).
+  // (gar::core::analysis::DependencyGraph::DerivationDepths).
   f << "# rel_name\tsrc\tdst\tbstar_round\tbstar_dg\n";
   for (const auto& g : goals) {
     f << g.rel << '\t' << g.src_name << '\t' << g.dst_name << '\t'
@@ -278,11 +278,11 @@ int CmdRulesStats(int argc, char** argv) {
   for (const auto& d : dirs) rules.push_back(gar::RuleLoader::Load(d));
   std::cerr << "[gar_analyze] " << rules.size() << " rules\n";
 
-  analysis::PredicateTable table;
-  analysis::DependencyGraph dg;
+  gar::core::analysis::PredicateTable table;
+  gar::core::analysis::DependencyGraph dg;
   dg.Build(rules, &table);
-  const auto st = analysis::ComputeRuleSetStats(rules, dg);
-  analysis::PrintRuleSetStats(std::cout, st, dg);
+  const auto st = gar::core::analysis::ComputeRuleSetStats(rules, dg);
+  gar::core::analysis::PrintRuleSetStats(std::cout, st, dg);
   if (!dot_path.empty()) {
     dg.WriteDot(dot_path);
     std::cerr << "[gar_analyze] dot written to " << dot_path << "\n";
@@ -381,11 +381,11 @@ int CmdGenWorkload(int argc, char** argv) {
   // goals (sampler order is deterministic given the seed).
   gar_apps::FullDeduceInputs in =
       gar_apps::LoadFullDeduceInputs(io, "gar_analyze");
-  analysis::PredicateTable table;
-  analysis::DependencyGraph dg;
+  gar::core::analysis::PredicateTable table;
+  gar::core::analysis::DependencyGraph dg;
   dg.Build(in.rules, &table);
   const auto n_slots =
-      analysis::GoalSampler(in.graph, dg).DerivableSlots().size();
+      gar::core::analysis::GoalSampler(in.graph, dg).DerivableSlots().size();
   const std::uint32_t per_slot = static_cast<std::uint32_t>(std::max<std::uint64_t>(
       1, (4ull * num_tasks + (n_slots ? n_slots : 1) - 1) /
              (n_slots ? n_slots : 1)));
@@ -500,7 +500,7 @@ struct VerdictInput {
   bool subset_ok = true;
   bool budget_exhausted = false;
   std::uint64_t budget = 0;
-  std::uint32_t bstar_dg = analysis::kUnreachable;
+  std::uint32_t bstar_dg = gar::core::analysis::kUnreachable;
   std::vector<std::string> divergent_facts;
 };
 
@@ -510,7 +510,7 @@ std::string VerdictOf(const VerdictInput& v) {
   if (v.goal_in_cpu) {
     if (v.agent_goal) return "CONSISTENT";
     const bool under_budgeted =
-        (v.bstar_dg != analysis::kUnreachable && v.budget < v.bstar_dg);
+        (v.bstar_dg != gar::core::analysis::kUnreachable && v.budget < v.bstar_dg);
     return (under_budgeted || v.budget_exhausted) ? "BUDGET-LIMITED"
                                                   : "DIVERGENT";
   }
@@ -587,7 +587,7 @@ void WriteVerifyReport(const std::string& path, const TextGoal& goal,
     << "agent_steps: " << agent_steps << "\n"
     << "budget: " << v.budget << "\n"
     << "bstar_dg: "
-    << (v.bstar_dg == analysis::kUnreachable
+    << (v.bstar_dg == gar::core::analysis::kUnreachable
             ? "unreachable"
             : std::to_string(v.bstar_dg))
     << "\n"
@@ -608,11 +608,11 @@ void WriteVerifyReport(const std::string& path, const TextGoal& goal,
 VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
                        const gar_apps::AgentModeArgs& agent_args,
                        const agent::Goal& goal,
-                       gar::graph::TripleGraph* g_base,
+                       gar::core::graph::TripleGraph* g_base,
                        const std::vector<gar::GARule>& rules,
                        const std::vector<std::string>& rule_ids,
-                       const gar::graph::VertexAttrs* attrs,
-                       const analysis::DependencyGraph& dg,
+                       const gar::core::graph::VertexAttrs* attrs,
+                       const gar::core::analysis::DependencyGraph& dg,
                        const std::vector<std::uint32_t>& depths,
                        bool with_gpu, agent::AgentResult* agent_out,
                        const deduction::ChaseConfig& chase_cfg) {
@@ -620,7 +620,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   v.budget = agent_args.budget;
 
   // Hold out the goal edge: Γ0 = G \ {g}.
-  gar::graph::TripleGraph g0 = *g_base;
+  gar::core::graph::TripleGraph g0 = *g_base;
   if (goal.args[0] && goal.args[1]) {
     g0.RemoveEdgesBatch(
         {{goal.slot, {{*goal.args[0], *goal.args[1]}}}});
@@ -629,7 +629,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   // agent on a clone (greedy mutates; bnb clones internally — either way
   // the base stays untouched)
   {
-    gar::graph::TripleGraph g_agent = g0;
+    gar::core::graph::TripleGraph g_agent = g0;
     agent::ReasoningAgent rag = gar_apps::MakeReasoningAgent(
         agent_args, &dg, &goal, &g0, &rules, &rule_ids);
     agent::AgentState state(g_agent, attrs, rules);
@@ -649,14 +649,14 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   // cpu closure on a clone
   deduction::ChaseConfig cfg = chase_cfg;
   cfg.keep_matches = false;
-  gar::graph::TripleGraph g_cpu = g0;
+  gar::core::graph::TripleGraph g_cpu = g0;
   deduction::CpuChaseEngine cpu_engine(g_cpu, attrs);
   const auto cpu_res = cpu_engine.Run(rules, cfg);
-  auto contains_goal = [](const gar::graph::TripleGraph& g,
+  auto contains_goal = [](const gar::core::graph::TripleGraph& g,
                           const auto& derived, const agent::Goal& gl) {
     if (gl.args[0] && gl.args[1] &&
         g.RelationPairSet(gl.slot)
-            .count(gar::graph::PackPair(*gl.args[0], *gl.args[1]))) {
+            .count(gar::core::graph::PackPair(*gl.args[0], *gl.args[1]))) {
       return true;  // base edge or derived-and-merged
     }
     for (const auto& e : derived) {
@@ -668,7 +668,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   // subset: every agent-derived fact sits in the cpu closure graph
   for (const auto& e : agent_out->derived) {
     if (!g_cpu.RelationPairSet(e.slot)
-             .count(gar::graph::PackPair(e.src, e.dst))) {
+             .count(gar::core::graph::PackPair(e.src, e.dst))) {
       v.subset_ok = false;
       v.divergent_facts.push_back(
           g_base->SlotName(e.slot) + "(" + g_base->EntityName(e.src) + "," +
@@ -678,7 +678,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
 
   if (with_gpu) {
     v.has_gpu = true;
-    gar::graph::TripleGraph g_gpu = g0;
+    gar::core::graph::TripleGraph g_gpu = g0;
     deduction::GpuDeduceEngine gpu_engine(g_gpu, attrs);
     const auto gpu_res = gpu_engine.Run(rules, cfg);
     v.goal_in_gpu = contains_goal(g_gpu, gpu_res.derived, goal);
@@ -686,7 +686,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
 
   const std::uint32_t p =
       dg.table().Find(g_base->RelationName(goal.slot));
-  v.bstar_dg = p == analysis::kInvalidPredicate ? analysis::kUnreachable
+  v.bstar_dg = p == gar::core::analysis::kInvalidPredicate ? gar::core::analysis::kUnreachable
                                                 : depths[p];
   return v;
 }
@@ -694,16 +694,16 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
 int CmdVerifyRun(const VerifyArgs& a) {
   gar_apps::FullDeduceInputs in =
       gar_apps::LoadFullDeduceInputs(a.io, "gar_analyze");
-  analysis::PredicateTable table;
-  analysis::DependencyGraph dg;
+  gar::core::analysis::PredicateTable table;
+  gar::core::analysis::DependencyGraph dg;
   dg.Build(in.rules, &table);
-  const auto anchors = analysis::BaseAnchoredPredicates(dg, in.graph);
+  const auto anchors = gar::core::analysis::BaseAnchoredPredicates(dg, in.graph);
   const auto depths = dg.DerivationDepths(anchors);
 
   const agent::Goal goal =
       gar_apps::ParseGoalSpec(a.agent.goal_spec, in.graph);
   agent::AgentResult agent_res;
-  const gar::graph::VertexAttrs* attrs =
+  const gar::core::graph::VertexAttrs* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
   const VerdictInput v =
       VerifyOne(a.io, a.agent, goal, &in.graph, in.rules, in.rule_ids, attrs, dg, depths,
@@ -757,12 +757,12 @@ int CmdVerifyFromDirs(const VerifyArgs& a) {
 int CmdVerifyTasks(const VerifyArgs& a) {
   gar_apps::FullDeduceInputs in =
       gar_apps::LoadFullDeduceInputs(a.io, "gar_analyze");
-  analysis::PredicateTable table;
-  analysis::DependencyGraph dg;
+  gar::core::analysis::PredicateTable table;
+  gar::core::analysis::DependencyGraph dg;
   dg.Build(in.rules, &table);
-  const auto anchors = analysis::BaseAnchoredPredicates(dg, in.graph);
+  const auto anchors = gar::core::analysis::BaseAnchoredPredicates(dg, in.graph);
   const auto depths = dg.DerivationDepths(anchors);
-  const gar::graph::VertexAttrs* attrs =
+  const gar::core::graph::VertexAttrs* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
 
   std::ifstream tf(a.tasks_path);
@@ -776,10 +776,10 @@ int CmdVerifyTasks(const VerifyArgs& a) {
   // Shared-closure state for the no-op hold-out fast path and for
   // --shared-holdout (see loop).
   bool shared_closure_ready = false;
-  std::optional<gar::graph::TripleGraph> shared_g_cpu, shared_g_gpu;
+  std::optional<gar::core::graph::TripleGraph> shared_g_cpu, shared_g_gpu;
   std::optional<deduction::ChaseResult> shared_cpu_res, shared_gpu_res;
   // --shared-holdout: Γ0 = G minus ALL task goal edges (base ones), once.
-  gar::graph::TripleGraph g0_shared = in.graph;
+  gar::core::graph::TripleGraph g0_shared = in.graph;
   if (a.shared_holdout) {
     std::unordered_map<std::uint32_t,
                        std::vector<std::pair<std::uint32_t, std::uint32_t>>>
@@ -841,7 +841,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
     bool goal_is_base =
         goal.args[0] && goal.args[1] &&
         in.graph.RelationPairSet(goal.slot)
-            .count(gar::graph::PackPair(*goal.args[0], *goal.args[1])) != 0;
+            .count(gar::core::graph::PackPair(*goal.args[0], *goal.args[1])) != 0;
     if (a.shared_holdout) goal_is_base = false;  // handled by g0 below
     double agent_wall_ms = 0.0;
     VerdictInput v;
@@ -866,7 +866,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
       }
       const auto a_t0 = std::chrono::steady_clock::now();
       {
-        gar::graph::TripleGraph g_agent =
+        gar::core::graph::TripleGraph g_agent =
             a.shared_holdout ? g0_shared : in.graph;
         agent::ReasoningAgent rag =
             gar_apps::MakeReasoningAgent(task_args, &dg, &goal,
@@ -909,14 +909,14 @@ int CmdVerifyTasks(const VerifyArgs& a) {
       }
       for (const auto& e : agent_res.derived) {
         if (!shared_g_cpu->RelationPairSet(e.slot)
-                 .count(gar::graph::PackPair(e.src, e.dst))) {
+                 .count(gar::core::graph::PackPair(e.src, e.dst))) {
           v.subset_ok = false;
         }
       }
       const std::uint32_t p =
           dg.table().Find(in.graph.RelationName(goal.slot));
-      v.bstar_dg = p == analysis::kInvalidPredicate
-                       ? analysis::kUnreachable
+      v.bstar_dg = p == gar::core::analysis::kInvalidPredicate
+                       ? gar::core::analysis::kUnreachable
                        : depths[p];
     }
     const std::string verdict = VerdictOf(v);

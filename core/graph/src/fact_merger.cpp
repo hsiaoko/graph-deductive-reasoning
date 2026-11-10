@@ -10,8 +10,7 @@
 #include <tbb/parallel_for.h>
 #endif
 
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 namespace {
 
@@ -79,5 +78,4 @@ void MarkAbsentEdges(const TripleGraph& g,
 #endif
 }
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

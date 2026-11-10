@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
               << " <model.meta> <original|simd|bit-lut> <calls>\n";
     return 1;
   }
-  namespace agent = gar::engine::agent;
+  namespace agent = gar::core::engine::agent;
   agent::HdcBackend backend;
   const std::string name = argv[2];
   if (name == "original") {

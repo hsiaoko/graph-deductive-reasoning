@@ -13,8 +13,7 @@
 #include "gar/graph/predicate_evaluator.h"
 #include "rule_support.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 namespace mg = sics::matrixgraph::core;
@@ -69,9 +68,9 @@ void DeduceSession::BuildPlans() {
     auto head_distance = [&](const deduce::RulePlan& plan) {
       const GARule& rule = rules[plan.rule];
       const std::uint32_t predicate = ctx_.table->Find(
-          analysis::PredicateIdOf(*rule.consequent, rule));
-      return predicate == analysis::kInvalidPredicate
-                 ? analysis::kUnreachable
+          gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
+      return predicate == gar::core::analysis::kInvalidPredicate
+                 ? gar::core::analysis::kUnreachable
                  : ctx_.distances[predicate];
     };
     std::stable_sort(plans_.begin(), plans_.end(),
@@ -100,11 +99,11 @@ std::unordered_map<std::uint32_t, std::uint32_t> DeduceSession::GoalPins(
   if (pl.head.slot == goal_.slot) {
     const GARule& rule = state_->rules()[pl.rule];
     const std::uint32_t predicate = ctx_.table->Find(
-        analysis::PredicateIdOf(*rule.consequent, rule));
+        gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
     // A recursive goal may need same-predicate intermediate facts before the
     // final constants can be derived. Pinning every complete match to the
     // final head would exclude those necessary actions.
-    if (predicate != analysis::kInvalidPredicate &&
+    if (predicate != gar::core::analysis::kInvalidPredicate &&
         ctx_.dg->RecursiveFamilyOf(predicate) >= 0) {
       return pins;
     }
@@ -273,11 +272,11 @@ void DeduceSession::AddPartials(
     const bool u_bound = eu != UINT32_MAX, v_bound = ev != UINT32_MAX;
     bool present = false;
     if (u_bound && v_bound) {
-      present = g_.RelationPairSet(de.slot).count(graph::PackPair(eu, ev)) != 0;
+      present = g_.RelationPairSet(de.slot).count(gar::core::graph::PackPair(eu, ev)) != 0;
     } else if (u_bound) {
       const auto& pairs = g_.RelationPairs(de.slot);
       auto lo =
-          std::lower_bound(pairs.begin(), pairs.end(), graph::PackPair(eu, 0));
+          std::lower_bound(pairs.begin(), pairs.end(), gar::core::graph::PackPair(eu, 0));
       present = lo != pairs.end() && (*lo >> 32) == eu;
     } else if (v_bound) {
       // dst-side presence: the mirror slot's pairs are (dst, src).
@@ -286,7 +285,7 @@ void DeduceSession::AddPartials(
                                        : de.slot + g_.num_relations();
       const auto& pairs = g_.RelationPairs(mirror);
       auto lo =
-          std::lower_bound(pairs.begin(), pairs.end(), graph::PackPair(ev, 0));
+          std::lower_bound(pairs.begin(), pairs.end(), gar::core::graph::PackPair(ev, 0));
       present = lo != pairs.end() && (*lo >> 32) == ev;
     }
     if (present) continue;  // really complete; complete enum covers it
@@ -372,7 +371,7 @@ void DeduceSession::GenerateStar(std::uint32_t pi) {
   VerifyGeneration();
 }
 
-void DeduceSession::CompleteDeltas(const graph::DerivedEdge& d,
+void DeduceSession::CompleteDeltas(const gar::core::graph::DerivedEdge& d,
                                      std::uint32_t mirror) {
   std::vector<std::uint32_t> affected;
   for (const std::uint32_t slot : {d.slot, mirror}) {
@@ -415,7 +414,7 @@ void DeduceSession::CompleteDeltas(const graph::DerivedEdge& d,
   }
 }
 
-void DeduceSession::CompletePartials(const graph::DerivedEdge& d,
+void DeduceSession::CompletePartials(const gar::core::graph::DerivedEdge& d,
                                        std::uint32_t mirror) {
   std::vector<std::uint64_t> done;
   for (const std::uint64_t id : ws_.MatchingPartials(d, mirror)) {
@@ -462,7 +461,7 @@ void DeduceSession::CompletePartials(const graph::DerivedEdge& d,
   for (std::uint64_t id : done) ws_.RemoveSuspended(id);
 }
 
-void DeduceSession::GrowPartials(const graph::DerivedEdge& d,
+void DeduceSession::GrowPartials(const gar::core::graph::DerivedEdge& d,
                                    std::uint32_t mirror) {
   // New partials from sub-spec growth (goal pins merged; a conflict between
   // a goal pin and the delta pin on the same vertex voids that edge's
@@ -499,7 +498,7 @@ void DeduceSession::GrowPartials(const graph::DerivedEdge& d,
   }
 }
 
-void DeduceSession::OnDerivation(const graph::DerivedEdge& d) {
+void DeduceSession::OnDerivation(const gar::core::graph::DerivedEdge& d) {
   const std::uint32_t mirror = g_.IsInverse(d.slot)
                                    ? g_.BaseRelation(d.slot)
                                    : d.slot + g_.num_relations();
@@ -607,11 +606,11 @@ int DeduceSession::Evaluate(const deduce::ActionRecord& rec) {
   return 2;
 }
 
-graph::DerivedEdge DeduceSession::Derive(const deduce::ActionRecord& rec) {
+gar::core::graph::DerivedEdge DeduceSession::Derive(const deduce::ActionRecord& rec) {
   auto& fx = *res_.stats;
   const GARule& r = state_->rules()[rec.motif.rule];
   const std::uint32_t* emb = rec.motif.embedding.data();
-  const graph::DerivedEdge d{
+  const gar::core::graph::DerivedEdge d{
       emb[rec.head.pu], emb[rec.head.pv], rec.head.slot, rec.motif.rule,
       static_cast<std::uint32_t>(res_.chain.size() + 1)};
   state_->ApplyDerivation(d);
@@ -657,11 +656,11 @@ bool DeduceSession::RevivalPass() {
         const std::uint32_t slot = static_cast<std::uint32_t>(k.hi & 0xffffffffu);
         const std::uint32_t s = static_cast<std::uint32_t>(k.lo >> 32);
         const std::uint32_t d = static_cast<std::uint32_t>(k.lo);
-        if (g_.RelationPairSet(slot).count(graph::PackPair(s, d)) == 0) {
+        if (g_.RelationPairSet(slot).count(gar::core::graph::PackPair(s, d)) == 0) {
           fulfilled = false;
           const std::uint32_t pid = ctx_.table->Find(g_.RelationName(
               slot < g_.num_relations() ? slot : slot - g_.num_relations()));
-          if (pid != analysis::kInvalidPredicate &&
+          if (pid != gar::core::analysis::kInvalidPredicate &&
               prod_->Alive(pid, state_->version())) {
             any_alive_producer = true;
           }
@@ -695,14 +694,14 @@ bool DeduceSession::RevivalPass() {
       const std::uint32_t dd = static_cast<std::uint32_t>(sw.wait.ground.lo);
       const std::uint32_t slot =
           static_cast<std::uint32_t>(sw.wait.ground.hi & 0xffffffffu);
-      present = g_.RelationPairSet(slot).count(graph::PackPair(s, dd)) != 0;
+      present = g_.RelationPairSet(slot).count(gar::core::graph::PackPair(s, dd)) != 0;
     } else {
       // Open-side: any fact with the bound endpoint now?
       const auto& pairs = g_.RelationPairs(sw.wait.slot);
       const std::uint32_t bv = sw.wait.bound_value;
       if (sw.wait.bound_is_src) {
         auto lo = std::lower_bound(pairs.begin(), pairs.end(),
-                                   graph::PackPair(bv, 0));
+                                   gar::core::graph::PackPair(bv, 0));
         present = lo != pairs.end() && (*lo >> 32) == bv;
       } else {
         const std::uint32_t mirror =
@@ -711,14 +710,14 @@ bool DeduceSession::RevivalPass() {
                 : sw.wait.slot + g_.num_relations();
         const auto& mp = g_.RelationPairs(mirror);
         auto lo = std::lower_bound(mp.begin(), mp.end(),
-                                   graph::PackPair(bv, 0));
+                                   gar::core::graph::PackPair(bv, 0));
         present = lo != mp.end() && (*lo >> 32) == bv;
       }
     }
     if (!present) {
       const std::uint32_t pid = ctx_.table->Find(
-          analysis::LabelNameOf(de.slot, state_->rules()[sw.rule]));
-      if (pid == analysis::kInvalidPredicate ||
+          gar::core::analysis::LabelNameOf(de.slot, state_->rules()[sw.rule]));
+      if (pid == gar::core::analysis::kInvalidPredicate ||
           !prod_->Alive(pid, state_->version())) {
         ++fx.prune_events;
         Trace("prune-dead\taction=" + std::to_string(sw.id));
@@ -826,7 +825,7 @@ void DeduceSession::RebuildIndex() {
 }
 
 std::uint64_t DeduceSession::Enumerate(
-    const graph::PatternSpec& spec, std::uint64_t cap,
+    const gar::core::graph::PatternSpec& spec, std::uint64_t cap,
     std::vector<std::uint32_t>* out, bool* capped,
     const std::unordered_map<std::uint32_t, std::uint32_t>& pins) {
   std::vector<std::int32_t> src, dst, label;
@@ -946,7 +945,7 @@ AgentResult DeduceSession::Run() {
     }
     if (verdict == 2) {
       const auto derivation_started = std::chrono::steady_clock::now();
-      const graph::DerivedEdge d = Derive(rec);
+      const gar::core::graph::DerivedEdge d = Derive(rec);
       res_.stats->derivation_wall_ms +=
           std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - derivation_started)
@@ -990,5 +989,4 @@ AgentResult DeduceSession::Run() {
 }
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

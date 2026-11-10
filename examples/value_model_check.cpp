@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
               << " <model.meta> [original|simd|bit-lut]\n";
     return 1;
   }
-  namespace agent = gar::engine::agent;
+  namespace agent = gar::core::engine::agent;
   agent::ValueModel vm;
   if (argc == 3) {
     const std::string backend = argv[2];

@@ -4,8 +4,7 @@
 
 // A fact derived by one chase round: a new edge (src, dst) in relation
 // `slot`, with its provenance (deriving rule and 1-based round).
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 struct DerivedEdge {
   std::uint32_t src, dst, slot;  // slot as named by the rule's head label
@@ -13,5 +12,4 @@ struct DerivedEdge {
   std::uint32_t round;           // 1-based chase round
 };
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

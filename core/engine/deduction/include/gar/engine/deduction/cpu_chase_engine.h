@@ -9,7 +9,7 @@
 //
 //   G_{i+1} = G_i ∪ { p₀(emb) | rule Q[x̄](X → p₀), emb ∈ Q(G_i), X(emb) }
 //
-// iterated to a fixpoint. Matching reuses graph::PatternMatcher (homomorphism
+// iterated to a fixpoint. Matching reuses gar::core::graph::PatternMatcher (homomorphism
 // semantics, edge-label constraints, vertex-label post-filter — the same
 // counting convention as the miners). X predicates are evaluated per
 // embedding: const (x.A⊕c), var (x.A⊕y.B), exists (x.A) against the vertex
@@ -27,26 +27,24 @@
 // non-fixpoint stop.
 //
 // The engine never sees MatrixGraph types: graphs arrive as
-// graph::TripleGraph and vertex attributes as graph::VertexAttrs (plain CPU
+// gar::core::graph::TripleGraph and vertex attributes as gar::core::graph::VertexAttrs (plain CPU
 // columns); loading from MatrixGraph formats lives in the bridge module.
-namespace gar {
-namespace engine {
-namespace deduction {
+namespace gar::core::engine {
+namespace chase {
 
 class CpuChaseEngine final : public DeductionEngine {
  public:
   // `g` is mutated in place: derived edges are merged into its indexes.
-  CpuChaseEngine(graph::TripleGraph& g, const graph::VertexAttrs* attrs)
+  CpuChaseEngine(gar::core::graph::TripleGraph& g, const gar::core::graph::VertexAttrs* attrs)
       : g_(g), attrs_(attrs) {}
 
   ChaseResult Run(const std::vector<GARule>& rules,
                   const ChaseConfig& cfg) override;
 
  private:
-  graph::TripleGraph& g_;
-  const graph::VertexAttrs* attrs_;  // may be nullptr (only edge/exists predicates)
+  gar::core::graph::TripleGraph& g_;
+  const gar::core::graph::VertexAttrs* attrs_;  // may be nullptr (only edge/exists predicates)
 };
 
-}  // namespace deduction
-}  // namespace engine
-}  // namespace gar
+}  // namespace chase
+}  // namespace gar::core::engine

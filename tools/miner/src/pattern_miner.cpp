@@ -11,13 +11,12 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace gar {
-namespace miner {
+namespace gar::tools::miner {
 
-using graph::PackPair;
-using graph::PatternMatcher;
-using graph::PatternSpec;
-using graph::TripleGraph;
+using gar::core::graph::PackPair;
+using gar::core::graph::PatternMatcher;
+using gar::core::graph::PatternSpec;
+using gar::core::graph::TripleGraph;
 
 namespace {
 
@@ -677,5 +676,4 @@ std::vector<GARule> PatternMiner::Mine() {
   return rules;
 }
 
-}  // namespace miner
-}  // namespace gar
+}  // namespace gar::tools::miner

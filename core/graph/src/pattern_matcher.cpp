@@ -2,8 +2,7 @@
 
 #include <algorithm>
 
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 namespace {
 
@@ -267,5 +266,4 @@ std::uint64_t PatternMatcher::Enumerate(
   return count;
 }
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

@@ -4,8 +4,7 @@
 #include <fstream>
 #include <stdexcept>
 
-namespace gar {
-namespace graph {
+namespace gar::core::graph {
 
 namespace {
 
@@ -238,5 +237,4 @@ std::uint64_t TripleGraph::RemoveEdgesBatch(
   return removed;
 }
 
-}  // namespace graph
-}  // namespace gar
+}  // namespace gar::core::graph

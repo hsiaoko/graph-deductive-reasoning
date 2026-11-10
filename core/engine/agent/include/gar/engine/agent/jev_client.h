@@ -13,8 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 
 struct JevChoiceResult {
@@ -72,5 +71,4 @@ class MockJevClient final : public JevClient {
 };
 
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

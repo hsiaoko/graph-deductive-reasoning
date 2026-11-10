@@ -26,8 +26,7 @@
 #include "gar/engine/agent/fact.h"
 #include "gar/engine/agent/motif.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -100,7 +99,7 @@ class WorkingSet {
   void RemoveSuspended(std::uint64_t id);
   SuspendedAction* FindSuspended(std::uint64_t id);
   std::vector<std::uint64_t> MatchingPartials(
-      const graph::DerivedEdge& d, std::uint32_t mirror) const;
+      const gar::core::graph::DerivedEdge& d, std::uint32_t mirror) const;
   std::vector<SuspendedAction>& suspended() { return suspended_; }
   bool SuspendedEmpty() const { return suspended_.empty(); }
 
@@ -130,5 +129,4 @@ class WorkingSet {
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine

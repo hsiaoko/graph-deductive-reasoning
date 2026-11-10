@@ -5,8 +5,7 @@
 #include "gar/engine/agent/executor.h"  // AgentContext
 #include "rule_support.h"
 
-namespace gar {
-namespace engine {
+namespace gar::core::engine {
 namespace agent {
 namespace deduce {
 
@@ -14,7 +13,7 @@ namespace {
 
 // Vertices covered by at least one edge of `edges` stay connected after
 // dropping edge `drop`? BFS over the remaining edges.
-bool ConnectedWithout(const graph::PatternSpec& spec, std::size_t drop,
+bool ConnectedWithout(const gar::core::graph::PatternSpec& spec, std::size_t drop,
                       std::vector<char>* covered) {
   covered->assign(spec.num_vertices, 0);
   std::vector<std::vector<std::uint32_t>> adj(spec.num_vertices);
@@ -56,14 +55,14 @@ bool ConnectedWithout(const graph::PatternSpec& spec, std::size_t drop,
 bool SlotDerivable(std::uint32_t slot, const GARule& rule,
                    const AgentContext& ctx) {
   const std::uint32_t id =
-      ctx.table->Find(analysis::LabelNameOf(slot, rule));
-  return id != analysis::kInvalidPredicate && ctx.dg->InDegree(id) > 0;
+      ctx.table->Find(gar::core::analysis::LabelNameOf(slot, rule));
+  return id != gar::core::analysis::kInvalidPredicate && ctx.dg->InDegree(id) > 0;
 }
 
 }  // namespace
 
 bool BuildRulePlan(const GARule& rule, std::uint32_t rule_idx,
-                   const AgentContext& ctx, const graph::TripleGraph& g,
+                   const AgentContext& ctx, const gar::core::graph::TripleGraph& g,
                    RulePlan* out) {
   RuleHead head;
   if (!RuleSupported(rule, &head)) return false;
@@ -116,5 +115,4 @@ std::vector<std::uint32_t> ExpandPartial(const DeferrableEdge& de,
 
 }  // namespace deduce
 }  // namespace agent
-}  // namespace engine
-}  // namespace gar
+}  // namespace gar::core::engine
