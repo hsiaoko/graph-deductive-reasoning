@@ -10,6 +10,9 @@
 #include "gar/graph/pattern_matcher.h"
 #include "gar/graph/predicate_evaluator.h"
 
+#include "core/data_structures/gar_graph_arrays.h"
+#include "core/task/cpu_task/hom_match.cuh"
+
 #if defined(GAR_ENGINE_DEDUCTION_HAS_TBB)
 #include <tbb/blocked_range.h>
 #include <tbb/global_control.h>
@@ -40,7 +43,8 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
         tbb::global_control::max_allowed_parallelism, cfg.threads);
   }
 #endif
-  const graph::PatternMatcher matcher(g_);
+  namespace mg = sics::matrixgraph::core;
+  namespace mg_cpu = sics::matrixgraph::core::task::cpu_task;
   ChaseResult result;
   result.rules.resize(rules.size());
   result.matches.resize(rules.size());
@@ -118,6 +122,28 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
     const auto round_t0 = std::chrono::steady_clock::now();
     std::vector<std::vector<graph::DerivedEdge>> contribs(rules.size());
 
+    // Rebuild the matching index from the current graph (a read-only
+    // snapshot shared by this round's parallel rule processing). HomMatchIndex
+    // materializes the inverse slots itself from the base-labeled flat edges.
+    std::vector<std::uint32_t> gv_id, ge_src, ge_dst, ge_id;
+    std::vector<std::int32_t> ge_label;
+    gv_id.reserve(g_.num_entities());
+    for (std::uint32_t i = 0; i < g_.num_entities(); ++i) gv_id.push_back(i);
+    for (std::uint32_t slot = 0; slot < g_.num_relations(); ++slot) {
+      for (auto p : g_.RelationPairs(slot)) {
+        ge_src.push_back(static_cast<std::uint32_t>(p >> 32));
+        ge_dst.push_back(static_cast<std::uint32_t>(p));
+        ge_id.push_back(static_cast<std::uint32_t>(ge_id.size()));
+        ge_label.push_back(static_cast<std::int32_t>(slot));
+      }
+    }
+    mg::data_structures::GARGraphArrays gg{
+        gv_id.data(), nullptr, static_cast<int>(gv_id.size()), ge_src.data(),
+        ge_dst.data(), ge_id.data(), ge_label.data(),
+        static_cast<int>(ge_src.size())};
+    const mg_cpu::HomMatchIndex idx(gg, static_cast<int>(g_.num_relations()));
+    const mg_cpu::HomMatcher hom;
+
     auto process_rule = [&](std::size_t i) {
       if (pp[i].skip) return;
       const GARule& r = rules[i];
@@ -126,9 +152,20 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
 
       std::vector<std::uint32_t> embs;
       bool capped = false;
+      std::vector<std::int32_t> pe_src, pe_dst, pe_label;
+      pe_src.reserve(pp[i].spec.edges.size());
+      pe_dst.reserve(pp[i].spec.edges.size());
+      pe_label.reserve(pp[i].spec.edges.size());
+      for (const auto& e : pp[i].spec.edges) {
+        pe_src.push_back(static_cast<std::int32_t>(e[0]));
+        pe_dst.push_back(static_cast<std::int32_t>(e[1]));
+        pe_label.push_back(static_cast<std::int32_t>(e[2]));
+      }
+      mg::data_structures::GARPatternArrays gp{
+          nullptr, static_cast<int>(pp[i].spec.num_vertices), pe_src.data(),
+          pe_dst.data(), pe_label.data(), static_cast<int>(pe_src.size())};
       const std::uint64_t n_emb =
-          matcher.Enumerate(pp[i].spec, cfg.max_matches_per_rule, &embs,
-                            &capped);
+          hom.Enumerate(idx, gp, cfg.max_matches_per_rule, &embs, &capped);
       if (capped) {
         st.match_capped = true;
         capped_out = true;
