@@ -42,6 +42,14 @@ struct GARule {
   // Pattern topology Q (dependency graph of pattern nodes).
   CSRTopology pattern;
 
+  // Flat edge list mirroring `pattern` (GARPatternArrays-compatible: int32
+  // src/dst/label), filled by the loader. Kept in CSR order (grouped by
+  // source vertex). This is the MatrixGraph-facing view; `pattern` (CSR)
+  // remains for the in-repo consumers until Phase 2 finishes the switch.
+  std::vector<std::int32_t> edge_src;
+  std::vector<std::int32_t> edge_dst;
+  std::vector<std::int32_t> edge_labels;
+
   // Per-node label constraints (size == pattern.num_vertices(),
   // kWildcardLabel for unconstrained).
   std::vector<LabelID> node_labels;
