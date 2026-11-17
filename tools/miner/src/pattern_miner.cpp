@@ -16,7 +16,7 @@ namespace gar::tools::miner {
 using gar::core::graph::PackPair;
 using gar::core::graph::PatternMatcher;
 using gar::core::graph::PatternSpec;
-using gar::core::graph::TripleGraph;
+using gar::core::graph::Graph;
 
 namespace {
 
@@ -92,7 +92,7 @@ void InsertCapped(std::unordered_set<std::uint64_t>* set, std::uint64_t value,
 
 // Head slots (base relations) between src -> dst, via the unified
 // out-adjacency. Appends each base slot found to *out.
-void SlotsBetween(const TripleGraph& g, std::uint32_t src, std::uint32_t dst,
+void SlotsBetween(const Graph& g, std::uint32_t src, std::uint32_t dst,
                   std::vector<std::uint32_t>* out) {
   out->clear();
   const auto [b, e] = g.OutEdgeRange(src);
@@ -151,7 +151,7 @@ std::uint32_t PivotPairs(std::uint32_t n, const std::vector<Edge>& edges,
 }
 
 // ---- evaluation: single edge (exact, mirrors ChainMiner len-1) ----
-EvalResult EvalSingleEdge(const TripleGraph& g, const PatternMinerConfig& cfg,
+EvalResult EvalSingleEdge(const Graph& g, const PatternMinerConfig& cfg,
                           std::uint32_t slot) {
   EvalResult res;
   auto& b01 = res.bodies[PairKey(0, 1)];
@@ -184,7 +184,7 @@ EvalResult EvalSingleEdge(const TripleGraph& g, const PatternMinerConfig& cfg,
 // The walk slots (t0,t1) along the path reproduce the chain (t0,t1) of
 // ChainMiner, including the iteration order and both caps, so capped counts
 // agree bit-for-bit.
-EvalResult EvalPath2(const TripleGraph& g, const PatternMinerConfig& cfg,
+EvalResult EvalPath2(const Graph& g, const PatternMinerConfig& cfg,
                      const std::vector<Edge>& edges) {
   const std::uint32_t R = g.num_relations();
   // Endpoints and walk slots from the lower-id endpoint.
@@ -289,7 +289,7 @@ join_done:;
 }
 
 // ---- evaluation: generic topology via PatternMatcher ----
-EvalResult EvalGeneric(const TripleGraph& g, const PatternMinerConfig& cfg,
+EvalResult EvalGeneric(const Graph& g, const PatternMinerConfig& cfg,
                        const PatternMatcher& matcher, std::uint32_t n,
                        const std::vector<Edge>& edges,
                        const std::vector<std::pair<std::uint32_t, std::uint32_t>>&
@@ -328,7 +328,7 @@ EvalResult EvalGeneric(const TripleGraph& g, const PatternMinerConfig& cfg,
 
 }  // namespace
 
-PatternMiner::PatternMiner(const TripleGraph& graph, PatternMinerConfig config)
+PatternMiner::PatternMiner(const Graph& graph, PatternMinerConfig config)
     : g_(graph), cfg_(std::move(config)) {}
 
 std::vector<GARule> PatternMiner::Mine() {

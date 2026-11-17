@@ -1,4 +1,4 @@
-#include "gar/hdc/value_kernels.h"
+#include "gar/core/hdc/value_kernels.h"
 
 #if defined(__AVX2__) || defined(__AVX512F__)
 #include <immintrin.h>

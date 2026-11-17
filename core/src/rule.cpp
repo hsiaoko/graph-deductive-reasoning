@@ -1,4 +1,4 @@
-#include "gar/rule.h"
+#include "gar/core/rule.h"
 
 #include <stdexcept>
 

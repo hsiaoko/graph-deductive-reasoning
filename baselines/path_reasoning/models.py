@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple
 
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from .graph import GraphTensors
 from .layers import GeneralizedRelationalConv
@@ -18,17 +19,20 @@ class NBFNet(nn.Module):
     def __init__(self, num_relations: int, dim: int = 32,
                  num_layers: int = 6, message: str = "distmult",
                  aggregate: str = "pna", short_cut: bool = True,
-                 layer_norm: bool = True, dependent: bool = True):
+                 layer_norm: bool = True, dependent: bool = True,
+                 gradient_checkpointing: bool = False):
         super().__init__()
         self.num_base_relations = num_relations
         self.dim = dim
         self.num_layers = num_layers
         self.short_cut = short_cut
+        self.gradient_checkpointing = gradient_checkpointing
         self.model_config = {
             "num_relations": num_relations, "dim": dim,
             "num_layers": num_layers, "message": message,
             "aggregate": aggregate, "short_cut": short_cut,
             "layer_norm": layer_norm, "dependent": dependent,
+            "gradient_checkpointing": gradient_checkpointing,
         }
         self.query = nn.Embedding(2 * num_relations, dim)
         self.layers = nn.ModuleList([
@@ -49,7 +53,11 @@ class NBFNet(nn.Module):
         hidden = boundary
         self.last_num_messages = []
         for layer in self.layers:
-            update = layer(hidden, boundary, query, graph)
+            if self.gradient_checkpointing and self.training:
+                update = checkpoint(layer, hidden, boundary, query, graph,
+                                    use_reentrant=False)
+            else:
+                update = layer(hidden, boundary, query, graph)
             if self.short_cut:
                 update = update + hidden
             hidden = update
@@ -63,9 +71,11 @@ class AStarNet(NBFNet):
                  num_layers: int = 6, message: str = "distmult",
                  aggregate: str = "pna", short_cut: bool = True,
                  layer_norm: bool = True, dependent: bool = True,
-                 node_ratio: float = 0.1, degree_ratio: float = 1.0):
+                 node_ratio: float = 0.1, degree_ratio: float = 1.0,
+                 gradient_checkpointing: bool = False):
         super().__init__(num_relations, dim, num_layers, message, aggregate,
-                         short_cut, layer_norm, dependent)
+                         short_cut, layer_norm, dependent,
+                         gradient_checkpointing)
         if not 0.0 <= node_ratio <= 1.0 or degree_ratio < 0.0:
             raise ValueError("invalid A*Net node/degree ratio")
         self.node_ratio = node_ratio

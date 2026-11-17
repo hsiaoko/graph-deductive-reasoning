@@ -79,12 +79,16 @@ class KnowledgeGraph:
     def __init__(self, train: torch.Tensor, valid: torch.Tensor,
                  test: torch.Tensor, entity_to_id: Dict[str, int],
                  relation_to_id: Dict[str, int], observed: torch.Tensor = None,
-                 signed_train: torch.Tensor = None):
+                 signed_train: torch.Tensor = None, test_group_ids = None,
+                 test_centers = None, test_labels = None):
         self.train = train.long()
         self.valid = valid.long()
         self.test = test.long()
         self.observed = None if observed is None else observed.long()
         self.signed_train = None if signed_train is None else signed_train.long()
+        self.test_group_ids = test_group_ids
+        self.test_centers = test_centers
+        self.test_labels = test_labels
         self.entity_to_id = entity_to_id
         self.relation_to_id = relation_to_id
         self.num_nodes = len(entity_to_id)
@@ -104,6 +108,9 @@ class KnowledgeGraph:
         names = (("observed",) if (root / "observed.txt").exists() else ()) + \
                 ("train", "valid", "test")
         tensors = {}
+        test_group_ids = None
+        test_centers = None
+        test_labels = None
         for name in names:
             file_path = root / f"{name}.txt"
             if name == "valid" and not file_path.exists():
@@ -112,11 +119,23 @@ class KnowledgeGraph:
             rows: List[Tuple[int, int, int]] = []
             signed_rows: List[Tuple[int, int, int, int]] = []
             labels = []
+            group_ids = []
+            centers = []
+            candidate_labels = []
             with file_path.open() as stream:
                 for line_no, line in enumerate(stream, 1):
+                    if not line or line.startswith("#"):
+                        continue
                     fields = line.rstrip("\n").split("\t")
-                    if len(fields) not in (3, 4) or (len(fields) == 4 and name != "train"):
-                        raise ValueError(f"{name}.txt:{line_no}: expected h\\tr\\tt")
+                    if len(fields) not in (3, 4, 6) or \
+                            (len(fields) == 4 and name != "train") or \
+                            (len(fields) == 6 and name != "test"):
+                        raise ValueError(f"{name}.txt:{line_no}: unsupported row format")
+                    if len(fields) == 6:
+                        group_ids.append(int(fields[0]))
+                        centers.append(int(fields[1]))
+                        candidate_labels.append(int(fields[5]))
+                        fields = fields[2:5]
                     h, r, t = fields[:3]
                     h_id = entity_to_id.setdefault(h, len(entity_to_id))
                     r_id = relation_to_id.setdefault(r, len(relation_to_id))
@@ -139,9 +158,14 @@ class KnowledgeGraph:
             if signed_rows:
                 tensors["signed_train"] = torch.tensor(
                     signed_rows, dtype=torch.long).reshape(-1, 4)
+            if name == "test" and group_ids:
+                test_group_ids = group_ids
+                test_centers = centers
+                test_labels = candidate_labels
         return cls(tensors["train"], tensors["valid"], tensors["test"],
                    entity_to_id, relation_to_id, tensors.get("observed"),
-                   tensors.get("signed_train"))
+                   tensors.get("signed_train"), test_group_ids, test_centers,
+                   test_labels)
 
     def split(self, name: str) -> torch.Tensor:
         if name not in ("train", "valid", "test"):
@@ -168,7 +192,10 @@ class KnowledgeGraph:
         known: Dict[Tuple[int, int], set] = {}
         r = self.num_base_relations
         for triples in splits:
-            for h, rel, t in triples.tolist():
+            for index, (h, rel, t) in enumerate(triples.tolist()):
+                if triples is self.test and self.test_labels is not None and \
+                        self.test_labels[index] == 0:
+                    continue
                 known.setdefault((h, rel), set()).add(t)
                 known.setdefault((t, rel + r), set()).add(h)
         self._known[key] = known

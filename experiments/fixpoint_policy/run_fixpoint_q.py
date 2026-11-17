@@ -123,8 +123,8 @@ def evaluate():
         goals = list(csv.DictReader(stream, delimiter="\t"))
     for goal in goals:
         for arm, policy, model in (("det", "deterministic", None),
-                                   ("q_numeric", "q-numeric", WORK / "models/q_numeric.meta"),
-                                   ("q_hdc", "q-hdc", WORK / "models/q_hdc.meta")):
+                                   ("q_numeric", "learned", WORK / "models/q_numeric.meta"),
+                                   ("q_hdc", "learned", WORK / "models/q_hdc.meta")):
             name = f"{goal['goal_id']}/{arm}"
             command = agent_command(goal, WORK / "runs" / name) + ["--policy", policy]
             if model is not None:

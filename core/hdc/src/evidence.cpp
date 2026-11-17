@@ -1,4 +1,4 @@
-#include "gar/hdc/evidence.h"
+#include "gar/core/hdc/evidence.h"
 
 #include <algorithm>
 #include <cmath>

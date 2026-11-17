@@ -13,7 +13,7 @@
 //                    [--min-body-edges 1] [--pair-cap 4000000] [--match-cap 2000000]
 //                    [--dataset ROOT_PATH] [--print 20]
 //
-// --graph reads the TripleGraph binary layout (tools/prepare_triples.py);
+// --graph reads the Graph binary layout (tools/prepare_triples.py);
 // --csr reads a MatrixGraph ImmutableCSR directory with edge_attr and dict
 // (kg_loader convert), which is the canonical format for downstream
 // MatrixGraph computation. The graph is always loaded with inverse
@@ -23,9 +23,9 @@
 #include <iostream>
 #include <string>
 
-#include "gar/bridge/graph_loader.h"
+#include "gar/core/graph/graph_loader.h"
 #include "gar/miner/pattern_miner.h"
-#include "gar/rule_store.h"
+#include "gar/core/rule_store.h"
 
 namespace {
 
@@ -86,11 +86,11 @@ Args ParseArgs(int argc, char** argv) {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::core::graph::TripleGraph g =
+    gar::core::graph::Graph g =
         args.graph_dir.empty()
-            ? gar::core::bridge::LoadTripleGraph(args.csr_dir,
+            ? gar::core::graph::LoadGraph(args.csr_dir,
                                            /*with_inverses=*/true)
-            : gar::core::graph::TripleGraph::Load(args.graph_dir,
+            : gar::core::graph::Graph::Load(args.graph_dir,
                                             /*with_inverses=*/true);
     std::cerr << "[mine_graph_rules] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()

@@ -6,10 +6,10 @@
 
 #include <cstdint>
 
-#include "gar/analysis/dependency_graph.h"
-#include "gar/analysis/predicate_table.h"
-#include "gar/engine/agent/executor.h"
-#include "gar/graph/predicate_evaluator.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/analysis/predicate_table.h"
+#include "gar/core/agent/executor.h"
+#include "gar/core/graph/predicate_evaluator.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -43,8 +43,8 @@ inline bool IsDynamicPredicate(const gar::Predicate& pred,
 
 inline FailureInfo ClassifyFailure(const gar::GARule& rule,
                                    const std::uint32_t* emb,
-                                   const gar::core::graph::VertexAttrs* attrs,
-                                   const gar::core::graph::TripleGraph& g,
+                                   const gar::core::graph::VertexAttributes* attrs,
+                                   const gar::core::graph::Graph& g,
                                    const AgentContext& ctx) {
   FailureInfo fi;
   fi.fail_idx = rule.antecedent.size();

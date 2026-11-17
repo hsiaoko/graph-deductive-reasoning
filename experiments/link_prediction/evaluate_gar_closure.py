@@ -39,11 +39,14 @@ def main():
                                             "confidence-per-round"),
                         default="first-proof-confidence")
     parser.add_argument("--limit-eval", type=int)
+    parser.add_argument("--allow-partial", action="store_true",
+                        help="Explicitly evaluate a capped/partial closure")
     args = parser.parse_args()
 
     chase_summary_path = args.closure.parent / "summary.yaml"
     chase_summary = yaml.safe_load(chase_summary_path.read_text())
-    if chase_summary.get("fixpoint") is not True:
+    closure_complete = chase_summary.get("fixpoint") is True
+    if not closure_complete and not args.allow_partial:
         raise RuntimeError("full ranking requires a complete, uncapped chase closure")
 
     confidence = {}
@@ -129,6 +132,8 @@ def main():
                 writer.writerow([direction, h, r, t, f"{score:.17g}", rank, count])
     result = {"score": args.score, "queries": len(ranks),
               "closure_rows": num_rows, "nodes": num_nodes,
+              "closure_complete": closure_complete,
+              "data_status": "complete_closure" if closure_complete else "capped_partial_closure",
               "target_coverage": covered / len(ranks),
               "evaluation_wall_sec": time.monotonic() - started,
               **metrics(ranks)}

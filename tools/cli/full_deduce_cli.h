@@ -2,7 +2,7 @@
 
 // Shared full-closure deduction CLI for apps/gar_reason.cu and the legacy
 // deduce / deduce_gpu thin shells: argument parsing, input loading
-// (gar::core::bridge::LoadTripleGraph / gar::core::bridge::LoadVertexAttrs / RuleLoader) and the
+// (gar::core::graph::LoadGraph / gar::core::graph::LoadVertexAttributes / RuleLoader) and the
 // summary/closure/matches reporting. All three apps go through this header
 // so their logs and output layout stay byte-identical.
 //
@@ -18,10 +18,10 @@
 #include <vector>
 
 #include "closure_output.h"
-#include "gar/bridge/graph_loader.h"
-#include "gar/bridge/vertex_attrs_loader.h"
-#include "gar/engine/deduction/deduction_engine.h"
-#include "gar/rule_loader.h"
+#include "gar/core/graph/graph_loader.h"
+#include "gar/core/graph/vertex_attrs_loader.h"
+#include "gar/core/chase/chase_engine.h"
+#include "gar/core/rule_loader.h"
 
 namespace gar_apps {
 
@@ -87,17 +87,17 @@ inline FullDeduceArgs ParseFullDeduceArgs(int argc, char** argv,
 }
 
 struct FullDeduceInputs {
-  gar::core::graph::TripleGraph graph;
+  gar::core::graph::Graph graph;
   std::vector<gar::GARule> rules;
   std::vector<std::string> rule_ids;
-  gar::core::graph::VertexAttrs attrs;
+  gar::core::graph::VertexAttributes attrs;
 };
 
 // Loads the graph (with inverse relations), the rule set and the vertex
 // attributes, logging with the "[<log_tag>] " prefix of the legacy apps.
 inline FullDeduceInputs LoadFullDeduceInputs(const FullDeduceArgs& args,
                                              const char* log_tag) {
-  FullDeduceInputs in{gar::core::bridge::LoadTripleGraph(args.csr_dir,
+  FullDeduceInputs in{gar::core::graph::LoadGraph(args.csr_dir,
                                                    /*with_inverses=*/true),
                       {}, {}, {}};
   std::cerr << "[" << log_tag << "] |V|=" << in.graph.num_entities()
@@ -119,7 +119,7 @@ inline FullDeduceInputs LoadFullDeduceInputs(const FullDeduceArgs& args,
   }
   std::cerr << "[" << log_tag << "] " << in.rules.size() << " rules\n";
 
-  in.attrs = gar::core::bridge::LoadVertexAttrs(args.csr_dir);
+  in.attrs = gar::core::graph::LoadVertexAttributes(args.csr_dir);
   std::cerr << "[" << log_tag << "] " << in.attrs.columns.size()
             << " numeric attribute columns\n";
   return in;

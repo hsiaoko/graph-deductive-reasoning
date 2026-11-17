@@ -1,4 +1,4 @@
-#include "gar/engine/agent/value_model.h"
+#include "gar/core/agent/value_model.h"
 
 #include <chrono>
 #include <cmath>
@@ -6,7 +6,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "gar/hdc/value_kernels.h"
+#include "gar/core/hdc/value_kernels.h"
 
 namespace gar::core::engine {
 namespace agent {

@@ -1,9 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(gar_apps LANGUAGES CXX)
 
-if (GAR_ENABLE_MATRIXGRAPH)
     add_executable(kg_loader kg_loader.cu)
-    target_link_libraries(kg_loader PRIVATE gar::core::bridge)
+    target_link_libraries(kg_loader PRIVATE gar::core::graph)
     # Same nvcc/GCC-12 workaround as MatrixGraph: AVX512/AMX intrinsics
     # headers break nvcc, disable them for CUDA compilation.
     target_compile_options(kg_loader PRIVATE
@@ -16,7 +15,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(match_pattern match_pattern.cu)
-    target_link_libraries(match_pattern PRIVATE gar::core::bridge)
+    target_link_libraries(match_pattern PRIVATE gar::core::graph)
     target_compile_options(match_pattern PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -27,7 +26,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(mine_predicates mine_predicates.cu)
-    target_link_libraries(mine_predicates PRIVATE gar::core::bridge)
+    target_link_libraries(mine_predicates PRIVATE gar::core::graph)
     target_compile_options(mine_predicates PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -38,7 +37,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(deduce deduce.cu)
-    target_link_libraries(deduce PRIVATE gar::core::bridge gar::core::engine::chase)
+    target_link_libraries(deduce PRIVATE gar::core::graph gar::core::engine::chase)
     target_compile_options(deduce PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -49,7 +48,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(deduce_gpu deduce_gpu.cu)
-    target_link_libraries(deduce_gpu PRIVATE gar::core::bridge gar::core::engine::chase)
+    target_link_libraries(deduce_gpu PRIVATE gar::core::graph gar::core::engine::chase)
     target_compile_options(deduce_gpu PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -60,7 +59,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(validate_rules validate_rules.cu)
-    target_link_libraries(validate_rules PRIVATE gar::core::bridge)
+    target_link_libraries(validate_rules PRIVATE gar::core::graph)
     target_compile_options(validate_rules PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -71,7 +70,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
     )
 
     add_executable(gar_reason gar_reason.cu)
-    target_link_libraries(gar_reason PRIVATE gar::core::bridge gar::core::engine::chase gar::core::engine::agent)
+    target_link_libraries(gar_reason PRIVATE gar::core::graph gar::core::engine::chase gar::core::engine::agent)
     target_compile_options(gar_reason PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
     )
@@ -83,7 +82,7 @@ if (GAR_ENABLE_MATRIXGRAPH)
 
     add_executable(gar_analyze gar_analyze.cu)
     target_link_libraries(gar_analyze PRIVATE
-        gar::core::bridge gar::core::engine::chase gar::core::engine::agent gar::core::analysis
+        gar::core::graph gar::core::engine::chase gar::core::engine::agent gar::core::analysis
     )
     target_compile_options(gar_analyze PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mno-avx512f,-mno-avx512bf16,-mno-amx-tile>
@@ -93,4 +92,3 @@ if (GAR_ENABLE_MATRIXGRAPH)
         POSITION_INDEPENDENT_CODE ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
-endif ()

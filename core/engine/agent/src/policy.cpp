@@ -1,10 +1,11 @@
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 
-#include "gar/engine/agent/policy.h"
+#include "gar/core/agent/policy.h"
 
-#include "gar/analysis/predicate_table.h"
-#include "gar/engine/agent/value_model.h"
+#include "gar/core/analysis/predicate_table.h"
+#include "gar/core/agent/value_model.h"
 
 #include <stdexcept>
 
@@ -17,6 +18,26 @@ std::string FormatDouble(double v, int digits = 3) {
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%.*f", digits, v);
   return buf;
+}
+
+// A pre-match upper-level cost signal: the first edge contributes its full
+// cardinality, while subsequent edges contribute average degree. It is used
+// only for gating and ordering, never as a logical satisfiability proof.
+double EstimateStarCost(const GARule& rule,
+                        const gar::core::graph::Graph& graph) {
+  if (rule.num_edges() == 0) return 0.0;
+  double log_estimate = 0.0;
+  const double log_vertices =
+      std::log(static_cast<double>(std::max(1u, graph.num_entities())));
+  for (std::size_t i = 0; i < rule.num_edges(); ++i) {
+    const auto cardinality = static_cast<double>(std::max<std::size_t>(
+        1, graph.RelationPairSet(rule.edge_labels[i]).size()));
+    const double contribution = i == 0
+        ? std::log(cardinality)
+        : std::max(0.0, std::log(cardinality) - log_vertices);
+    log_estimate += contribution;
+  }
+  return std::exp(std::min(log_estimate, 50.0));
 }
 
 }  // namespace
@@ -167,6 +188,176 @@ std::optional<std::size_t> JevPolicy::Select(
     if (pick < acc) return admissible[i];
   }
   return admissible.back();
+}
+
+const std::vector<double>& LlmStarGuide::Preferences(
+    const std::vector<std::uint32_t>& eligible) {
+  if (initialized_) return preferences_;
+  initialized_ = true;
+  preferences_.assign(rules_->size(), 0.0);
+  auto fallback = [&](const std::string& reason) {
+    ++fallbacks_;
+    active_ = false;
+    std::fill(preferences_.begin(), preferences_.end(), 0.0);
+    if (!warned_) {
+      std::fprintf(stderr, "[guide] fallback: %s\n", reason.c_str());
+      warned_ = true;
+    }
+  };
+
+  std::vector<std::string> options;
+  std::vector<std::string> criteria;
+  std::vector<std::uint32_t> rule_indices;
+  const std::uint32_t goal_pred =
+      dg_->table().Find(g_->RelationName(goal_->slot));
+  const auto distances = goal_pred != gar::core::analysis::kInvalidPredicate
+                             ? dg_->DistancesTo(goal_pred)
+                             : std::vector<std::uint32_t>{};
+  for (const std::uint32_t rule_index : eligible) {
+    if (rule_index >= rules_->size()) continue;
+    const GARule& rule = (*rules_)[rule_index];
+    const std::string id = rule_ids_ && rule_index < rule_ids_->size()
+                               ? (*rule_ids_)[rule_index]
+                               : "r" + std::to_string(rule_index);
+    const std::uint32_t p0 = dg_->table().Find(
+        gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
+    const std::uint32_t distance =
+        p0 < distances.size() ? distances[p0]
+                              : gar::core::analysis::kUnreachable;
+    if (distance == gar::core::analysis::kUnreachable) continue;
+    ++reachable_;
+    estimated_cost_ += EstimateStarCost(rule, *g_);
+    if (options.size() >= max_options_) continue;
+    std::string criterion = "rule " + id + ": " + rule.name +
+                            "\nconfidence=" +
+                            FormatDouble(rule.quality.confidence) +
+                            " d=" + std::to_string(distance) +
+                            " guide_score: " +
+                            FormatDouble(rule.quality.confidence, 6);
+    if (!rule.description.empty()) {
+      criterion += "\ndescription: " + rule.description;
+    }
+    if (p0 < distances.size() &&
+        goal_pred != gar::core::analysis::kInvalidPredicate) {
+      criterion += "\npath: " + dg_->RenderPath(p0, goal_pred, rule_ids_);
+    }
+    options.push_back(std::to_string(rule_index));
+    criteria.push_back(std::move(criterion));
+    rule_indices.push_back(rule_index);
+  }
+  options_ = options.size();
+  if (options.empty()) return preferences_;
+  active_ = estimated_cost_ >= min_estimated_cost_;
+  if (!active_) return preferences_;
+
+  const std::string state =
+      "goal: " + g_->RelationName(goal_->slot) + "(" +
+      (goal_->args[0] ? g_->EntityName(*goal_->args[0]) : "_") + "," +
+      (goal_->args[1] ? g_->EntityName(*goal_->args[1]) : "_") + ")\n" +
+      "graph vertices: " + std::to_string(g_->num_entities()) +
+      " edges: " + std::to_string(g_->num_edges()) + "\n" +
+      "This is the only guide request for this goal.";
+  const std::string instructions =
+      "Rank the rule stars by how promising their consequents and dependency "
+      "paths are for the goal. Return a preference for every option. Do not "
+      "invent facts or rules; exact deduction is performed separately.";
+
+  LlmChoiceResult result;
+  const auto started = std::chrono::steady_clock::now();
+  try {
+    result = client_->Choice(state, instructions, options, criteria);
+    wall_ms_ += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started)
+                    .count();
+    ++calls_;
+  } catch (const std::exception& e) {
+    wall_ms_ += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started)
+                    .count();
+    ++calls_;
+    fallback(e.what());
+    return preferences_;
+  }
+  if (result.probabilities.size() != options.size()) {
+    fallback("probabilities/options size mismatch");
+    return preferences_;
+  }
+  double best = 0.0;
+  for (std::size_t i = 0; i < options.size(); ++i) {
+    const double p = result.probabilities[i];
+    if (!std::isfinite(p) || p < 0.0) {
+      fallback("invalid rule preference");
+      return preferences_;
+    }
+    preferences_[rule_indices[i]] = p;
+    best = std::max(best, p);
+  }
+  if (best == 0.0) {
+    for (std::size_t i = 0; i < options.size(); ++i) {
+      if (result.choice == options[i]) {
+        preferences_[rule_indices[i]] = 1.0;
+        best = 1.0;
+        break;
+      }
+    }
+  }
+  if (best == 0.0) {
+    fallback("degenerate (all-zero) rule preferences");
+    return preferences_;
+  }
+  for (const std::uint32_t rule_index : rule_indices) {
+    preferences_[rule_index] /= best;
+  }
+  return preferences_;
+}
+
+AdaptivePolicy::AdaptivePolicy(std::unique_ptr<Policy> fallback,
+                               std::unique_ptr<Policy> guided)
+    : fallback_(std::move(fallback)), guided_(std::move(guided)) {}
+
+Policy& AdaptivePolicy::Current() {
+  return guide_ != nullptr && guide_->active() ? *guided_ : *fallback_;
+}
+
+const Policy& AdaptivePolicy::Current() const {
+  return guide_ != nullptr && guide_->active() ? *guided_ : *fallback_;
+}
+
+bool AdaptivePolicy::RequiresAdmissible() const {
+  return Current().RequiresAdmissible();
+}
+
+double AdaptivePolicy::SelectionPriority(std::uint64_t action_id, double total) {
+  return Current().SelectionPriority(action_id, total);
+}
+
+double AdaptivePolicy::SelectionPriorityWithFeatures(
+    std::uint64_t action_id, double total,
+    const std::array<double, 11>& features) {
+  return Current().SelectionPriorityWithFeatures(action_id, total, features);
+}
+
+void AdaptivePolicy::ReleaseSelectionPriority(std::uint64_t action_id) {
+  Current().ReleaseSelectionPriority(action_id);
+}
+
+std::optional<std::size_t> AdaptivePolicy::Select(
+    const std::vector<ScoredMotif>& cands) {
+  return Current().Select(cands);
+}
+
+std::optional<std::size_t> AdaptivePolicy::SelectScores(
+    const std::vector<double>& totals, const std::vector<char>& admissible) {
+  return Current().SelectScores(totals, admissible);
+}
+
+std::optional<std::size_t> AdaptivePolicy::SelectRule(
+    const std::vector<ScoredRule>& rules) {
+  return Current().SelectRule(rules);
+}
+
+void AdaptivePolicy::OnApplication(const Motif& mu, bool success, double cost) {
+  Current().OnApplication(mu, success, cost);
 }
 
 }  // namespace agent

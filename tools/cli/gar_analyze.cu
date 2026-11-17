@@ -39,11 +39,11 @@
 #include "agent_mode.h"
 #include "closure_output.h"
 #include "full_deduce_cli.h"
-#include "gar/analysis/dependency_graph.h"
-#include "gar/analysis/goal_sampler.h"
-#include "gar/analysis/rule_stats.h"
-#include "gar/engine/deduction/cpu_chase_engine.h"
-#include "gar/engine/deduction/gpu_deduce_engine.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/analysis/goal_sampler.h"
+#include "gar/core/analysis/rule_stats.h"
+#include "gar/core/chase/cpu_chase_engine.h"
+#include "gar/core/chase/gpu_chase_engine.h"
 
 namespace {
 
@@ -182,7 +182,7 @@ std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
             << ", sampled candidates: " << cands.size() << "\n";
 
   // Hold out every candidate (base + inverse mirror) at once.
-  gar::core::graph::TripleGraph g_held = in.graph;  // clone (vector memcpy)
+  gar::core::graph::Graph g_held = in.graph;  // clone (vector memcpy)
   std::unordered_map<std::uint32_t,
                      std::vector<std::pair<std::uint32_t, std::uint32_t>>>
       by_slot;
@@ -608,10 +608,10 @@ void WriteVerifyReport(const std::string& path, const TextGoal& goal,
 VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
                        const gar_apps::AgentModeArgs& agent_args,
                        const agent::Goal& goal,
-                       gar::core::graph::TripleGraph* g_base,
+                       gar::core::graph::Graph* g_base,
                        const std::vector<gar::GARule>& rules,
                        const std::vector<std::string>& rule_ids,
-                       const gar::core::graph::VertexAttrs* attrs,
+                       const gar::core::graph::VertexAttributes* attrs,
                        const gar::core::analysis::DependencyGraph& dg,
                        const std::vector<std::uint32_t>& depths,
                        bool with_gpu, agent::AgentResult* agent_out,
@@ -620,7 +620,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   v.budget = agent_args.budget;
 
   // Hold out the goal edge: Γ0 = G \ {g}.
-  gar::core::graph::TripleGraph g0 = *g_base;
+  gar::core::graph::Graph g0 = *g_base;
   if (goal.args[0] && goal.args[1]) {
     g0.RemoveEdgesBatch(
         {{goal.slot, {{*goal.args[0], *goal.args[1]}}}});
@@ -629,12 +629,13 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   // agent on a clone (greedy mutates; bnb clones internally — either way
   // the base stays untouched)
   {
-    gar::core::graph::TripleGraph g_agent = g0;
+    gar::core::graph::Graph g_agent = g0;
     agent::ReasoningAgent rag = gar_apps::MakeReasoningAgent(
         agent_args, &dg, &goal, &g0, &rules, &rule_ids);
     agent::AgentState state(g_agent, attrs, rules);
     agent::ExecConfig ec;
     ec.budget = agent_args.budget;
+    ec.engine = agent_args.engine;
     ec.match_cap_per_rule = agent_args.max_candidates_per_rule;
     ec.utility_gamma = agent_args.score.gamma;
     ec.wall_limit_sec = agent_args.wall_limit_sec;
@@ -649,10 +650,10 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   // cpu closure on a clone
   deduction::ChaseConfig cfg = chase_cfg;
   cfg.keep_matches = false;
-  gar::core::graph::TripleGraph g_cpu = g0;
+  gar::core::graph::Graph g_cpu = g0;
   deduction::CpuChaseEngine cpu_engine(g_cpu, attrs);
   const auto cpu_res = cpu_engine.Run(rules, cfg);
-  auto contains_goal = [](const gar::core::graph::TripleGraph& g,
+  auto contains_goal = [](const gar::core::graph::Graph& g,
                           const auto& derived, const agent::Goal& gl) {
     if (gl.args[0] && gl.args[1] &&
         g.RelationPairSet(gl.slot)
@@ -678,8 +679,8 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
 
   if (with_gpu) {
     v.has_gpu = true;
-    gar::core::graph::TripleGraph g_gpu = g0;
-    deduction::GpuDeduceEngine gpu_engine(g_gpu, attrs);
+    gar::core::graph::Graph g_gpu = g0;
+    deduction::GpuChaseEngine gpu_engine(g_gpu, attrs);
     const auto gpu_res = gpu_engine.Run(rules, cfg);
     v.goal_in_gpu = contains_goal(g_gpu, gpu_res.derived, goal);
   }
@@ -703,7 +704,7 @@ int CmdVerifyRun(const VerifyArgs& a) {
   const agent::Goal goal =
       gar_apps::ParseGoalSpec(a.agent.goal_spec, in.graph);
   agent::AgentResult agent_res;
-  const gar::core::graph::VertexAttrs* attrs =
+  const gar::core::graph::VertexAttributes* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
   const VerdictInput v =
       VerifyOne(a.io, a.agent, goal, &in.graph, in.rules, in.rule_ids, attrs, dg, depths,
@@ -762,7 +763,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
   dg.Build(in.rules, &table);
   const auto anchors = gar::core::analysis::BaseAnchoredPredicates(dg, in.graph);
   const auto depths = dg.DerivationDepths(anchors);
-  const gar::core::graph::VertexAttrs* attrs =
+  const gar::core::graph::VertexAttributes* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
 
   std::ifstream tf(a.tasks_path);
@@ -776,10 +777,10 @@ int CmdVerifyTasks(const VerifyArgs& a) {
   // Shared-closure state for the no-op hold-out fast path and for
   // --shared-holdout (see loop).
   bool shared_closure_ready = false;
-  std::optional<gar::core::graph::TripleGraph> shared_g_cpu, shared_g_gpu;
+  std::optional<gar::core::graph::Graph> shared_g_cpu, shared_g_gpu;
   std::optional<deduction::ChaseResult> shared_cpu_res, shared_gpu_res;
   // --shared-holdout: Γ0 = G minus ALL task goal edges (base ones), once.
-  gar::core::graph::TripleGraph g0_shared = in.graph;
+  gar::core::graph::Graph g0_shared = in.graph;
   if (a.shared_holdout) {
     std::unordered_map<std::uint32_t,
                        std::vector<std::pair<std::uint32_t, std::uint32_t>>>
@@ -859,14 +860,14 @@ int CmdVerifyTasks(const VerifyArgs& a) {
         shared_cpu_res = eng.Run(in.rules, cfg);
         if (a.gpu) {
           shared_g_gpu = a.shared_holdout ? g0_shared : in.graph;
-          deduction::GpuDeduceEngine geng(*shared_g_gpu, attrs);
+          deduction::GpuChaseEngine geng(*shared_g_gpu, attrs);
           shared_gpu_res = geng.Run(in.rules, cfg);
         }
         shared_closure_ready = true;
       }
       const auto a_t0 = std::chrono::steady_clock::now();
       {
-        gar::core::graph::TripleGraph g_agent =
+        gar::core::graph::Graph g_agent =
             a.shared_holdout ? g0_shared : in.graph;
         agent::ReasoningAgent rag =
             gar_apps::MakeReasoningAgent(task_args, &dg, &goal,
@@ -874,6 +875,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
         agent::AgentState state(g_agent, attrs, in.rules);
         agent::ExecConfig ec;
         ec.budget = task_args.budget;
+        ec.engine = task_args.engine;
         ec.match_cap_per_rule = task_args.max_candidates_per_rule;
         ec.utility_gamma = task_args.score.gamma;
         ec.wall_limit_sec = task_args.wall_limit_sec;

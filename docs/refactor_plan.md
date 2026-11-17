@@ -1,4 +1,4 @@
-# GARAgent 重构计划（2026-11-09 冻结）
+# GARAgent 重构计划（2026-11-09 冻结，2026-11-11 完成）
 
 本文是重构的单一事实源。所有决策、命名、架构约定与分阶段执行顺序在此冻结；
 执行中不再临时变更，变更需回到本文修订并注明日期。
@@ -46,13 +46,14 @@ third_party/MatrixGraph/       # 数据结构 + 基础图计算
 
 ### 1.3 数据结构
 
-- 图 G = MatrixGraph `ImmutableCSR`（删 `graph::TripleGraph`）。**G 固定不变
-  （immutable），派生事实不写回 G**；派生事实由 core 用可变事实集 Γ 维护
-  （带版本号，供动态失败重准入），匹配在 G∪Γ 上进行——MatrixGraph 的
-  `Match(pattern, G, Γ)` 把 Γ 作为增量边集合输入。
+- 基础图数组 = MatrixGraph `GARGraphArrays`；core 的 `Graph` 负责字典、
+  可变事实集 Γ、动态索引和版本号，不再保留旧 `TripleGraph`。MatrixGraph 的
+  `HomMatchIndex` 是静态索引，因此静态匹配交给 `HomMatcher`，动态 G∪Γ 匹配
+  由 core 的增量路径处理，避免每条派生事实都重建整图索引。
 - 模式拓扑 + label = MatrixGraph `GARPatternArrays`（删 `CSRTopology` 与
-  `bridge/pattern_bridge` 零拷贝转换）。
-- 属性 = MatrixGraph `Attribute`（删 `VertexAttrs`）。
+  `bridge/pattern_bridge` 零拷贝转换，`GARule::ToGARPatternArrays` 直接返回视图）。
+- 属性 = MatrixGraph `Attribute` / `AttributesIO::Storage`（删 `VertexAttrs` 和
+  `AttrColumn` 的自定义副本）。
 - X 谓词 / consequent p₀ / quality / pivot / 字典：MatrixGraph 无对应结构，
   留在 `core::rule`。
 - **逆槽位**：方案 A——物化双向边，`r^-1` 的 label = 基础 label + num_relations，
@@ -73,7 +74,7 @@ third_party/MatrixGraph/       # 数据结构 + 基础图计算
   （策略模式，接口 `Policy`/`Scorer` 下的实现）。
 - 删四个遗留 executor：`GreedyExecutor`/`BranchBoundExecutor`/`BackwardExecutor`/
   `BackwardBnBExecutor`，以及 `motif_generator.cpp`（bnb 专用）、`AgentResult::fwd_stats`。
-- 现 CLI 的 `--mode full` 改名 `--mode chase`。
+- 现 CLI 的 `--mode chase` 改名 `--mode chase`。
 
 ### 1.5 命名（对齐论文术语 + Google C++ Style）
 
@@ -142,9 +143,23 @@ Google style：类型/函数 PascalCase，变量 snake_case（类成员尾下划
 
 - **纯 CPU 开关废弃**：core 依赖 MatrixGraph（CUDA），`-DGAR_ENABLE_MATRIXGRAPH=OFF`
   不再支持（「尽可能用 MatrixGraph」的必然结果）。
-- **MatrixGraph 是 submodule**：改 MatrixGraph（加同态匹配）需提交到
-  `hsiaoko/MatrixGraph` 并更新 submodule 指针。
-- **实验失效**：现有实验（TripleGraph 输入）需在 Phase 4 后重跑锚点，不承诺
-  全矩阵复现。
+- **MatrixGraph 是 submodule**：本次只更新并使用上游最新代码，不修改其源码。
+- **实验兼容性**：历史实验产物仍可用于审计；新实验统一使用 `--mode chase` 和
+  `--policy learned`，旧 `q-hdc/q-numeric` 仅作为兼容别名保留。
 - **论文算法语义**：保留代码已落地的「通用 GAR 方案」，不倒退到「只在静态 G
   匹配一次」的旧伪代码。
+
+## 4. 完成记录（2026-11-11）
+
+- `TripleGraph`、`VertexAttrs`、`CSRTopology` 和 `core/bridge` 已删除；图数组、
+  模式数组和属性表直接使用 MatrixGraph 类型。
+- `Graph` 提供 `GARGraphArrays` 视图与版本号；静态匹配使用 MatrixGraph
+  `HomMatcher`，动态 G∪Γ 使用 core 增量匹配。
+- include 统一为 `gar/core/...`；命名空间保持 `gar::core`。
+- `engine/chase` 完成命名与目录统一：`ChaseEngine`、`CpuChaseEngine`、
+  `GpuChaseEngine`、`gar_engine_chase`。
+- CLI 主模式为 `--mode chase`；`--policy learned` 从模型文件自动识别
+  numeric/HDC。MatrixGraph/CUDA 为必需依赖，纯 CPU 开关已删除。
+- 全量构建通过；`mine_graph_rules`、`validate_rules`、CPU/GPU chase、
+  learned agent、`gar_analyze verify`、MatrixGraph pattern view 和 DBpedia 属性
+  谓词均通过回归。synth 上 agent 派生属于 chase 闭包，CPU/GPU 闭包集合一致。

@@ -1,4 +1,4 @@
-#include "gar/analysis/dependency_graph.h"
+#include "gar/core/analysis/dependency_graph.h"
 
 #include <algorithm>
 #include <cmath>
@@ -117,7 +117,7 @@ std::vector<std::uint32_t> DependencyGraph::DerivationDepths(
 }
 
 std::vector<char> BaseAnchoredPredicates(const DependencyGraph& dg,
-                                         const gar::core::graph::TripleGraph& g) {
+                                         const gar::core::graph::Graph& g) {
   // Name -> base relation id map, built once (the graph has no reverse
   // dictionary).
   std::unordered_map<std::string, std::uint32_t> rel_by_name;

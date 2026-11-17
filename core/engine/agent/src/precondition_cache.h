@@ -31,11 +31,11 @@
 #include <vector>
 
 #include "apply_helpers.h"  // IsDynamicPredicate
-#include "gar/engine/agent/fact.h"
-#include "gar/engine/agent/goal.h"
-#include "gar/graph/predicate_evaluator.h"
-#include "gar/graph/triple_graph.h"
-#include "gar/rule.h"
+#include "gar/core/agent/fact.h"
+#include "gar/core/agent/goal.h"
+#include "gar/core/graph/predicate_evaluator.h"
+#include "gar/core/graph/graph.h"
+#include "gar/core/rule.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -69,7 +69,7 @@ GroundPreconditionKey MakePreconditionKey(const gar::Predicate& pred,
 // (edge facts only: inverse slots normalize to base slot with swapped
 // endpoints) — used for Γ membership checks and W wait keys.
 bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
-                    const gar::core::graph::TripleGraph& g, Fact* out);
+                    const gar::core::graph::Graph& g, Fact* out);
 
 // Evaluate one grounded antecedent predicate (single-predicate
 // EvalAntecedent, same semantics as the chase's short-circuiting call —
@@ -77,8 +77,8 @@ bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
 PrecondState ClassifyPredicate(const gar::Predicate& pred,
                                const gar::GARule& rule,
                                const std::uint32_t* emb,
-                               const gar::core::graph::VertexAttrs* attrs,
-                               const gar::core::graph::TripleGraph& g,
+                               const gar::core::graph::VertexAttributes* attrs,
+                               const gar::core::graph::Graph& g,
                                const AgentContext& ctx);
 
 // H: the precondition cache.

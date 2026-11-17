@@ -80,7 +80,7 @@ GroundPreconditionKey MakePreconditionKey(const gar::Predicate& pred,
 }
 
 bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
-                    const gar::core::graph::TripleGraph& g, Fact* out) {
+                    const gar::core::graph::Graph& g, Fact* out) {
   if (pred.kind != gar::PredKind::kEdge) return false;
   const std::uint32_t u = emb[pred.src], v = emb[pred.dst];
   const std::uint32_t num_rel = g.num_relations();
@@ -95,8 +95,8 @@ bool GroundEdgeFact(const gar::Predicate& pred, const std::uint32_t* emb,
 PrecondState ClassifyPredicate(const gar::Predicate& pred,
                                const gar::GARule& rule,
                                const std::uint32_t* emb,
-                               const gar::core::graph::VertexAttrs* attrs,
-                               const gar::core::graph::TripleGraph& g,
+                               const gar::core::graph::VertexAttributes* attrs,
+                               const gar::core::graph::Graph& g,
                                const AgentContext& ctx) {
   const bool ok = gar::core::graph::EvalAntecedent({pred}, emb, attrs, g);
   const bool dyn = IsDynamicPredicate(pred, rule, ctx);

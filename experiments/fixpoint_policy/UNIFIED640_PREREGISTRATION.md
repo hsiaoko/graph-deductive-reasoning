@@ -20,8 +20,8 @@
 1. GoalChase：`--policy deterministic --scorer null`。
 2. Deterministic：`--policy deterministic --scorer exact`。
 3. Random：`--policy random --scorer exact`；在线 Gumbel-max 与 softmax(total/tau) 分布等价。
-4. Learned numeric-Q：`--policy q-numeric --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_numeric.meta`。
-5. Learned HDC-Q：`--policy q-hdc --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_hdc.meta --hdc-value-backend original`。为与已有 HDC 模型开销分析一致，本矩阵固定原始后端；bit-LUT 是另一个计算内核实验。
+4. Learned numeric-Q：`--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_numeric.meta`。
+5. Learned HDC-Q：`--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_hdc.meta --hdc-value-backend original`。为与已有 HDC 模型开销分析一致，本矩阵固定原始后端；bit-LUT 是另一个计算内核实验。
 
 所有臂共享 DG goal-relevance 过滤、候选生成、精确前提求值、事实派生、挂起/复活和 goal 提前停止。不重新选择规则、goal 或训练数据，不根据新结果替换模型。
 

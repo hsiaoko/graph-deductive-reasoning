@@ -11,15 +11,15 @@
 #include <string>
 #include <vector>
 
-#include "gar/engine/deduction/deduction_engine.h"
-#include "gar/graph/triple_graph.h"
+#include "gar/core/chase/chase_engine.h"
+#include "gar/core/graph/graph.h"
 
 namespace gar_apps {
 
 // closure_edges.tsv writer, shared by the full-closure apps and the agent
 // mode (identical layout: src \t relation \t dst \t round \t rule_id).
 inline void WriteClosureEdges(
-    const std::string& out_root, const gar::core::graph::TripleGraph& g,
+    const std::string& out_root, const gar::core::graph::Graph& g,
     const std::vector<std::string>& rule_ids,
     const std::vector<gar::core::graph::DerivedEdge>& derived) {
   std::ofstream f(out_root + "/closure_edges.tsv");
@@ -31,7 +31,7 @@ inline void WriteClosureEdges(
   }
 }
 
-inline void WriteClosureOutputs(const gar::core::graph::TripleGraph& g,
+inline void WriteClosureOutputs(const gar::core::graph::Graph& g,
                                 const std::vector<std::string>& rule_ids,
                                 const gar::core::engine::chase::ChaseResult& res,
                                 const std::string& out_root,

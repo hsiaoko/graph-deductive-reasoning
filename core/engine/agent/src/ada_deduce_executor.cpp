@@ -4,14 +4,14 @@
 // match on the initial graph only").
 //
 // The public executor only constructs a DeduceSession and runs it; every
-// mechanism lives in src-local fixpoint_*.{h,cpp}:
+// mechanism lives in src-local deduce/partial-match/working-set files:
 //   deduce_session      — one Run's state (R/W loops, scheduling)
 //   partial_matcher      — rule plans, deferrable dynamic edges, sub-specs
 //   working_set  — R (complete actions) / W (suspended)
 //   precondition_cache— per-predicate status + the H cache
 //   producer_tracker    — producer aliveness for safe pruning
 
-#include "gar/engine/agent/executor.h"
+#include "gar/core/agent/executor.h"
 
 #include "deduce_session.h"
 

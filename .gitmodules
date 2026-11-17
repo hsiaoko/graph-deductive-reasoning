@@ -1,3 +1,6 @@
 [submodule "third_party/MatrixGraph"]
 	path = third_party/MatrixGraph
 	url = https://github.com/hsiaoko/MatrixGraph
+[submodule "third_party/llm2jev"]
+	path = third_party/llm2jev
+	url = https://github.com/Yinsongxu/LLM2Jev.git

@@ -160,3 +160,70 @@ def evaluate(model: NBFNet, graph: GraphTensors, triples: torch.Tensor,
         "queries": len(ranks),
         "wall_sec": elapsed,
     }
+
+
+@torch.no_grad()
+def evaluate_grouped(model: NBFNet, graph: GraphTensors,
+                     triples: torch.Tensor, group_ids,
+                     labels, batch_size: int,
+                     limit_groups: Optional[int] = None) -> Dict[str, float]:
+    model.eval()
+    boundaries = []
+    start = 0
+    while start < len(group_ids):
+        end = start + 1
+        while end < len(group_ids) and group_ids[end] == group_ids[start]:
+            end += 1
+        boundaries.append((start, end))
+        start = end
+    if limit_groups is not None:
+        boundaries = boundaries[:limit_groups]
+    if not boundaries:
+        raise RuntimeError("no grouped test candidates")
+    ranks = []
+    auc_values = []
+    evaluated_candidates = 0
+    started = time.monotonic()
+    for batch_start in range(0, len(boundaries), batch_size):
+        batch = boundaries[batch_start:batch_start + batch_size]
+        sources, relations, candidates = [], [], []
+        for begin, end in batch:
+            group = triples[begin:end].to(graph.device)
+            head, relation, tail = group.unbind(-1)
+            if (head == head[0]).all():
+                sources.append(head[0])
+                relations.append(relation[0])
+                candidates.append(tail)
+            elif (tail == tail[0]).all():
+                sources.append(tail[0])
+                relations.append(relation[0] + graph.num_relations // 2)
+                candidates.append(head)
+            else:
+                raise RuntimeError("candidate group has mixed endpoints")
+        scores = model(graph, torch.stack(sources), torch.stack(relations))
+        for index, (begin, end) in enumerate(batch):
+            candidate_scores = scores[index, candidates[index]]
+            group_labels = labels[begin:end]
+            positive = group_labels.index(1)
+            positive_score = candidate_scores[positive]
+            rank = int((candidate_scores >= positive_score).sum())
+            ranks.append(rank)
+            negative_scores = torch.cat([
+                candidate_scores[:positive], candidate_scores[positive + 1:]])
+            wins = (negative_scores < positive_score).double().mean()
+            ties = (negative_scores == positive_score).double().mean()
+            auc_values.append(float(wins + 0.5 * ties))
+            evaluated_candidates += end - begin
+    ranking = torch.tensor(ranks, dtype=torch.float64)
+    return {
+        "mr": float(ranking.mean()),
+        "mrr": float((1.0 / ranking).mean()),
+        "hits@1": float((ranking <= 1).double().mean()),
+        "hits@3": float((ranking <= 3).double().mean()),
+        "hits@10": float((ranking <= 10).double().mean()),
+        "accuracy@1": float((ranking <= 1).double().mean()),
+        "auc": sum(auc_values) / len(auc_values),
+        "groups": len(ranks),
+        "candidates": evaluated_candidates,
+        "wall_sec": time.monotonic() - started,
+    }

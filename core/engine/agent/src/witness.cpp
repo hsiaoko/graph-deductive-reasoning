@@ -1,6 +1,6 @@
-#include "gar/engine/agent/witness.h"
+#include "gar/core/agent/witness.h"
 
-#include "gar/analysis/predicate_table.h"
+#include "gar/core/analysis/predicate_table.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -17,7 +17,7 @@ std::uint64_t Fnv1a64(const std::string& s) {
 
 }  // namespace
 
-WitnessLog::WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::TripleGraph* g,
+WitnessLog::WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::Graph* g,
                        const gar::core::analysis::PredicateTable* table, bool use_hdc)
     : hdc_ev_(hdc_dim),
       packed_cache_(hdc_dim),
@@ -25,7 +25,7 @@ WitnessLog::WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::TripleGrap
       table_(table),
       use_hdc_(use_hdc) {}
 
-std::uint64_t FactPredicateSymbol(const Fact& f, const gar::core::graph::TripleGraph& g,
+std::uint64_t FactPredicateSymbol(const Fact& f, const gar::core::graph::Graph& g,
                                   const gar::core::analysis::PredicateTable& table) {
   const std::string& name = f.kind == FactKind::kEdge
                                 ? g.RelationName(f.pred)

@@ -1,4 +1,4 @@
-#include "gar/graph/fact_merger.h"
+#include "gar/core/graph/fact_merger.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -14,7 +14,7 @@ namespace gar::core::graph {
 
 namespace {
 
-bool HasEdge(const TripleGraph& g, std::uint32_t s,
+bool HasEdge(const Graph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   // O(1) hash point query; always reflects the latest edges.
   return g.RelationPairSet(slot).count(PackPair(s, d)) != 0;
@@ -24,7 +24,7 @@ bool HasEdge(const TripleGraph& g, std::uint32_t s,
 
 RoundMerge MergeRoundFacts(
     const std::vector<std::vector<DerivedEdge>>& contribs,
-    std::uint64_t max_derivations, TripleGraph& g,
+    std::uint64_t max_derivations, Graph& g,
     std::vector<DerivedEdge>* out_derived,
     std::vector<std::uint64_t>* out_rule_derived) {
   // Ordered merge: dedupe (slot, src, dst) across rules; the lowest-index
@@ -60,7 +60,7 @@ RoundMerge MergeRoundFacts(
   return out;
 }
 
-void MarkAbsentEdges(const TripleGraph& g,
+void MarkAbsentEdges(const Graph& g,
                      const std::uint32_t* src, const std::uint32_t* dst,
                      std::uint32_t slot, std::size_t n, char* keep) {
 #if defined(GAR_GRAPH_HAS_TBB)

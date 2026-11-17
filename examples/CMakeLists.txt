@@ -13,7 +13,5 @@ target_link_libraries(value_model_check PRIVATE gar::core::engine::agent)
 add_executable(value_model_bench value_model_bench.cpp)
 target_link_libraries(value_model_bench PRIVATE gar::core::engine::agent)
 
-if (GAR_ENABLE_MATRIXGRAPH)
     add_executable(matrixgraph_bridge matrixgraph_bridge.cpp)
-    target_link_libraries(matrixgraph_bridge PRIVATE gar::core::bridge)
-endif ()
+    target_link_libraries(matrixgraph_bridge PRIVATE gar::core::graph)

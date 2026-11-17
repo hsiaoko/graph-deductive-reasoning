@@ -37,10 +37,10 @@ def command_for(goal, arm, seed):
     elif arm == "random":
         command += ["--policy", "random", "--scorer", "exact"]
     elif arm == "q_numeric":
-        command += ["--policy", "q-numeric", "--scorer", "exact",
+        command += ["--policy", "learned", "--scorer", "exact",
                     "--value-model", str(base.WORK / "models/q_numeric.meta")]
     elif arm == "q_hdc":
-        command += ["--policy", "q-hdc", "--scorer", "exact",
+        command += ["--policy", "learned", "--scorer", "exact",
                     "--value-model", str(base.WORK / "models/q_hdc.meta"),
                     "--hdc-value-backend", "original"]
     else:

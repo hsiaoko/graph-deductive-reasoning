@@ -1,10 +1,28 @@
-#include "gar/graph/pattern_matcher.h"
+#include "gar/core/graph/pattern_matcher.h"
 
 #include <algorithm>
 
 namespace gar::core::graph {
 
 namespace {
+
+sics::matrixgraph::core::data_structures::GARPatternArrays ToGARArrays(
+    const PatternSpec& p, std::vector<std::int32_t>* src,
+    std::vector<std::int32_t>* dst, std::vector<std::int32_t>* labels) {
+  src->clear();
+  dst->clear();
+  labels->clear();
+  src->reserve(p.edges.size());
+  dst->reserve(p.edges.size());
+  labels->reserve(p.edges.size());
+  for (const auto [s, d, label] : p.edges) {
+    src->push_back(static_cast<std::int32_t>(s));
+    dst->push_back(static_cast<std::int32_t>(d));
+    labels->push_back(static_cast<std::int32_t>(label));
+  }
+  return {nullptr, static_cast<int>(p.num_vertices), src->data(), dst->data(),
+          labels->data(), static_cast<int>(p.edges.size())};
+}
 
 // Slot of the same data edges walked in the opposite direction.
 std::uint32_t FlipSlot(std::uint32_t slot, std::uint32_t num_relations) {
@@ -36,6 +54,12 @@ std::uint64_t PatternMatcher::Enumerate(
     const PatternSpec& p, std::uint64_t match_cap,
     std::vector<std::uint32_t>* out, bool* capped,
     const std::unordered_map<std::uint32_t, std::uint32_t>& pins) const {
+  if (static_index_ != nullptr && g_.version() == 0) {
+    std::vector<std::int32_t> src, dst, labels;
+    const auto arrays = ToGARArrays(p, &src, &dst, &labels);
+    return static_matcher_.Enumerate(*static_index_, arrays, match_cap, out,
+                                     capped, pins);
+  }
   *capped = false;
   const std::uint32_t n = p.num_vertices;
   const std::uint32_t m = static_cast<std::uint32_t>(p.edges.size());

@@ -3,7 +3,7 @@
 // Modes:
 //   kg_loader convert --graph <triple_graph_dir> --out <csr_dir>
 //                     [--label-from-prefix]
-//       Converts a TripleGraph directory (edges.bin + entities.tsv +
+//       Converts a Graph directory (edges.bin + entities.tsv +
 //       relations.tsv, see tools/prepare_triples.py) into MatrixGraph's
 //       ImmutableCSR on-disk format (<csr_dir>/meta.yaml, graphs/0.bin,
 //       label/0.bin), using MatrixGraph's own Edges / Edgelist2ImmutableCSR
@@ -285,7 +285,7 @@ void Show(const std::string& csr_dir, VertexID print_n) {
 // meta.tsv with "name \t Int|Double \t n_rows" plus one "<name>.tsv" of
 // "vid \t value" rows per column) into <csr_dir>/vertex_attr, merging with
 // any columns already there. Sparse coverage is recorded with a valid mask.
-void AddVertexAttrs(const std::string& csr_dir, const std::string& attrs_dir) {
+void AddVertexAttributes(const std::string& csr_dir, const std::string& attrs_dir) {
   namespace mg_attr = sics::matrixgraph::core::data_structures;
   using sics::matrixgraph::core::io::AttributesIO;
 
@@ -417,7 +417,7 @@ int main(int argc, char** argv) {
       Convert(graph_dir, out_dir, label_from_prefix);
     } else if (mode == "add-vertex-attrs" && !csr_dir.empty() &&
                !attrs_dir.empty()) {
-      AddVertexAttrs(csr_dir, attrs_dir);
+      AddVertexAttributes(csr_dir, attrs_dir);
     } else if (mode == "show" && !csr_dir.empty()) {
       Show(csr_dir, print_n);
     } else {

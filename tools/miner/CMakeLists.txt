@@ -23,11 +23,11 @@ if (TARGET gar_bridge)
     # mine_rules app
     #######################
     add_executable(mine_rules mine_rules.cpp)
-    target_link_libraries(mine_rules PRIVATE gar::tools::miner gar::core::bridge)
+    target_link_libraries(mine_rules PRIVATE gar::tools::miner gar::core::graph)
 
     #######################
     # mine_graph_rules app (generic topology patterns)
     #######################
     add_executable(mine_graph_rules mine_graph_rules.cpp)
-    target_link_libraries(mine_graph_rules PRIVATE gar::tools::miner gar::core::bridge)
+    target_link_libraries(mine_graph_rules PRIVATE gar::tools::miner gar::core::graph)
 endif ()

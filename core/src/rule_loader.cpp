@@ -1,15 +1,33 @@
-#include "gar/rule_loader.h"
+#include "gar/core/rule_loader.h"
 
+#include <fstream>
 #include <stdexcept>
 #include <unordered_map>
 
 #include <yaml-cpp/yaml.h>
 
-#include "gar/csr.h"
-
 namespace gar {
 
 namespace {
+
+template <typename T>
+std::vector<T> ReadArray(const std::filesystem::path& path, bool required) {
+  std::ifstream in(path, std::ios::binary | std::ios::ate);
+  if (!in) {
+    if (!required) return {};
+    throw std::runtime_error("RuleLoader: cannot open " + path.string());
+  }
+  const auto bytes = in.tellg();
+  if (bytes % static_cast<std::streamoff>(sizeof(T)) != 0) {
+    throw std::runtime_error("RuleLoader: invalid array size in " +
+                             path.string());
+  }
+  std::vector<T> out(static_cast<std::size_t>(bytes) / sizeof(T));
+  in.seekg(0);
+  in.read(reinterpret_cast<char*>(out.data()), bytes);
+  if (!in) throw std::runtime_error("RuleLoader: failed reading " + path.string());
+  return out;
+}
 
 [[noreturn]] void Fail(const std::string& where, const std::string& what) {
   throw std::runtime_error("rule yaml [" + where + "]: " + what);
@@ -306,22 +324,33 @@ GARule RuleLoader::Load(const std::filesystem::path& rule_dir) {
 
   // CSR binaries override inline edges when present; convert to flat.
   if (std::filesystem::exists(rule_dir / "csr_offsets.bin")) {
-    const CSRTopology topo = CSRTopology::LoadBin(rule_dir);
-    rule.n_vertices = static_cast<std::uint32_t>(topo.num_vertices());
+    const auto offsets = ReadArray<EdgeIndex>(rule_dir / "csr_offsets.bin", true);
+    const auto indices = ReadArray<VertexID>(rule_dir / "csr_indices.bin", true);
+    const auto labels = ReadArray<LabelID>(rule_dir / "csr_edge_labels.bin", false);
+    if (offsets.empty() || offsets.front() != 0 ||
+        static_cast<std::size_t>(offsets.back()) != indices.size() ||
+        (!labels.empty() && labels.size() != indices.size())) {
+      throw std::runtime_error("RuleLoader: inconsistent CSR arrays in " +
+                               rule_dir.string());
+    }
+    rule.n_vertices = static_cast<std::uint32_t>(offsets.size() - 1);
     rule.edge_src.clear();
     rule.edge_dst.clear();
     rule.edge_labels.clear();
-    rule.edge_src.reserve(topo.num_edges());
-    rule.edge_dst.reserve(topo.num_edges());
-    rule.edge_labels.reserve(topo.num_edges());
-    for (std::size_t s = 0; s < topo.num_vertices(); ++s) {
-      for (EdgeIndex e = topo.offsets[s]; e < topo.offsets[s + 1]; ++e) {
+    rule.edge_src.reserve(indices.size());
+    rule.edge_dst.reserve(indices.size());
+    rule.edge_labels.reserve(indices.size());
+    for (std::size_t s = 0; s + 1 < offsets.size(); ++s) {
+      for (EdgeIndex e = offsets[s]; e < offsets[s + 1]; ++e) {
+        if (indices[e] >= offsets.size() - 1) {
+          throw std::runtime_error("RuleLoader: CSR vertex out of range in " +
+                                   rule_dir.string());
+        }
         rule.edge_src.push_back(static_cast<std::int32_t>(s));
-        rule.edge_dst.push_back(static_cast<std::int32_t>(topo.indices[e]));
+        rule.edge_dst.push_back(static_cast<std::int32_t>(indices[e]));
         rule.edge_labels.push_back(
-            topo.has_edge_labels()
-                ? static_cast<std::int32_t>(topo.edge_labels[e])
-                : static_cast<std::int32_t>(kWildcardLabel));
+            labels.empty() ? static_cast<std::int32_t>(kWildcardLabel)
+                           : static_cast<std::int32_t>(labels[e]));
       }
     }
     if (rule.node_labels.empty()) {

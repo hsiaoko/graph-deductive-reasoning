@@ -9,9 +9,9 @@
 namespace gar::tools::miner {
 
 using gar::core::graph::PackPair;
-using gar::core::graph::TripleGraph;
+using gar::core::graph::Graph;
 
-ChainMiner::ChainMiner(const TripleGraph& graph, MinerConfig config)
+ChainMiner::ChainMiner(const Graph& graph, MinerConfig config)
     : g_(graph), cfg_(std::move(config)) {}
 
 std::unordered_set<std::uint64_t> ChainMiner::ChainPairs(

@@ -12,6 +12,9 @@ add_library(gar_engine_agent STATIC
     src/witness.cpp
     src/scorer.cpp
     src/ada_deduce_executor.cpp
+    src/match_backend.cpp
+    src/cpu_match_backend.cpp
+    src/gpu_match_backend.cu
     src/deduce_session.cpp
     src/partial_matcher.cpp
     src/working_set.cpp
@@ -31,19 +34,16 @@ target_link_libraries(gar_engine_agent PUBLIC
 )
 target_compile_features(gar_engine_agent PUBLIC cxx_std_20)
 
-# Vendored JSON for the Jev HTTP client: nlohmann/json v3.11.2, MIT,
-# official release layout, copied into third_party/nlohmann (offline
-# environment; identical to the single_include distribution). PRIVATE —
-# it appears in no public header (JevClient's interface is JSON-free).
+# Vendored JSON for the HTTP model clients: nlohmann/json v3.11.2, MIT.
+# PRIVATE — it appears in no public header (LlmClient is JSON-free).
 target_include_directories(gar_engine_agent PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/nlohmann
 )
 
-# MatrixGraph HomMatch (CPU homomorphism matcher): the agent's matching
-# primitive. Host-only header + pure-host symbols inside matrixgraph_core.
-if (GAR_ENABLE_MATRIXGRAPH)
-    find_package(CUDAToolkit REQUIRED)
-    target_link_libraries(gar_engine_agent PRIVATE
-        matrixgraph_core CUDA::cudart
-    )
-endif ()
+# MatrixGraph supplies HomMatch and generic CUDA buffers. Agent-specific
+# dynamic GPU matching remains in this target.
+find_package(CUDAToolkit REQUIRED)
+find_package(CURL REQUIRED)
+target_link_libraries(gar_engine_agent PRIVATE
+    matrixgraph_core CUDA::cudart CURL::libcurl
+)

@@ -4,8 +4,7 @@
 // Usage: matrixgraph_bridge <rule_dir>
 #include <iostream>
 
-#include "gar/bridge/pattern_bridge.h"
-#include "gar/rule_loader.h"
+#include "gar/core/rule_loader.h"
 
 int main(int argc, char** argv) {
   if (argc != 2) {
@@ -14,7 +13,7 @@ int main(int argc, char** argv) {
   }
   try {
     gar::GARule rule = gar::RuleLoader::Load(argv[1]);
-    auto p = gar::core::bridge::ToPatternArrays(rule);
+    auto p = rule.ToGARPatternArrays();
     p.Print();
   } catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << "\n";

@@ -18,19 +18,20 @@
 #include <vector>
 
 #include "full_deduce_cli.h"  // FullDeduceArgs + loaders + closure_output.h
-#include "gar/analysis/dependency_graph.h"
-#include "gar/engine/agent/executor.h"
-#include "gar/engine/agent/reasoning_agent.h"
-#include "gar/engine/deduction/cpu_chase_engine.h"
-#include "gar/engine/agent/value_model.h"
-#include "gar/hdc/const.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/agent/executor.h"
+#include "gar/core/agent/reasoning_agent.h"
+#include "gar/core/chase/cpu_chase_engine.h"
+#include "gar/core/agent/value_model.h"
+#include "gar/core/hdc/const.h"
 
 namespace gar_apps {
 
 struct AgentModeArgs {
   std::string goal_spec;  // "rel_name(src,dst)"; '_' = open argument
+  std::string engine = "cpu";  // cpu|gpu pattern-matching backend
   std::uint64_t budget = 100;
-  std::string policy = "deterministic";   // deterministic|random|hybrid|jev|q-hdc|q-numeric
+  std::string policy = "deterministic";   // deterministic|random|hybrid|jev|learned (legacy: q-hdc|q-numeric)
   std::string scorer = "exact";           // exact|hdc|null
   // Longest-waiting fair scheduling interval (0=off).
   std::uint32_t fair_interval = 0;
@@ -57,11 +58,25 @@ struct AgentModeArgs {
   // for the network-free MockJevClient (development/regression support).
   gar::core::engine::agent::JevConfig jev;
   bool jev_mock = false;
+  bool llm_guide = false;
+  bool llm_mock = false;
+  double guide_strength = 1.0;
+  std::size_t guide_max_options = 255;
+  double guide_min_cost = 0.0;
+  std::string llm_backend = "openai";  // openai|jev
+  std::string llm_base_url = "https://api.deepseek.com";
+  std::string llm_model = "deepseek-chat";
+  std::uint32_t llm_timeout_ms = 120000;
   double wall_limit_sec = 0.0;
   std::string value_model;
   gar::core::engine::agent::HdcBackend hdc_value_backend =
       gar::core::engine::agent::HdcBackend::kBitLut;
   std::string q_trace_path;
+  // Multi-goal execution: independent goals share one process and DG, while
+  // each worker owns its graph delta state.
+  std::string tasks_path;
+  std::string ground_truth_dir;
+  std::uint32_t workers = 1;
 };
 
 // Parses one agent-mode option; returns false when `k` is not one.
@@ -69,6 +84,10 @@ template <typename NextFn>
 bool ParseAgentModeOption(const std::string& k, NextFn&& next,
                           AgentModeArgs* a) {
   if (k == "--goal") a->goal_spec = next();
+  else if (k == "--tasks") a->tasks_path = next();
+  else if (k == "--workers") a->workers = std::stoul(next());
+  else if (k == "--gt") a->ground_truth_dir = next();
+  else if (k == "--engine") a->engine = next();
   else if (k == "--budget") a->budget = std::stoull(next());
   else if (k == "--policy") a->policy = next();
   else if (k == "--scorer") a->scorer = next();
@@ -92,6 +111,37 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->jev.timeout_ms = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--jev-top-k")
     a->jev.top_k = static_cast<std::size_t>(std::stoull(next()));
+  else if (k == "--llm-guide") a->llm_guide = true;
+  else if (k == "--llm-mock") a->llm_mock = true;
+  else if (k == "--llm-backend") {
+    a->llm_backend = next();
+    if (a->llm_backend != "openai" && a->llm_backend != "jev") {
+      throw std::invalid_argument("unknown --llm-backend: " + a->llm_backend +
+                                  " (openai|jev)");
+    }
+  }
+  else if (k == "--llm-base-url") a->llm_base_url = next();
+  else if (k == "--llm-model") a->llm_model = next();
+  else if (k == "--llm-timeout-ms")
+    a->llm_timeout_ms = static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--guide-strength") {
+    a->guide_strength = std::stod(next());
+    if (a->guide_strength < 0.0) {
+      throw std::invalid_argument("--guide-strength must be nonnegative");
+    }
+  }
+  else if (k == "--guide-max-options") {
+    a->guide_max_options = std::stoull(next());
+    if (a->guide_max_options == 0) {
+      throw std::invalid_argument("--guide-max-options must be positive");
+    }
+  }
+  else if (k == "--guide-min-cost") {
+    a->guide_min_cost = std::stod(next());
+    if (a->guide_min_cost < 0.0) {
+      throw std::invalid_argument("--guide-min-cost must be nonnegative");
+    }
+  }
   else if (k == "--wall-limit") a->wall_limit_sec = std::stod(next());
   else if (k == "--fair-interval")
     a->fair_interval = static_cast<std::uint32_t>(std::stoul(next()));
@@ -129,7 +179,7 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
 // through the graph's relation dictionary; arguments are entity names
 // resolved through the entity dictionary, or '_' for an open variable.
 inline gar::core::engine::agent::Goal ParseGoalSpec(const std::string& spec,
-                                              const gar::core::graph::TripleGraph& g) {
+                                              const gar::core::graph::Graph& g) {
   const auto lp = spec.find('(');
   const auto rp = spec.rfind(')');
   if (lp == std::string::npos || rp == std::string::npos || rp < lp) {
@@ -177,10 +227,11 @@ inline gar::core::engine::agent::Goal ParseGoalSpec(const std::string& spec,
 inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
     const AgentModeArgs& args, const gar::core::analysis::DependencyGraph* dg,
     const gar::core::engine::agent::Goal* goal = nullptr,
-    const gar::core::graph::TripleGraph* graph = nullptr,
+    const gar::core::graph::Graph* graph = nullptr,
     const std::vector<gar::GARule>* rules = nullptr,
     const std::vector<std::string>* rule_ids = nullptr,
-    gar::core::engine::agent::JevPolicy** jev_out = nullptr) {
+    gar::core::engine::agent::JevPolicy** jev_out = nullptr,
+    gar::core::engine::agent::LlmStarGuide** guide_out = nullptr) {
   namespace agent = gar::core::engine::agent;
   const gar::core::hdc::HdcEncoder encoder({args.hdc_dim, args.HdcSeed()});
   agent::ReasoningAgent::Components comps;
@@ -219,13 +270,17 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
     comps.policy = std::make_unique<agent::RandomizedPolicy>(args.PolicySeed());
   } else if (args.policy == "hybrid") {
     comps.policy = std::make_unique<agent::HybridNeuroSymbolicPolicy>();
-  } else if (args.policy == "q-hdc" || args.policy == "q-numeric") {
+  } else if (args.policy == "learned" || args.policy == "adaptive" ||
+             args.policy == "q-hdc" || args.policy == "q-numeric") {
     if (args.value_model.empty()) {
       throw std::invalid_argument("--policy " + args.policy +
                                   " requires --value-model PATH");
     }
+    if (args.policy == "adaptive" && !args.llm_guide) {
+      throw std::invalid_argument("--policy adaptive requires --llm-guide");
+    }
     if (args.scorer != "exact") {
-      throw std::invalid_argument("Q policies require --scorer exact");
+      throw std::invalid_argument("learned policies require --scorer exact");
     }
     auto vm = std::make_shared<agent::ValueModel>();
     vm->SetHdcBackend(args.hdc_value_backend);
@@ -233,15 +288,47 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
       throw std::runtime_error("failed to load value model: " +
                                args.value_model);
     }
-    const std::string want = args.policy == "q-hdc" ? "hdc" : "numeric";
-    if (vm->kind() != want) {
-      throw std::runtime_error("--policy " + args.policy + " got a " +
-                               vm->kind() + " model: " + args.value_model);
+    if (args.policy != "learned") {
+      const std::string want = args.policy == "q-hdc" ? "hdc" : "numeric";
+      if (vm->kind() != want) {
+        throw std::runtime_error("--policy " + args.policy + " got a " +
+                                 vm->kind() + " model: " + args.value_model);
+      }
     }
-    comps.policy = std::make_unique<agent::LearnedQPolicy>(vm.get());
+    if (args.policy == "adaptive") {
+      comps.policy = std::make_unique<agent::AdaptivePolicy>(
+          std::make_unique<agent::DeterministicPolicy>(),
+          std::make_unique<agent::LearnedQPolicy>(vm.get()));
+    } else {
+      comps.policy = std::make_unique<agent::LearnedQPolicy>(vm.get());
+    }
     comps.value_model = std::move(vm);
   } else {
     comps.policy = std::make_unique<agent::DeterministicPolicy>();
+  }
+  if (args.llm_guide) {
+    if (goal == nullptr || graph == nullptr || rules == nullptr) {
+      throw std::invalid_argument("--llm-guide needs goal/graph/rules context");
+    }
+    std::unique_ptr<agent::LlmClient> client;
+    if (args.llm_mock) {
+      client = std::make_unique<agent::MockLlmClient>(args.PolicySeed());
+    } else if (args.llm_backend == "jev") {
+      client = std::make_unique<agent::HttpJevClient>(
+          args.llm_base_url, args.llm_timeout_ms, args.llm_model);
+    } else {
+      client = std::make_unique<agent::OpenAiLlmClient>(
+          args.llm_base_url, args.llm_model, args.llm_timeout_ms);
+    }
+    auto guide = std::make_unique<agent::LlmStarGuide>(
+        std::move(client), goal, graph, dg, rules, rule_ids,
+        args.guide_max_options, args.guide_min_cost);
+    if (args.policy == "adaptive") {
+      static_cast<agent::AdaptivePolicy*>(comps.policy.get())->SetGuide(
+          guide.get());
+    }
+    if (guide_out != nullptr) *guide_out = guide.get();
+    comps.star_guide = std::move(guide);
   }
   if (!args.q_trace_path.empty() && args.scorer != "exact") {
     throw std::invalid_argument("--q-trace requires --scorer exact");
@@ -251,7 +338,7 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
 }
 
 // Renders a derived fact as "rel(src,dst)" with entity names.
-inline std::string FormatFact(const gar::core::graph::TripleGraph& g,
+inline std::string FormatFact(const gar::core::graph::Graph& g,
                               const gar::core::graph::DerivedEdge& e) {
   return g.SlotName(e.slot) + "(" + g.EntityName(e.src) + "," +
          g.EntityName(e.dst) + ")";
@@ -261,8 +348,8 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   namespace agent = gar::core::engine::agent;
 
   // ---- load (same sources as the full mode) ----
-  gar::core::graph::TripleGraph g =
-      gar::core::bridge::LoadTripleGraph(io.csr_dir, /*with_inverses=*/true);
+  gar::core::graph::Graph g =
+      gar::core::graph::LoadGraph(io.csr_dir, /*with_inverses=*/true);
   std::cerr << "[gar_reason] |V|=" << g.num_entities()
             << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
             << "\n";
@@ -281,7 +368,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
     rule_ids.push_back(d.filename().string());
   }
   std::cerr << "[gar_reason] " << rules.size() << " rules\n";
-  gar::core::graph::VertexAttrs attrs = gar::core::bridge::LoadVertexAttrs(io.csr_dir);
+  gar::core::graph::VertexAttributes attrs = gar::core::graph::LoadVertexAttributes(io.csr_dir);
   std::cerr << "[gar_reason] " << attrs.columns.size()
             << " numeric attribute columns\n";
 
@@ -303,25 +390,30 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
 
   // ---- components (composition root wiring) ----
   agent::JevPolicy* jev = nullptr;
+  agent::LlmStarGuide* guide = nullptr;
   agent::ReasoningAgent rag = MakeReasoningAgent(
       args, &dg, &goal, &g, &rules, &rule_ids,
-      args.policy == "jev" ? &jev : nullptr);
+      args.policy == "jev" ? &jev : nullptr,
+      args.llm_guide ? &guide : nullptr);
   agent::AgentState state(g, attrs.columns.empty() ? nullptr : &attrs, rules);
   agent::ExecConfig ec;
   ec.budget = args.budget;
+  ec.engine = args.engine;
   ec.match_cap_per_rule = args.max_candidates_per_rule;
   ec.utility_gamma = args.score.gamma;
   ec.wall_limit_sec = args.wall_limit_sec;
   ec.fair_interval = args.fair_interval;
   ec.star_order = args.star_order;
+  ec.guide_strength = args.llm_guide ? args.guide_strength : 0.0;
   ec.q_trace_path = args.q_trace_path;
   ec.seed = args.PolicySeed();
 
-  std::cerr << "[gar_reason] running: policy=" << args.policy
-            << " scorer=" << args.scorer
+  std::cerr << "[gar_reason] running: engine=" << args.engine
+            << " policy=" << args.policy << " scorer=" << args.scorer
             << " budget=" << args.budget << " hdc_dim=" << args.hdc_dim
             << " seed=" << args.seed << " policy_seed=" << args.PolicySeed()
-            << " hdc_seed=" << args.HdcSeed() << "\n";
+            << " hdc_seed=" << args.HdcSeed()
+            << " llm_guide=" << args.llm_guide << "\n";
   const auto run_t0 = std::chrono::steady_clock::now();
   const agent::AgentResult res = rag.Run(&state, goal, ec);
   const double wall =
@@ -348,8 +440,8 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   bool sound = true;
   if (args.verify_against_closure) {
     const auto v_t0 = std::chrono::steady_clock::now();
-    gar::core::graph::TripleGraph g2 =
-        gar::core::bridge::LoadTripleGraph(io.csr_dir, /*with_inverses=*/true);
+    gar::core::graph::Graph g2 =
+        gar::core::graph::LoadGraph(io.csr_dir, /*with_inverses=*/true);
     gar::core::engine::chase::CpuChaseEngine closure_engine(
         g2, attrs.columns.empty() ? nullptr : &attrs);
     const gar::core::engine::chase::ChaseConfig closure_cfg;
@@ -405,9 +497,17 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
     f << "mode: agent\n"
       << "goal: \"" << args.goal_spec << "\"\n"
       << "goal_slot: " << goal.slot << "\n"
+      << "engine: " << args.engine << "\n"
       << "policy: " << args.policy << "\n"
       << "scorer: " << args.scorer << "\n"
       << "star_order: " << args.star_order << "\n"
+      << "llm_guide: " << (args.llm_guide ? "true" : "false") << "\n"
+      << "guide_strength: " << args.guide_strength << "\n"
+      << "guide_max_options: " << args.guide_max_options << "\n"
+      << "guide_min_cost: " << args.guide_min_cost << "\n"
+      << "llm_backend: " << args.llm_backend << "\n"
+      << "llm_base_url: " << args.llm_base_url << "\n"
+      << "llm_model: " << args.llm_model << "\n"
       << "hdc_dim: " << args.hdc_dim << "\n"
       << "hdc_value_backend: "
       << gar::core::engine::agent::HdcBackendName(args.hdc_value_backend) << "\n"
@@ -452,6 +552,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
         << "evaluation_wall_ms: " << res.stats->evaluation_wall_ms << "\n"
         << "derivation_wall_ms: " << res.stats->derivation_wall_ms << "\n"
         << "delta_wall_ms: " << res.stats->delta_wall_ms << "\n"
+        << "delta_match_wall_ms: " << res.stats->delta_match_wall_ms << "\n"
         << "delta_complete_wall_ms: "
         << res.stats->delta_complete_wall_ms << "\n"
         << "partial_complete_wall_ms: "
@@ -467,6 +568,16 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
         << "  calls: " << jev->calls() << "\n"
         << "  wall_ms: " << jev->total_wall_ms() << "\n"
         << "  fallbacks: " << jev->fallbacks() << "\n";
+    }
+    if (guide != nullptr) {
+      f << "guide_overhead:\n"
+        << "  calls: " << guide->calls() << "\n"
+        << "  wall_ms: " << guide->total_wall_ms() << "\n"
+        << "  fallbacks: " << guide->fallbacks() << "\n"
+        << "  reachable: " << guide->reachable() << "\n"
+        << "  options: " << guide->options() << "\n"
+        << "  active: " << (guide->active() ? "true" : "false") << "\n"
+        << "  estimated_cost: " << guide->estimated_cost() << "\n";
     }
     if (args.verify_against_closure) {
       f << "soundness: " << (sound ? "pass" : "fail") << "\n";

@@ -1,4 +1,4 @@
-#include "gar/analysis/goal_sampler.h"
+#include "gar/core/analysis/goal_sampler.h"
 
 #include <random>
 

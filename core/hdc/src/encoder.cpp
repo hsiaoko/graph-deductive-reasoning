@@ -1,4 +1,4 @@
-#include "gar/hdc/encoder.h"
+#include "gar/core/hdc/encoder.h"
 
 #include <vector>
 

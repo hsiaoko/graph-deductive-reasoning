@@ -32,9 +32,9 @@
 #include "core/data_structures/gar_pattern_arrays.h"
 #include "core/io/attributes_io.cuh"
 #include "core/task/gpu_task/gar_match.cuh"
-#include "gar/bridge/graph_loader.h"
-#include "gar/graph/triple_graph.h"
-#include "gar/rule_loader.h"
+#include "gar/core/graph/graph_loader.h"
+#include "gar/core/graph/graph.h"
+#include "gar/core/rule_loader.h"
 
 namespace {
 
@@ -87,8 +87,8 @@ Args ParseArgs(int argc, char** argv) {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::core::graph::TripleGraph g =
-        gar::core::bridge::LoadTripleGraph(args.csr_dir,
+    gar::core::graph::Graph g =
+        gar::core::graph::LoadGraph(args.csr_dir,
                                      /*with_inverses=*/false);
     gar::GARule rule = gar::RuleLoader::Load(args.rule_dir);
     std::cerr << "[match_pattern] graph |V|=" << g.num_entities()

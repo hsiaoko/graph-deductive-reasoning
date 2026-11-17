@@ -1,4 +1,4 @@
-#include "gar/hdc/hypervector.h"
+#include "gar/core/hdc/hypervector.h"
 
 #include <stdexcept>
 

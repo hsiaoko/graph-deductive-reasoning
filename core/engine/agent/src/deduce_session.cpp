@@ -9,15 +9,12 @@
 #include <stdexcept>
 #include <utility>
 
-#include "gar/engine/agent/value_model.h"
-#include "gar/graph/predicate_evaluator.h"
+#include "gar/core/agent/value_model.h"
+#include "gar/core/graph/predicate_evaluator.h"
 #include "rule_support.h"
 
 namespace gar::core::engine {
 namespace agent {
-
-namespace mg = sics::matrixgraph::core;
-namespace mg_cpu = sics::matrixgraph::core::task::cpu_task;
 
 bool DeduceSession::ActionIndex::Insert(std::uint32_t rule,
                                           const std::vector<std::uint32_t>& e) {
@@ -77,6 +74,25 @@ void DeduceSession::BuildPlans() {
                      [&](const deduce::RulePlan& a,
                          const deduce::RulePlan& b) {
                        return head_distance(a) < head_distance(b);
+                     });
+  }
+  if (kit_.star_guide != nullptr && cfg_.guide_strength > 0.0 &&
+      plans_.size() > 1) {
+    std::vector<std::uint32_t> eligible;
+    eligible.reserve(plans_.size());
+    for (const auto& plan : plans_) eligible.push_back(plan.rule);
+    const auto& preferences = kit_.star_guide->Preferences(eligible);
+    std::vector<double> order_score(rules.size(), 0.0);
+    for (std::size_t j = 0; j < plans_.size(); ++j) {
+      const double baseline = static_cast<double>(plans_.size() - 1 - j) /
+                              static_cast<double>(plans_.size() - 1);
+      order_score[plans_[j].rule] =
+          baseline + cfg_.guide_strength * preferences[plans_[j].rule];
+    }
+    std::stable_sort(plans_.begin(), plans_.end(),
+                     [&](const deduce::RulePlan& a,
+                         const deduce::RulePlan& b) {
+                       return order_score[a.rule] > order_score[b.rule];
                      });
   }
   for (std::uint32_t pi = 0; pi < plans_.size(); ++pi) {
@@ -250,17 +266,14 @@ void DeduceSession::AddComplete(std::uint32_t pi,
   prod_->SetPending(pi, true);
 }
 
-void DeduceSession::AddPartials(
+void DeduceSession::AddPartialMatches(
     std::uint32_t pi, const deduce::DeferrableEdge& de,
-    const std::unordered_map<std::uint32_t, std::uint32_t>& sub_pins) {
+    const std::vector<std::uint32_t>& embs) {
   const deduce::RulePlan& pl = plans_[pi];
   const GARule& r = state_->rules()[pl.rule];
-  std::vector<std::uint32_t> embs;
-  bool capped = false;
-  const std::uint64_t n_emb = Enumerate(
-      de.sub_spec, cfg_.match_cap_per_rule, &embs, &capped, sub_pins);
-  if (capped) ++res_.stats->candidate_caps;
   const auto ns = de.sub_spec.num_vertices;
+  if (ns == 0) return;
+  const std::uint64_t n_emb = embs.size() / ns;
   for (std::uint64_t t = 0; t < n_emb; ++t) {
     const std::uint32_t* se = embs.data() + t * ns;
     std::vector<std::uint32_t> full =
@@ -323,14 +336,15 @@ void DeduceSession::VerifyGeneration() {
   if (!verify_) return;
   // Only EXPANDED stars are checked: an unexpanded star generates on its
   // turn and sees the full current G∪Γ, so its matches need no coverage.
+  std::unique_ptr<MatchBackend> cpu_backend = MakeMatchBackend("cpu", g_);
   for (std::uint32_t pi = 0; pi < next_star_; ++pi) {
     const deduce::RulePlan& pl = plans_[pi];
     const GARule& r = state_->rules()[pl.rule];
-    std::vector<std::uint32_t> embs;
-    bool capped = false;
-    const std::uint64_t n_emb = Enumerate(pl.spec, UINT64_MAX, &embs,
-                                                   &capped, GoalPins(pl));
+    const std::vector<MatchResult> matches = cpu_backend->RunBatch(
+        {MatchRequest{pl.spec, UINT64_MAX, GoalPins(pl)}});
+    const std::vector<std::uint32_t>& embs = matches.front().embeddings;
     const auto n = pl.spec.num_vertices;
+    const std::uint64_t n_emb = embs.size() / n;
     for (std::uint64_t t = 0; t < n_emb; ++t) {
       std::vector<std::uint32_t> emb(embs.data() + t * n,
                                      embs.data() + (t + 1) * n);
@@ -342,9 +356,13 @@ void DeduceSession::VerifyGeneration() {
       // The embedding must already be known (Insert returns true only when
       // it was MISSING).
       if (seen_actions_.Insert(pl.rule, emb)) {
-        std::fprintf(stderr, "[verify-fixpoint] MISSING rule=%s emb#%llu\n",
+        std::fprintf(stderr, "[verify-fixpoint] MISSING rule=%s emb#%llu",
                      r.name.substr(0, 80).c_str(),
                      static_cast<unsigned long long>(t));
+        for (const std::uint32_t v : emb) {
+          std::fprintf(stderr, " %s", g_.EntityName(v).c_str());
+        }
+        std::fprintf(stderr, "\n");
         std::abort();
       }
     }
@@ -353,61 +371,70 @@ void DeduceSession::VerifyGeneration() {
 
 void DeduceSession::GenerateStar(std::uint32_t pi) {
   const deduce::RulePlan& pl = plans_[pi];
-  std::vector<std::uint32_t> embs;
-  bool capped = false;
-  const std::uint64_t n_emb = Enumerate(
-      pl.spec, cfg_.match_cap_per_rule, &embs, &capped, GoalPins(pl));
-  if (capped) ++res_.stats->candidate_caps;
+  std::vector<MatchRequest> requests;
+  requests.push_back(
+      MatchRequest{pl.spec, cfg_.match_cap_per_rule, GoalPins(pl)});
+  for (const auto& de : pl.defers) {
+    requests.push_back(MatchRequest{de.sub_spec, cfg_.match_cap_per_rule,
+                                    GoalSubPins(pl, de)});
+  }
+  const std::vector<MatchResult> results = match_backend_->RunBatch(requests);
   const auto n = pl.spec.num_vertices;
-  for (std::uint64_t t = 0; t < n_emb; ++t) {
+  const std::vector<std::uint32_t>& embs = results.front().embeddings;
+  if (results.front().capped) ++res_.stats->candidate_caps;
+  for (std::uint64_t t = 0; t < embs.size() / n; ++t) {
     AddComplete(pi, std::vector<std::uint32_t>(embs.data() + t * n,
                                                embs.data() + (t + 1) * n));
   }
-  for (const auto& de : pl.defers) {
-    AddPartials(pi, de, GoalSubPins(pl, de));
+  for (std::size_t i = 0; i < pl.defers.size(); ++i) {
+    const MatchResult& result = results[i + 1];
+    if (result.capped) ++res_.stats->candidate_caps;
+    AddPartialMatches(pi, pl.defers[i], result.embeddings);
   }
   prod_->MarkGenerated(pi);
   RefreshPeaks();
   VerifyGeneration();
 }
 
-void DeduceSession::CompleteDeltas(const gar::core::graph::DerivedEdge& d,
-                                     std::uint32_t mirror) {
-  std::vector<std::uint32_t> affected;
-  for (const std::uint32_t slot : {d.slot, mirror}) {
-    const auto it = complete_slot_users_.find(slot);
-    if (it != complete_slot_users_.end()) {
-      affected.insert(affected.end(), it->second.begin(), it->second.end());
-    }
-  }
-  std::sort(affected.begin(), affected.end());
-  affected.erase(std::unique(affected.begin(), affected.end()), affected.end());
-  for (const std::uint32_t pi : affected) {
-    if (pi >= next_star_) continue;
-    const deduce::RulePlan& pl = plans_[pi];
+void DeduceSession::CompleteDeltas(
+    const std::vector<gar::core::graph::DerivedEdge>& derived,
+    std::vector<MatchRequest>* requests, std::vector<DeltaMatchJob>* jobs) {
+  for (const auto& d : derived) {
+    const std::uint32_t mirror = g_.IsInverse(d.slot)
+                                     ? g_.BaseRelation(d.slot)
+                                     : d.slot + g_.num_relations();
+    std::vector<std::uint32_t> affected;
     for (const std::uint32_t slot : {d.slot, mirror}) {
-      const bool flipped = (slot == mirror);
-      for (const auto& e : pl.spec.edges) {
-        if (e[2] != slot) continue;
-        auto pins = GoalPins(pl);
-        const std::uint32_t ps = flipped ? d.dst : d.src;
-        const std::uint32_t pd = flipped ? d.src : d.dst;
-        auto pit = pins.find(e[0]);
-        if (pit != pins.end() && pit->second != ps) continue;
-        auto qit = pins.find(e[1]);
-        if (qit != pins.end() && qit->second != pd) continue;
-        pins[e[0]] = ps;
-        pins[e[1]] = pd;
-        std::vector<std::uint32_t> embs;
-        bool capped = false;
-        const std::uint64_t n_emb = Enumerate(
-            pl.spec, cfg_.match_cap_per_rule, &embs, &capped, pins);
-        if (capped) ++res_.stats->candidate_caps;
-        const auto n = pl.spec.num_vertices;
-        for (std::uint64_t t = 0; t < n_emb; ++t) {
-          AddComplete(pi, std::vector<std::uint32_t>(embs.data() + t * n,
-                                                     embs.data() +
-                                                         (t + 1) * n));
+      const auto it = complete_slot_users_.find(slot);
+      if (it != complete_slot_users_.end()) {
+        affected.insert(affected.end(), it->second.begin(), it->second.end());
+      }
+    }
+    std::sort(affected.begin(), affected.end());
+    affected.erase(std::unique(affected.begin(), affected.end()),
+                   affected.end());
+    for (const std::uint32_t pi : affected) {
+      if (pi >= next_star_) continue;
+      const deduce::RulePlan& pl = plans_[pi];
+      for (const std::uint32_t slot : {d.slot, mirror}) {
+        const bool flipped = (slot == mirror);
+        for (const auto& e : pl.spec.edges) {
+          if (e[2] != slot) continue;
+          auto pins = GoalPins(pl);
+          const std::uint32_t ps = flipped ? d.dst : d.src;
+          const std::uint32_t pd = flipped ? d.src : d.dst;
+          auto pit = pins.find(e[0]);
+          if (pit != pins.end() && pit->second != ps) continue;
+          auto qit = pins.find(e[1]);
+          if (qit != pins.end() && qit->second != pd) continue;
+          pins[e[0]] = ps;
+          pins[e[1]] = pd;
+          const std::uint32_t edge =
+              static_cast<std::uint32_t>(&e - pl.spec.edges.data());
+          requests->push_back(MatchRequest{
+              pl.spec, cfg_.match_cap_per_rule, std::move(pins),
+              EdgeSeed{e[2], ps, pd, edge}});
+          jobs->push_back(DeltaMatchJob{pi, 0, false});
         }
       }
     }
@@ -461,67 +488,125 @@ void DeduceSession::CompletePartials(const gar::core::graph::DerivedEdge& d,
   for (std::uint64_t id : done) ws_.RemoveSuspended(id);
 }
 
-void DeduceSession::GrowPartials(const gar::core::graph::DerivedEdge& d,
-                                   std::uint32_t mirror) {
-  // New partials from sub-spec growth (goal pins merged; a conflict between
-  // a goal pin and the delta pin on the same vertex voids that edge's
-  // delta — the intersection is empty by construction).
-  std::vector<std::uint32_t> affected;
-  for (const std::uint32_t slot : {d.slot, mirror}) {
-    const auto it = partial_slot_users_.find(slot);
-    if (it != partial_slot_users_.end()) {
-      affected.insert(affected.end(), it->second.begin(), it->second.end());
+void DeduceSession::GrowPartials(
+    const std::vector<gar::core::graph::DerivedEdge>& derived,
+    std::vector<MatchRequest>* requests, std::vector<DeltaMatchJob>* jobs) {
+  for (const auto& d : derived) {
+    const std::uint32_t mirror = g_.IsInverse(d.slot)
+                                     ? g_.BaseRelation(d.slot)
+                                     : d.slot + g_.num_relations();
+    // New partials from sub-spec growth; a goal/delta pin conflict makes the
+    // intersection empty by construction.
+    std::vector<std::uint32_t> affected;
+    for (const std::uint32_t slot : {d.slot, mirror}) {
+      const auto it = partial_slot_users_.find(slot);
+      if (it != partial_slot_users_.end()) {
+        affected.insert(affected.end(), it->second.begin(), it->second.end());
+      }
     }
-  }
-  std::sort(affected.begin(), affected.end());
-  affected.erase(std::unique(affected.begin(), affected.end()), affected.end());
-  for (const std::uint32_t pi : affected) {
-    if (pi >= next_star_) continue;
-    for (const auto& de : plans_[pi].defers) {
-      for (const std::uint32_t slot : {d.slot, mirror}) {
-        const bool flipped = (slot == mirror);
-        for (const auto& e : de.sub_spec.edges) {
-          if (e[2] != slot) continue;
-          auto pins = GoalSubPins(plans_[pi], de);
-          const std::uint32_t ps = flipped ? d.dst : d.src;
-          const std::uint32_t pd = flipped ? d.src : d.dst;
-          auto pit = pins.find(e[0]);
-          if (pit != pins.end() && pit->second != ps) continue;
-          auto qit = pins.find(e[1]);
-          if (qit != pins.end() && qit->second != pd) continue;
-          pins[e[0]] = ps;
-          pins[e[1]] = pd;
-          AddPartials(pi, de, pins);
+    std::sort(affected.begin(), affected.end());
+    affected.erase(std::unique(affected.begin(), affected.end()),
+                   affected.end());
+    for (const std::uint32_t pi : affected) {
+      if (pi >= next_star_) continue;
+      for (std::size_t di = 0; di < plans_[pi].defers.size(); ++di) {
+        const auto& de = plans_[pi].defers[di];
+        for (const std::uint32_t slot : {d.slot, mirror}) {
+          const bool flipped = (slot == mirror);
+          for (const auto& e : de.sub_spec.edges) {
+            if (e[2] != slot) continue;
+            auto pins = GoalSubPins(plans_[pi], de);
+            const std::uint32_t ps = flipped ? d.dst : d.src;
+            const std::uint32_t pd = flipped ? d.src : d.dst;
+            auto pit = pins.find(e[0]);
+            if (pit != pins.end() && pit->second != ps) continue;
+            auto qit = pins.find(e[1]);
+            if (qit != pins.end() && qit->second != pd) continue;
+            pins[e[0]] = ps;
+            pins[e[1]] = pd;
+            const std::uint32_t edge =
+                static_cast<std::uint32_t>(&e - de.sub_spec.edges.data());
+            requests->push_back(MatchRequest{
+                de.sub_spec, cfg_.match_cap_per_rule, std::move(pins),
+                EdgeSeed{e[2], ps, pd, edge}});
+            jobs->push_back(DeltaMatchJob{pi, di, true});
+          }
         }
       }
     }
   }
 }
 
-void DeduceSession::OnDerivation(const gar::core::graph::DerivedEdge& d) {
-  const std::uint32_t mirror = g_.IsInverse(d.slot)
-                                   ? g_.BaseRelation(d.slot)
-                                   : d.slot + g_.num_relations();
+void DeduceSession::OnDerivations(
+    const std::vector<gar::core::graph::DerivedEdge>& derived) {
+  std::vector<MatchRequest> requests;
+  std::vector<DeltaMatchJob> jobs;
   auto started = std::chrono::steady_clock::now();
-  CompleteDeltas(d, mirror);
+  CompleteDeltas(derived, &requests, &jobs);
   res_.stats->delta_complete_wall_ms +=
       std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - started)
           .count();
   started = std::chrono::steady_clock::now();
-  CompletePartials(d, mirror);
+  GrowPartials(derived, &requests, &jobs);
+  res_.stats->partial_grow_wall_ms +=
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - started)
+          .count();
+  started = std::chrono::steady_clock::now();
+  const std::vector<MatchResult> results = match_backend_->RunBatch(requests);
+  res_.stats->delta_match_wall_ms +=
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - started)
+          .count();
+
+  started = std::chrono::steady_clock::now();
+  for (std::size_t j = 0; j < results.size(); ++j) {
+    if (jobs[j].partial) continue;
+    const std::uint32_t pi = jobs[j].pi;
+    const auto n = plans_[pi].spec.num_vertices;
+    const std::vector<std::uint32_t>& embs = results[j].embeddings;
+    if (results[j].capped) ++res_.stats->candidate_caps;
+    for (std::uint64_t t = 0; t < embs.size() / n; ++t) {
+      AddComplete(pi, std::vector<std::uint32_t>(embs.data() + t * n,
+                                                 embs.data() + (t + 1) * n));
+    }
+  }
+  res_.stats->delta_complete_wall_ms +=
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - started)
+          .count();
+  started = std::chrono::steady_clock::now();
+  for (const auto& d : derived) {
+    const std::uint32_t mirror = g_.IsInverse(d.slot)
+                                     ? g_.BaseRelation(d.slot)
+                                     : d.slot + g_.num_relations();
+    CompletePartials(d, mirror);
+  }
   res_.stats->partial_complete_wall_ms +=
       std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - started)
           .count();
   started = std::chrono::steady_clock::now();
-  GrowPartials(d, mirror);
+  for (std::size_t j = 0; j < results.size(); ++j) {
+    if (!jobs[j].partial) continue;
+    const DeltaMatchJob& job = jobs[j];
+    if (results[j].capped) ++res_.stats->candidate_caps;
+    AddPartialMatches(job.pi, plans_[job.pi].defers[job.defer],
+                      results[j].embeddings);
+  }
   res_.stats->partial_grow_wall_ms +=
       std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - started)
           .count();
   RefreshPeaks();
   VerifyGeneration();
+}
+
+void DeduceSession::FlushDerivations() {
+  if (pending_derivations_.empty()) return;
+  OnDerivations(pending_derivations_);
+  pending_derivations_.clear();
 }
 
 int DeduceSession::Evaluate(const deduce::ActionRecord& rec) {
@@ -614,7 +699,7 @@ gar::core::graph::DerivedEdge DeduceSession::Derive(const deduce::ActionRecord& 
       emb[rec.head.pu], emb[rec.head.pv], rec.head.slot, rec.motif.rule,
       static_cast<std::uint32_t>(res_.chain.size() + 1)};
   state_->ApplyDerivation(d);
-  RebuildIndex();
+  match_backend_->CommitDerived(d);
   std::vector<Fact> premises;
   GroundPremises(r, rec.motif, g_, *ctx_.table, &premises);
   for (const Fact& f : premises) RecordWitness(f);
@@ -805,44 +890,6 @@ deduce::ActionRecord* DeduceSession::SelectReady() {
   return chosen;
 }
 
-void DeduceSession::RebuildIndex() {
-  std::vector<std::uint32_t> v_id, e_src, e_dst, e_id;
-  std::vector<std::int32_t> e_label;
-  v_id.reserve(g_.num_entities());
-  for (std::uint32_t i = 0; i < g_.num_entities(); ++i) v_id.push_back(i);
-  for (std::uint32_t slot = 0; slot < g_.num_relations(); ++slot) {
-    for (auto p : g_.RelationPairs(slot)) {
-      e_src.push_back(static_cast<std::uint32_t>(p >> 32));
-      e_dst.push_back(static_cast<std::uint32_t>(p));
-      e_id.push_back(static_cast<std::uint32_t>(e_id.size()));
-      e_label.push_back(static_cast<std::int32_t>(slot));
-    }
-  }
-  mg::data_structures::GARGraphArrays gg{
-      v_id.data(), nullptr, static_cast<int>(v_id.size()), e_src.data(),
-      e_dst.data(), e_id.data(), e_label.data(), static_cast<int>(e_src.size())};
-  idx_ = mg_cpu::HomMatchIndex(gg, static_cast<int>(g_.num_relations()));
-}
-
-std::uint64_t DeduceSession::Enumerate(
-    const gar::core::graph::PatternSpec& spec, std::uint64_t cap,
-    std::vector<std::uint32_t>* out, bool* capped,
-    const std::unordered_map<std::uint32_t, std::uint32_t>& pins) {
-  std::vector<std::int32_t> src, dst, label;
-  src.reserve(spec.edges.size());
-  dst.reserve(spec.edges.size());
-  label.reserve(spec.edges.size());
-  for (const auto& e : spec.edges) {
-    src.push_back(static_cast<std::int32_t>(e[0]));
-    dst.push_back(static_cast<std::int32_t>(e[1]));
-    label.push_back(static_cast<std::int32_t>(e[2]));
-  }
-  mg::data_structures::GARPatternArrays gp{
-      nullptr, static_cast<int>(spec.num_vertices), src.data(), dst.data(),
-      label.data(), static_cast<int>(src.size())};
-  return mg_cpu::HomMatcher().Enumerate(*idx_, gp, cap, out, capped, pins);
-}
-
 AgentResult DeduceSession::Run() {
   res_.stats.emplace();
   t0_ = std::chrono::steady_clock::now();
@@ -857,7 +904,7 @@ AgentResult DeduceSession::Run() {
 
   const auto prepared_at = std::chrono::steady_clock::now();
   BuildPlans();
-  RebuildIndex();
+  match_backend_ = MakeMatchBackend(cfg_.engine, g_);
   res_.stats->prepare_wall_ms +=
       std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - prepared_at)
@@ -879,6 +926,8 @@ AgentResult DeduceSession::Run() {
       break;
     }
     if (ws_.ReadyEmpty()) {
+      if (cfg_.engine == "gpu") FlushDerivations();
+      if (!ws_.ReadyEmpty()) continue;
       if (next_star_ < plans_.size()) {
         const auto started = std::chrono::steady_clock::now();
         GenerateStar(next_star_++);
@@ -957,7 +1006,12 @@ AgentResult DeduceSession::Run() {
         break;
       }
       const auto delta_started = std::chrono::steady_clock::now();
-      OnDerivation(d);
+      if (cfg_.engine == "gpu") {
+        pending_derivations_.push_back(d);
+        if (pending_derivations_.size() >= 256) FlushDerivations();
+      } else {
+        OnDerivations({d});
+      }
       res_.stats->delta_wall_ms +=
           std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - delta_started)

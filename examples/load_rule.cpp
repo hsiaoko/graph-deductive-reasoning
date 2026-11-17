@@ -4,7 +4,7 @@
 //   e.g. load_rule data/rules/example
 #include <iostream>
 
-#include "gar/rule_loader.h"
+#include "gar/core/rule_loader.h"
 
 int main(int argc, char** argv) {
   if (argc != 2) {

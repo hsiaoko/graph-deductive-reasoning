@@ -1,13 +1,13 @@
-#include "gar/engine/agent/scorer.h"
+#include "gar/core/agent/scorer.h"
 
 #include <cmath>
 #include <limits>
 #include <unordered_set>
 
-#include "gar/analysis/dependency_graph.h"
-#include "gar/engine/agent/state.h"
-#include "gar/engine/agent/witness.h"
-#include "gar/hdc/evidence.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/agent/state.h"
+#include "gar/core/agent/witness.h"
+#include "gar/core/hdc/evidence.h"
 
 namespace gar::core::engine {
 namespace agent {

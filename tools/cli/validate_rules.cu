@@ -29,12 +29,12 @@
 // NOTE: do not include <execution> here — it drags in AVX512 intrinsics
 // headers that nvcc + GCC 12 cannot compile.
 
-#include "gar/bridge/graph_loader.h"
-#include "gar/bridge/vertex_attrs_loader.h"
-#include "gar/graph/pattern_matcher.h"
-#include "gar/graph/predicate_evaluator.h"
-#include "gar/graph/triple_graph.h"
-#include "gar/rule_loader.h"
+#include "gar/core/graph/graph_loader.h"
+#include "gar/core/graph/vertex_attrs_loader.h"
+#include "gar/core/graph/pattern_matcher.h"
+#include "gar/core/graph/predicate_evaluator.h"
+#include "gar/core/graph/graph.h"
+#include "gar/core/rule_loader.h"
 
 namespace {
 
@@ -78,7 +78,7 @@ Args ParseArgs(int argc, char** argv) {
   return a;
 }
 
-bool HasEdge(const gar::core::graph::TripleGraph& g, std::uint32_t s,
+bool HasEdge(const gar::core::graph::Graph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   const auto [b, e] = g.OutEdgeRange(s);
   const std::uint32_t* dsts = g.OutEdgeDsts();
@@ -116,8 +116,8 @@ struct RuleReport {
 int main(int argc, char** argv) {
   const Args args = ParseArgs(argc, argv);
   try {
-    gar::core::graph::TripleGraph g =
-        gar::core::bridge::LoadTripleGraph(args.csr_dir,
+    gar::core::graph::Graph g =
+        gar::core::graph::LoadGraph(args.csr_dir,
                                      /*with_inverses=*/true);
     std::cerr << "[validate_rules] |V|=" << g.num_entities()
               << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
@@ -140,9 +140,9 @@ int main(int argc, char** argv) {
     }
     std::cerr << "[validate_rules] " << rules.size() << " rules\n";
 
-    const gar::core::graph::VertexAttrs attrs =
-        gar::core::bridge::LoadVertexAttrs(args.csr_dir);
-    const gar::core::graph::VertexAttrs* attrs_p =
+    const gar::core::graph::VertexAttributes attrs =
+        gar::core::graph::LoadVertexAttributes(args.csr_dir);
+    const gar::core::graph::VertexAttributes* attrs_p =
         attrs.columns.empty() ? nullptr : &attrs;
 
     const gar::core::graph::PatternMatcher matcher(g);

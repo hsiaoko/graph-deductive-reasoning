@@ -1,8 +1,8 @@
 // gar_reason: unified entry point for the reasoning engine family.
 //
-// --mode full  runs the whole rule set to a (capped) fixpoint, on the CPU
-//     chase (gar::core::engine::deduction::CpuChaseEngine, oneTBB) or the GPU engine
-//     (gar::core::engine::deduction::GpuDeduceEngine, MatrixGraph task::GARDeduce);
+// --mode chase  runs the whole rule set to a (capped) fixpoint, on the CPU
+//     chase (gar::core::engine::chase::CpuChaseEngine, oneTBB) or the GPU engine
+//     (gar::core::engine::chase::GpuChaseEngine, MatrixGraph task::GARDeduce);
 //     both share the semantics and the output layout of the legacy
 //     deduce / deduce_gpu apps.
 // --mode agent runs policy-guided deduction (gar::core::engine::agent): a single
@@ -10,7 +10,7 @@
 //     policy / scorer / executor.
 //
 // Usage:
-//   gar_reason --mode full --engine cpu|gpu --csr <immutable_csr_dir>
+//   gar_reason --mode chase --engine cpu|gpu --csr <immutable_csr_dir>
 //              --rules <rules_root> --out <out_dir>
 //              [--max-rounds 100] [--max-derivations 10000000]
 //              [--max-matches 1000000] [--no-matches] [--print 20]
@@ -18,7 +18,7 @@
 //
 //   gar_reason --mode agent --csr <dir> --rules <root>
 //              --goal 'rel_name(src,dst)' --budget B
-//              [--policy deterministic|random|hybrid|jev|q-hdc|q-numeric] [--scorer exact|hdc|null]
+//              [--policy deterministic|random|hybrid|jev|learned] [--scorer exact|hdc|null]
 //              [--hdc-dim N] [--seed 42]
 //              [--max-candidates-per-rule 256]
 //              [--alpha A] [--beta B] [--gamma G] [--nu N] [--nu2 N2]
@@ -32,16 +32,17 @@
 #include <memory>
 #include <string>
 
+#include "agent_batch.h"
 #include "agent_mode.h"
 #include "full_deduce_cli.h"
-#include "gar/engine/deduction/cpu_chase_engine.h"
-#include "gar/engine/deduction/gpu_deduce_engine.h"
+#include "gar/core/chase/cpu_chase_engine.h"
+#include "gar/core/chase/gpu_chase_engine.h"
 
 namespace {
 
 struct Args {
-  std::string mode;    // "full" | "agent"
-  std::string engine;  // full mode: "cpu" | "gpu"
+  std::string mode;    // "chase" | "agent"
+  std::string engine;  // chase mode: "cpu" | "gpu"
   gar_apps::FullDeduceArgs full;
   gar_apps::AgentModeArgs agent;
 };
@@ -49,13 +50,13 @@ struct Args {
 void PrintUsage() {
   std::cerr
       << "usage:\n"
-         "  gar_reason --mode full --engine cpu|gpu --csr <csr_dir> "
+         "  gar_reason --mode chase --engine cpu|gpu --csr <csr_dir> "
          "--rules <rules_root> --out <out_dir> [--max-rounds N] "
          "[--max-derivations N] [--max-matches N] [--no-matches] "
          "[--print N] [--threads N]\n"
-         "  gar_reason --mode agent --csr <csr_dir> --rules <rules_root> "
-         "--goal 'rel_name(src,dst)' --budget B [--policy "
-         "deterministic|random|hybrid|jev|q-hdc|q-numeric] [--scorer exact|hdc|null] [--hdc-dim N] "
+         "  gar_reason --mode agent [--engine cpu|gpu] --csr <csr_dir> "
+         "--rules <rules_root> --goal 'rel_name(src,dst)' --budget B [--policy "
+         "deterministic|random|hybrid|jev|learned|adaptive] [--scorer exact|hdc|null] [--hdc-dim N] "
          "[--seed N] [--policy-seed N] [--hdc-seed N] "
          "[--max-candidates-per-rule N] [--value-model PATH] "
          "[--hdc-value-backend original|simd|bit-lut] "
@@ -64,8 +65,15 @@ void PrintUsage() {
          "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
          "[--tau-hdc F] [--no-confidence] [--out <dir>] "
          "[--verify-against-closure] [--print N]\n"
+         "  gar_reason --mode agent-batch [--engine cpu|gpu] --csr <csr_dir> "
+         "--rules <rules_root> --tasks goals.tsv --out <dir> "
+         "[--workers N] [--gt closure_dir]\n"
          "    jev: [--jev-endpoint URL] [--jev-timeout-ms N] [--jev-top-k N] "
-         "[--jev-sample] [--jev-mock]\n";
+         "[--jev-sample] [--jev-mock]\n"
+         "    initial guide: [--llm-guide] [--llm-mock] [--guide-strength F] "
+         "[--guide-max-options N] [--guide-min-cost F] "
+         "[--llm-backend openai|jev] [--llm-base-url URL] [--llm-model NAME] "
+         "[--llm-timeout-ms N]\n";
 }
 
 Args ParseArgs(int argc, char** argv) {
@@ -80,9 +88,12 @@ Args ParseArgs(int argc, char** argv) {
       return argv[++i];
     };
     if (k == "--mode") a.mode = next();
-    else if (k == "--engine") a.engine = next();
+    else if (k == "--engine") {
+      a.engine = next();
+      a.agent.engine = a.engine;
+    }
     else if (k == "--goal") {
-      // Routed by mode (--mode precedes --goal in every invocation): full
+      // Routed by mode (--mode precedes --goal in every invocation): chase
       // mode uses it as a goal-cone filter, agent mode as the goal fact.
       if (a.mode == "agent") a.agent.goal_spec = next();
       else a.full.goal = next();
@@ -94,7 +105,7 @@ Args ParseArgs(int argc, char** argv) {
       std::exit(2);
     }
   }
-  if (a.mode == "full") {
+  if (a.mode == "chase") {
     if ((a.engine != "cpu" && a.engine != "gpu") || a.full.csr_dir.empty() ||
         a.full.rules_root.empty()) {
       PrintUsage();
@@ -103,11 +114,20 @@ Args ParseArgs(int argc, char** argv) {
   } else if (a.mode == "agent") {
     if (a.full.csr_dir.empty() || a.full.rules_root.empty() ||
         a.agent.goal_spec.empty() || a.agent.budget == 0 ||
+        (a.agent.engine != "cpu" && a.agent.engine != "gpu") ||
         (a.agent.policy != "deterministic" && a.agent.policy != "random" &&
          a.agent.policy != "hybrid" && a.agent.policy != "jev" &&
+         a.agent.policy != "learned" && a.agent.policy != "adaptive" &&
          a.agent.policy != "q-hdc" && a.agent.policy != "q-numeric") ||
         (a.agent.scorer != "exact" && a.agent.scorer != "hdc" &&
          a.agent.scorer != "null")) {
+      PrintUsage();
+      std::exit(2);
+    }
+  } else if (a.mode == "agent-batch") {
+    if (a.full.csr_dir.empty() || a.full.rules_root.empty() ||
+        a.agent.tasks_path.empty() || a.agent.workers == 0 ||
+        (a.agent.engine != "cpu" && a.agent.engine != "gpu")) {
       PrintUsage();
       std::exit(2);
     }
@@ -150,15 +170,15 @@ int RunFullMode(const Args& args) {
     in.rule_ids = std::move(filtered_ids);
   }
 
-  const gar::core::graph::VertexAttrs* attrs =
+  const gar::core::graph::VertexAttributes* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
 
   namespace deduction = gar::core::engine::chase;
-  std::unique_ptr<deduction::DeductionEngine> engine;
+  std::unique_ptr<deduction::ChaseEngine> engine;
   if (cpu) {
     engine = std::make_unique<deduction::CpuChaseEngine>(in.graph, attrs);
   } else {
-    engine = std::make_unique<deduction::GpuDeduceEngine>(in.graph, attrs);
+    engine = std::make_unique<deduction::GpuChaseEngine>(in.graph, attrs);
   }
   const auto res = engine->Run(in.rules, args.full.cfg);
   gar_apps::ReportFullDeduce(args.full, in, res, log_tag, summary_title);
@@ -172,6 +192,9 @@ int main(int argc, char** argv) {
   try {
     if (args.mode == "agent") {
       return gar_apps::RunAgentMode(args.full, args.agent);
+    }
+    if (args.mode == "agent-batch") {
+      return gar_apps::agent_batch::Run(args.full, args.agent);
     }
     return RunFullMode(args);
   } catch (const std::exception& e) {

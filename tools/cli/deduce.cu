@@ -24,7 +24,7 @@
 #include <iostream>
 
 #include "full_deduce_cli.h"
-#include "gar/engine/deduction/cpu_chase_engine.h"
+#include "gar/core/chase/cpu_chase_engine.h"
 
 int main(int argc, char** argv) {
   const gar_apps::FullDeduceArgs args =

@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "gar/graph/triple_graph.h"
-#include "gar/rule.h"
+#include "gar/core/graph/graph.h"
+#include "gar/core/rule.h"
 
 // ChainMiner: mines GAR chain rules from a triple graph, AMIE-style:
 //
@@ -62,7 +62,7 @@ class ChainMiner {
       std::unordered_map<TypeSig, std::unordered_set<std::uint64_t>,
                          TypeSigHash>;
 
-  ChainMiner(const gar::core::graph::TripleGraph& graph, MinerConfig config);
+  ChainMiner(const gar::core::graph::Graph& graph, MinerConfig config);
 
   // Runs the mining pass and returns the rules (quality fields filled).
   std::vector<GARule> Mine();
@@ -81,7 +81,7 @@ class ChainMiner {
                          const std::unordered_set<std::uint64_t>& body_pairs,
                          const TypeSig* sig, std::vector<GARule>* out);
 
-  const gar::core::graph::TripleGraph& g_;
+  const gar::core::graph::Graph& g_;
   MinerConfig cfg_;
   MinerStats stats_;
 };

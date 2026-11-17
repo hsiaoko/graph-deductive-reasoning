@@ -1,4 +1,4 @@
-#include "gar/rule_store.h"
+#include "gar/core/rule_store.h"
 
 #include <fstream>
 #include <stdexcept>
@@ -6,15 +6,19 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "gar/csr.h"
-
 namespace gar {
 
 namespace {
 
-// Rebuilds the CSR topology from the flat edge arrays (for the legacy
-// csr_*.bin serialization).
-CSRTopology ToCsr(const GARule& rule) {
+template <typename T>
+void WriteArray(const std::filesystem::path& path, const std::vector<T>& values) {
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) throw std::runtime_error("RuleStore: cannot write " + path.string());
+  out.write(reinterpret_cast<const char*>(values.data()),
+            static_cast<std::streamsize>(values.size() * sizeof(T)));
+}
+
+void SavePatternBin(const GARule& rule, const std::filesystem::path& dir) {
   std::vector<EdgeIndex> offsets(rule.num_vertices() + 1, 0);
   for (auto s : rule.edge_src) ++offsets[static_cast<std::size_t>(s) + 1];
   for (std::size_t i = 1; i < offsets.size(); ++i) offsets[i] += offsets[i - 1];
@@ -26,8 +30,9 @@ CSRTopology ToCsr(const GARule& rule) {
     indices[pos] = static_cast<VertexID>(rule.edge_dst[e]);
     labels[pos] = static_cast<LabelID>(rule.edge_labels[e]);
   }
-  return CSRTopology(std::move(offsets), std::move(indices),
-                     std::move(labels));
+  WriteArray(dir / "csr_offsets.bin", offsets);
+  WriteArray(dir / "csr_indices.bin", indices);
+  if (rule.has_edge_labels()) WriteArray(dir / "csr_edge_labels.bin", labels);
 }
 
 using RevLabels = std::unordered_map<LabelID, std::string>;
@@ -159,7 +164,7 @@ void RuleStore::SaveDir(const std::vector<GARule>& rules,
     std::filesystem::create_directories(dir);
 
     // Topology goes to the CSR binaries; the YAML carries no inline edges.
-    ToCsr(rule).SaveBin(dir);
+    SavePatternBin(rule, dir);
 
     YAML::Node root;
     root["rule"] = EmitRule(rule, /*inline_edges=*/false);

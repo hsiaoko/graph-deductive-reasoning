@@ -1,7 +1,7 @@
 // deduce_gpu: full logical closure (chase) of a GAR rule set over a KG,
 // with the per-rule match + X-evaluation + head emission running on the GPU
 // (MatrixGraph's task::GARDeduce). Thin shell over
-// gar::core::engine::deduction::GpuDeduceEngine; argument parsing, input loading and
+// gar::core::engine::deduction::GpuChaseEngine; argument parsing, input loading and
 // output reporting are shared with gar_reason and deduce via
 // full_deduce_cli.h. The host-side round driver lives in the engine and is
 // SHARED with the CPU chase (gar::core::graph::MergeRoundFacts), so both engines
@@ -19,7 +19,7 @@
 #include <iostream>
 
 #include "full_deduce_cli.h"
-#include "gar/engine/deduction/gpu_deduce_engine.h"
+#include "gar/core/chase/gpu_chase_engine.h"
 
 int main(int argc, char** argv) {
   const gar_apps::FullDeduceArgs args =
@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
   try {
     gar_apps::FullDeduceInputs in =
         gar_apps::LoadFullDeduceInputs(args, "deduce_gpu");
-    gar::core::engine::chase::GpuDeduceEngine engine(
+    gar::core::engine::chase::GpuChaseEngine engine(
         in.graph, in.attrs.columns.empty() ? nullptr : &in.attrs);
     const auto res = engine.Run(in.rules, args.cfg);
     gar_apps::ReportFullDeduce(args, in, res, "deduce_gpu", "chase (GPU)");

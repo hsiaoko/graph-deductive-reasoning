@@ -8,7 +8,7 @@
 #include <random>
 #include <string>
 
-#include "gar/engine/agent/value_model.h"
+#include "gar/core/agent/value_model.h"
 
 int main(int argc, char** argv) {
   if (argc != 4) {

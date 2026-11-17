@@ -1,6 +1,6 @@
 #include "producer_tracker.h"
 
-#include "gar/analysis/predicate_table.h"
+#include "gar/core/analysis/predicate_table.h"
 
 namespace gar::core::engine {
 namespace agent {

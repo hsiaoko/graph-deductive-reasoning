@@ -5,7 +5,6 @@ project(garagent VERSION 0.1.0 LANGUAGES CXX)
 #######################
 # Options
 #######################
-option(GAR_ENABLE_MATRIXGRAPH "Enable MatrixGraph (CUDA) integration via third_party/MatrixGraph" ON)
 option(GAR_BUILD_EXAMPLES "Build examples" ON)
 
 #######################
@@ -25,7 +24,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 message(STATUS "[GARAgent] Build type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "[GARAgent] MatrixGraph integration: ${GAR_ENABLE_MATRIXGRAPH}")
+message(STATUS "[GARAgent] MatrixGraph integration: required")
 
 #######################
 # Third Party: MatrixGraph
@@ -35,24 +34,17 @@ message(STATUS "[GARAgent] MatrixGraph integration: ${GAR_ENABLE_MATRIXGRAPH}")
 # the `matrixgraph_core` target. EXCLUDE_FROM_ALL keeps its apps/tools out of
 # the default build; targets are compiled only when something links them.
 set(MATRIXGRAPH_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/third_party/MatrixGraph)
-
-if (GAR_ENABLE_MATRIXGRAPH)
-    if (NOT EXISTS ${MATRIXGRAPH_ROOT}/CMakeLists.txt)
-        message(FATAL_ERROR
-            "third_party/MatrixGraph is missing. Clone it with:\n"
-            "  git clone https://github.com/hsiaoko/MatrixGraph third_party/MatrixGraph\n"
-            "  (cd third_party/MatrixGraph && git submodule update --init)\n"
-            "Or configure with -DGAR_ENABLE_MATRIXGRAPH=OFF.")
-    endif ()
-    enable_language(CUDA)
-    if (NOT DEFINED CUDA_ARCHITECTURES)
-        set(CUDA_ARCHITECTURES "sm_70")
-    endif ()
-    add_subdirectory(${MATRIXGRAPH_ROOT} EXCLUDE_FROM_ALL)
-else ()
-    # Minimal fallback: only yaml-cpp (bundled inside MatrixGraph's tree).
-    add_subdirectory(${MATRIXGRAPH_ROOT}/third_party/yaml-cpp EXCLUDE_FROM_ALL)
+if (NOT EXISTS ${MATRIXGRAPH_ROOT}/CMakeLists.txt)
+    message(FATAL_ERROR
+        "third_party/MatrixGraph is missing. Clone it with:\n"
+        "  git clone https://github.com/hsiaoko/MatrixGraph third_party/MatrixGraph\n"
+        "  (cd third_party/MatrixGraph && git submodule update --init)")
 endif ()
+enable_language(CUDA)
+if (NOT DEFINED CUDA_ARCHITECTURES)
+    set(CUDA_ARCHITECTURES "sm_70")
+endif ()
+add_subdirectory(${MATRIXGRAPH_ROOT} EXCLUDE_FROM_ALL)
 
 #######################
 # Project Components
@@ -63,9 +55,6 @@ add_subdirectory(core)
 add_subdirectory(core/hdc)
 add_subdirectory(core/graph)
 add_subdirectory(core/analysis)
-if (GAR_ENABLE_MATRIXGRAPH)
-    add_subdirectory(core/bridge)
-endif ()
 add_subdirectory(core/engine)
 add_subdirectory(tools/miner)
 add_subdirectory(tools/cli)
@@ -74,8 +63,8 @@ add_subdirectory(tools/cli)
 # target to link for downstream consumers.
 add_library(gar_core INTERFACE)
 target_link_libraries(gar_core INTERFACE
-    gar_rule gar_hdc gar_graph gar_analysis gar_bridge
-    gar_engine_deduction gar_engine_agent gar_miner)
+    gar_rule gar_hdc gar_graph gar_analysis
+    gar_engine_chase gar_engine_agent gar_miner)
 add_library(gar::core ALIAS gar_core)
 
 if (GAR_BUILD_EXAMPLES)

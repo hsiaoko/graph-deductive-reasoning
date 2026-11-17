@@ -2,7 +2,7 @@
 
 #include <queue>
 
-#include "gar/engine/agent/executor.h"  // AgentContext
+#include "gar/core/agent/executor.h"  // AgentContext
 #include "rule_support.h"
 
 namespace gar::core::engine {
@@ -62,7 +62,7 @@ bool SlotDerivable(std::uint32_t slot, const GARule& rule,
 }  // namespace
 
 bool BuildRulePlan(const GARule& rule, std::uint32_t rule_idx,
-                   const AgentContext& ctx, const gar::core::graph::TripleGraph& g,
+                   const AgentContext& ctx, const gar::core::graph::Graph& g,
                    RulePlan* out) {
   RuleHead head;
   if (!RuleSupported(rule, &head)) return false;

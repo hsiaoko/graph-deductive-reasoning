@@ -24,7 +24,7 @@ def main():
             name = f"{goal['goal_id']}/{backend}"
             output = WORK / "runs" / name
             command = base.agent_command(goal, output) + [
-                "--policy", "q-hdc", "--value-model", str(MODEL),
+                "--policy", "learned", "--value-model", str(MODEL),
                 "--hdc-value-backend", backend, "--fair-interval", "1024",
             ]
             base.run(name, command, WORK / "runs")

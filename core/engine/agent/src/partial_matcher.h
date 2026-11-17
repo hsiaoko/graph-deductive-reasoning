@@ -14,11 +14,11 @@
 #include <cstdint>
 #include <vector>
 
-#include "gar/analysis/dependency_graph.h"
-#include "gar/engine/agent/executor.h"  // AgentContext
-#include "gar/engine/agent/motif.h"
-#include "gar/graph/pattern_matcher.h"
-#include "gar/rule.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/agent/executor.h"  // AgentContext
+#include "gar/core/agent/motif.h"
+#include "gar/core/graph/pattern_matcher.h"
+#include "gar/core/rule.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -43,7 +43,7 @@ struct RulePlan {
 // Builds the plan; returns false for rules the chase convention skips
 // (RuleSupported) or that cannot reach the goal in the DG.
 bool BuildRulePlan(const GARule& rule, std::uint32_t rule_idx,
-                   const AgentContext& ctx, const gar::core::graph::TripleGraph& g,
+                   const AgentContext& ctx, const gar::core::graph::Graph& g,
                    RulePlan* out);
 
 // Expand a sub-spec embedding (sub vertex space) into the original vertex

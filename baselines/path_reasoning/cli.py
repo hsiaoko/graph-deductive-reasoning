@@ -8,9 +8,17 @@ import time
 
 import torch
 
-from .engine import evaluate, resolve_device, set_seed, train_epoch
+from .engine import evaluate, evaluate_grouped, resolve_device, set_seed, train_epoch
 from .graph import KnowledgeGraph
 from .models import build_model
+
+
+def evaluate_dataset(model, tensors, data, known, batch_size, limit_eval,
+                     limit_groups, split="test"):
+    if split == "test" and data.test_group_ids is not None:
+        return evaluate_grouped(model, tensors, data.test, data.test_group_ids,
+                                data.test_labels, batch_size, limit_groups)
+    return evaluate(model, tensors, data.split(split), known, batch_size, limit_eval)
 
 
 def add_model_options(parser):
@@ -27,6 +35,7 @@ def add_model_options(parser):
                         default=True)
     parser.add_argument("--dependent", action=argparse.BooleanOptionalAction,
                         default=True)
+    parser.add_argument("--gradient-checkpointing", action="store_true")
     parser.add_argument("--node-ratio", type=float, default=0.1)
     parser.add_argument("--degree-ratio", type=float, default=1.0)
 
@@ -37,6 +46,7 @@ def model_config(args, graph):
         "num_layers": args.num_layers, "message": args.message,
         "aggregate": args.aggregate, "short_cut": args.short_cut,
         "layer_norm": args.layer_norm, "dependent": args.dependent,
+        "gradient_checkpointing": args.gradient_checkpointing,
     }
     if args.model == "astarnet":
         config.update(node_ratio=args.node_ratio, degree_ratio=args.degree_ratio)
@@ -102,15 +112,17 @@ def train(args):
     checkpoint = out / ("best.pt" if best_epoch else "last.pt")
     saved = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(saved["state_dict"])
-    test = evaluate(model, tensors, graph.test, known_all,
-                    args.eval_batch_size, args.limit_eval)
+    test = evaluate_dataset(model, tensors, graph, known_all,
+                            args.eval_batch_size, args.limit_eval,
+                            args.limit_groups)
     result = {"model": args.model, "device": str(device),
               "train_wall_sec": train_wall, "best_epoch": best_epoch,
               "best_valid_mrr": best_mrr if best_epoch else None,
               "test": test, "model_config": config,
               "train_samples": graph.num_train_examples,
               "signed_training": graph.signed_train is not None,
-              "eval_limit": args.limit_eval}
+              "eval_limit": args.limit_eval,
+              "eval_limit_groups": args.limit_groups}
     (out / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)
 
@@ -129,8 +141,9 @@ def evaluate_checkpoint(args):
     evaluation = graph.split(args.split)
     if len(evaluation) == 0:
         raise RuntimeError(f"evaluation split is empty: {args.split}")
-    result = evaluate(model, graph.graph(device), evaluation,
-                      graph.known_targets(), args.eval_batch_size, args.limit_eval)
+    result = evaluate_dataset(model, graph.graph(device), graph,
+                              graph.known_targets(), args.eval_batch_size,
+                              args.limit_eval, args.limit_groups, args.split)
     result.update(model=saved["model_name"], checkpoint=str(args.checkpoint),
                   split=args.split, device=str(device))
     if args.summary:
@@ -159,6 +172,7 @@ def main():
     train_parser.add_argument("--eval-every", type=int, default=1)
     train_parser.add_argument("--limit-train", type=int)
     train_parser.add_argument("--limit-eval", type=int)
+    train_parser.add_argument("--limit-groups", type=int)
     train_parser.add_argument("--seed", type=int, default=42)
     train_parser.set_defaults(func=train)
 
@@ -170,6 +184,7 @@ def main():
     eval_parser.add_argument("--device", default="auto")
     eval_parser.add_argument("--eval-batch-size", type=int, default=4)
     eval_parser.add_argument("--limit-eval", type=int)
+    eval_parser.add_argument("--limit-groups", type=int)
     eval_parser.add_argument("--summary")
     eval_parser.set_defaults(func=evaluate_checkpoint)
     args = parser.parse_args()

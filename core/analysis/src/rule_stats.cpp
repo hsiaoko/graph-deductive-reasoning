@@ -1,4 +1,4 @@
-#include "gar/analysis/rule_stats.h"
+#include "gar/core/analysis/rule_stats.h"
 
 #include <algorithm>
 #include <vector>

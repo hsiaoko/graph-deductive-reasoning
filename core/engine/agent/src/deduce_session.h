@@ -21,8 +21,8 @@
 #include "precondition_cache.h"
 #include "producer_tracker.h"
 #include "working_set.h"
-#include "core/task/cpu_task/hom_match.cuh"
-#include "gar/engine/agent/executor.h"
+#include "match_backend.h"
+#include "gar/core/agent/executor.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -60,15 +60,6 @@ class DeduceSession {
   };
 
   void BuildPlans();
-  // Rebuilds the matching index from the current graph (after each derived
-  // fact is merged) so the HomMatcher always sees the latest G∪Γ.
-  void RebuildIndex();
-  // Homomorphism enumeration through the MatrixGraph HomMatcher: converts
-  // the PatternSpec to GARPatternArrays and runs the pinned matcher.
-  std::uint64_t Enumerate(
-      const gar::core::graph::PatternSpec& spec, std::uint64_t cap,
-      std::vector<std::uint32_t>* out, bool* capped,
-      const std::unordered_map<std::uint32_t, std::uint32_t>& pins);
   std::unordered_map<std::uint32_t, std::uint32_t> GoalPins(
       const deduce::RulePlan& pl) const;
   std::unordered_map<std::uint32_t, std::uint32_t> GoalSubPins(
@@ -84,19 +75,34 @@ class DeduceSession {
   void RecordWitness(const Fact& fact);
 
   void AddComplete(std::uint32_t pi, const std::vector<std::uint32_t>& emb);
-  void AddPartials(std::uint32_t pi, const deduce::DeferrableEdge& de,
-                   const std::unordered_map<std::uint32_t, std::uint32_t>&
-                       sub_pins);
+  void AddPartialMatches(std::uint32_t pi,
+                         const deduce::DeferrableEdge& de,
+                         const std::vector<std::uint32_t>& embeddings);
   void GenerateStar(std::uint32_t pi);
   void VerifyGeneration();
 
   bool WallExceeded() const;
   bool BudgetHit() const;
 
-  void OnDerivation(const gar::core::graph::DerivedEdge& d);
-  void CompleteDeltas(const gar::core::graph::DerivedEdge& d, std::uint32_t mirror);
-  void CompletePartials(const gar::core::graph::DerivedEdge& d, std::uint32_t mirror);
-  void GrowPartials(const gar::core::graph::DerivedEdge& d, std::uint32_t mirror);
+  struct DeltaMatchJob {
+    std::uint32_t pi = 0;
+    std::size_t defer = 0;
+    bool partial = false;
+  };
+
+  void OnDerivations(
+      const std::vector<gar::core::graph::DerivedEdge>& derived);
+  void CompleteDeltas(
+      const std::vector<gar::core::graph::DerivedEdge>& derived,
+      std::vector<MatchRequest>* requests,
+      std::vector<DeltaMatchJob>* jobs);
+  void CompletePartials(const gar::core::graph::DerivedEdge& d,
+                        std::uint32_t mirror);
+  void GrowPartials(
+      const std::vector<gar::core::graph::DerivedEdge>& derived,
+      std::vector<MatchRequest>* requests,
+      std::vector<DeltaMatchJob>* jobs);
+  void FlushDerivations();
 
   // 2 = all present (derive), 1 = dynamic missing (suspended),
   // 0 = static false (prune), 3 = static false answered from H.
@@ -114,8 +120,8 @@ class DeduceSession {
   const AgentContext& ctx_;
   const ExecConfig& cfg_;
   const ExecKit& kit_;
-  const gar::core::graph::TripleGraph& g_;
-  std::optional<sics::matrixgraph::core::task::cpu_task::HomMatchIndex> idx_;
+  const gar::core::graph::Graph& g_;
+  std::unique_ptr<MatchBackend> match_backend_;
   const ScoringContext sctx_;
 
   AgentResult res_;
@@ -138,6 +144,7 @@ class DeduceSession {
     std::uint32_t rule = 0;
   };
   std::vector<QTraceRow> q_trace_rows_;
+  std::vector<gar::core::graph::DerivedEdge> pending_derivations_;
 
   std::chrono::steady_clock::time_point t0_;
   std::uint32_t next_star_ = 0;  // first unexpanded star (star discipline)

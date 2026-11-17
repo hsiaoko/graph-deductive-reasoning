@@ -23,8 +23,8 @@
 #include <vector>
 
 #include "partial_matcher.h"
-#include "gar/engine/agent/fact.h"
-#include "gar/engine/agent/motif.h"
+#include "gar/core/agent/fact.h"
+#include "gar/core/agent/motif.h"
 
 namespace gar::core::engine {
 namespace agent {

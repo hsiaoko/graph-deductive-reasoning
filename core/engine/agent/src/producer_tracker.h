@@ -17,8 +17,8 @@
 #include <vector>
 
 #include "partial_matcher.h"
-#include "gar/analysis/dependency_graph.h"
-#include "gar/rule.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/rule.h"
 
 namespace gar::core::engine {
 namespace agent {

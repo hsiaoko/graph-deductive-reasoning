@@ -14,22 +14,18 @@
 ```
 ├── CMakeLists.txt            # 顶层构建
 ├── core/                     # gar::core 单一库（规则 + 图 + HDC + 分析 + 演绎引擎）
-│   ├── include/gar/          #   gar::core::rule：规则表示与 IO
-│   │   ├── types.h           #     VertexID/EdgeIndex/LabelID（对齐 MatrixGraph：均 uint32）
-│   │   ├── csr.h             #     CSRTopology（仅 legacy csr_*.bin 二进制序列化）
-│   │   ├── predicate.h       #     五种谓词：const/var/edge/exists/ml
-│   │   ├── rule.h            #     GARule = (Q, X -> p₀)：扁平边数组 + 语义字段
-│   │   ├── rule_loader.h     #     YAML/目录/规则集加载
-│   │   └── rule_store.h      #     规则集 YAML 写出
-│   ├── graph/                #   gar::core::graph：图与语义内核
-│   │   ├── triple_graph.h    #     G∪Γ 三元组存储（惰性 out-adjacency）
-│   │   ├── pattern_matcher.h #     embedding 枚举（CPU 回溯；已被 HomMatch 取代）
-│   │   ├── predicate_evaluator.h / fact_merger.h / vertex_attrs.h / fact.h
+│   ├── include/gar/core/     #   所有 public include 的统一前缀
+│   │   ├── rule.h            #     GARule = (Q, X -> p₀)：GARPatternArrays + 语义字段
+│   │   ├── rule_loader.h / rule_store.h / predicate.h / types.h
+│   ├── graph/                #   gar::core::graph：GARGraphArrays + Γ + 语义内核
+│   │   ├── graph.h           #     基础图数组、动态事实集与版本号
+│   │   ├── pattern_matcher.h #     MatrixGraph HomMatch + core 动态增量匹配
+│   │   ├── attributes.h      #     MatrixGraph Attribute / AttributesIO::Storage
+│   │   └── predicate_evaluator.h / fact_merger.h / fact.h
 │   ├── hdc/                  #   gar::core::hdc：HDC 数值库（bit-packed 超向量）
 │   ├── analysis/             #   gar::core::analysis：依赖图 + 谓词表 + 统计
-│   ├── bridge/               #   gar::core::bridge：ImmutableCSR → TripleGraph 适配
 │   └── engine/
-│       ├── deduction/        #     gar::core::engine::chase：全闭包 chase（CPU + GPU）
+│       ├── chase/            #     gar::core::engine::chase：全闭包 chase（CPU + GPU）
 │       └── agent/            #     gar::core::engine::agent：AdaDeduce（策略制导演绎，论文核心）
 ├── tools/                    # 消费者（用 gar::core）
 │   ├── cli/                  #   kg_loader / match_pattern / mine_predicates / deduce /
@@ -46,9 +42,9 @@
 
 ```
 gar::core::rule  ←  gar::core::{graph,hdc,analysis}
-                  ↖   gar::core::engine::{chase,agent}  ←  gar::core::bridge（ImmutableCSR 加载）
+                  ↖   gar::core::engine::{chase,agent}
 tools::{cli,miner}  ←  gar::core（消费者）
-MatrixGraph        ←  gar::core::bridge / gar::core::engine（唯一外部依赖）
+MatrixGraph        ←  gar::core::{rule,graph,engine}（唯一外部依赖）
 ```
 
 
@@ -68,7 +64,7 @@ cmake --build build -j
 
 选项：
 
-- `-DGAR_ENABLE_MATRIXGRAPH=ON/OFF`：是否启用 MatrixGraph（CUDA）集成；OFF 时构建纯 CPU 库（core/hdc/graph/analysis/miner 库本体），bridge/engine/app 不可用
+- MatrixGraph/CUDA 为必需依赖，不再提供纯 CPU 构建开关。
 - `-DGAR_BUILD_EXAMPLES=ON/OFF`
 
 ## 规则格式
@@ -108,7 +104,7 @@ csr_indices.bin [+ csr_edge_labels.bin]`（`mine_rules` 的输出布局，`RuleL
 confidence = support / body 对数。
 
 ```bash
-# 1. FinReflectKG -> TripleGraph 二进制（字典编码 + 去重）
+# 1. FinReflectKG -> Graph 二进制（字典编码 + 去重）
 python3 tools/prepare_finreflectkg.py \
     --src /path/to/FinReflectKG/data --out /ssd_data/zhuxk/graphs/KG/finreflectkg/triple_graph
 
@@ -126,7 +122,7 @@ python3 tools/prepare_finreflectkg.py \
 ./build/bin/load_rule /ssd_data/zhuxk/graphs/KG/finreflectkg/rules/gar_000001
 ```
 
-`mine_rules` 的输入二选一：`--graph`（TripleGraph 原始二进制）或 `--csr`
+`mine_rules` 的输入二选一：`--graph`（Graph 原始二进制）或 `--csr`
 （MatrixGraph ImmutableCSR 目录，**推荐**——与后续 MatrixGraph 计算共用同一份图，
 两种输入已验证产出完全一致的规则集）。`--dataset` 记录数据集的**根路径**
 （写入每条规则的 `quality.dataset` 溯源字段，缺省取输入图的路径）。挖掘完成后
@@ -196,12 +192,12 @@ ChainMiner 完全一致，k=3 新增 30,055 条三边链、43,108 条星型（4 
 
 ## KG 装载到 MatrixGraph（kg_loader）
 
-把统一格式的三元组图（TripleGraph 目录）装进 MatrixGraph 的 `ImmutableCSR`
+把统一格式的三元组图（Graph 目录）装进 MatrixGraph 的 `ImmutableCSR`
 （走 MatrixGraph 自己的 `Edges` → `Edgelist2ImmutableCSR` → `ImmutableCSR::Write`
 管线，保证二进制布局与引擎完全一致）：
 
 ```bash
-# 转换：TripleGraph -> ImmutableCSR + 属性表
+# 转换：Graph -> ImmutableCSR + 属性表
 ./build/bin/kg_loader convert --graph <triple_graph_dir> --out <csr_dir> [--label-from-prefix]
 
 # 展示：用 ImmutableCSR::Read 读回，打印元数据、label 分布、属性 schema、样例顶点
@@ -228,7 +224,7 @@ ChainMiner 完全一致，k=3 新增 30,055 条三边链、43,108 条星型（4 
 - `--label-from-prefix`：按实体名 `:` 前缀（如 `drug:CID...` → `drug`）生成顶点 label
   （写入 label/0.bin）、`vertex_attr/type` 列和 `dict/labels.tsv`（label id → 名字），
   适用于 ogbl-biokg 这类带类型的图谱。
-- 字符串（实体名/关系名）不进属性表，保留在 TripleGraph 字典层（`entities.tsv` /
+- 字符串（实体名/关系名）不进属性表，保留在 Graph 字典层（`entities.tsv` /
   `relations.tsv`），跨语言只传 uint32 id——与 GraphRAG 的契约一致。
 
 ## 模式匹配与匹配表（match_pattern）
@@ -293,7 +289,7 @@ var 候选要求等值组两侧都 ≥2 个实体。
 
 给定规则集目录与 KG，做完整的 **chase**（CPU `engine::deduction::CpuChaseEngine` / GPU
 `engine::deduction::GpuDeduceEngine`（MatrixGraph `task::GARDeduce`），统一入口
-`gar_reason --mode full --engine cpu|gpu`，旧 app `deduce` / `deduce_gpu` 为薄壳）：
+`gar_reason --mode chase --engine cpu|gpu`，旧 app `deduce` / `deduce_gpu` 为薄壳）：
 
 ```
 G_{i+1} = G_i ∪ { p₀(emb) | 规则 Q[x̄](X → p₀)，emb ∈ Q(G_i)，X(emb) 成立 }
@@ -304,7 +300,7 @@ G_{i+1} = G_i ∪ { p₀(emb) | 规则 Q[x̄](X → p₀)，emb ∈ Q(G_i)，X(e
 拓扑匹配为同态语义（边 label、顶点 label 约束），X 谓词
 （const/var/exists/edge）逐 embedding 求值——**这是目前唯一 X 生效的环节**
 （`match_pattern` 的 GPU GARMatch 只做拓扑+label）。推出的边按轮次合并回
-TripleGraph（含逆槽位镜像），后续轮次在增强图上继续匹配，支持跨规则链式推导。
+Graph（含逆槽位镜像），后续轮次在增强图上继续匹配，支持跨规则链式推导。
 
 ```bash
 ./build/bin/deduce --csr /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr \
@@ -399,7 +395,7 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 ./build/bin/kg_loader convert --graph data/synth --out /tmp/synth_csr
 
 # 2. 全闭包演绎（CPU；--engine gpu 为 GPU 版，输出逐字节一致）
-./build/bin/gar_reason --mode full --engine cpu \
+./build/bin/gar_reason --mode chase --engine cpu \
     --csr /tmp/synth_csr --rules /tmp/synth_rules --out /tmp/synth_full
 
 # 3. 策略制导演绎：朝一个闭包第二轮才导出的事实做目标推理
@@ -409,6 +405,29 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
     --policy deterministic --scorer exact \
     --out /tmp/synth_agent --verify-against-closure
 #    → goal_derived=true，soundness=pass
+# agent 增加 --engine gpu 后由 GARAgent 自己的 GPU 后端执行 full/partial/delta
+# 匹配；策略、精确谓词求值、R/W 挂起复活与派生计账仍在主机端。
+
+# 可选：每个 goal 仅在起步时调用一次 LLM，为 star 排序生成偏好；
+# motif 选择仍由 --policy 控制。--llm-mock 用于无网络的确定性回归。
+./build/bin/gar_reason --mode agent \
+    --csr /tmp/synth_csr --rules /tmp/synth_rules \
+    --goal 'lives_in(p0,t1)' --budget 20 \
+    --policy deterministic --scorer exact \
+    --llm-guide --llm-model deepseek-chat \
+    --out /tmp/synth_agent_guided --verify-against-closure
+# DeepSeek/OpenAI 兼容接口：从环境变量 DEEPSEEK_API_KEY 读取密钥。
+# 默认模型为 deepseek-chat；
+# 默认 base URL 为 https://api.deepseek.com，可用 --llm-base-url 覆盖。
+# 本地 Jev 决策服务可用 --llm-backend jev --llm-base-url http://host:port。
+# LLM2Jev submodule 与本地部署脚本见 deploy/jev/README.md。
+# 架构、协议、排序公式、实验与排查详见 docs/jev_guide.md。
+
+# 冷启动 warm-start 流程：前 N 个 goal 用 LLM guide 并采集 Q-trace，
+# 训练后，剩余 warm goals 自动切换 learned policy，不再调用 LLM。
+python3 experiments/fixpoint_policy/run_warm_start.py \
+    --work /tmp/garagent-warm-start --cold-goals 4 --engine gpu \
+    --model numeric  # 或 --model hdc；测试可加 --llm-mock
 
 # 4. 三方对账（agent vs cpu 闭包）
 ./build/bin/gar_analyze verify --run \
@@ -424,27 +443,25 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 | 子模块别名 | 说明 |
 |---|---|
 | `gar::core::rule` | 规则表示与加载（扁平边数组 + YAML） |
-| `gar::core::graph` | 图与语义内核（TripleGraph + 谓词求值/事实合并） |
+| `gar::core::graph` | MatrixGraph 图数组 + Γ + 谓词求值/事实合并 |
 | `gar::core::hdc` | HDC 数值内核（bit-packed 超向量） |
 | `gar::core::analysis` | 依赖图 + 谓词表 + 统计 |
-| `gar::core::bridge` | ImmutableCSR → TripleGraph 适配 |
 | `gar::core::engine::chase` | 全闭包 chase（CPU + GPU） |
 | `gar::core::engine::agent` | AdaDeduce（策略制导演绎） |
 | `gar::tools::miner` | 规则挖掘 |
-| `gar::bridge` | 到 MatrixGraph 的桥接（依赖 `matrixgraph_core`，CUDA） |
 
 ## 可执行程序
 
 | 程序 | 用途 |
 |---|---|
-| `mine_rules` | 链式 GAR 挖掘（TripleGraph/ImmutableCSR → 一规则一目录） |
+| `mine_rules` | 链式 GAR 挖掘（Graph/ImmutableCSR → 一规则一目录） |
 | `mine_graph_rules` | 通用拓扑 GAR 挖掘（星型/三角/带环，k≤2 时与 mine_rules 一致） |
 | `deduce` | 演绎：规则集在 KG 上的完整逻辑闭包（CPU chase，拓扑 + X 谓词） |
 | `deduce_gpu` | 演绎 GPU 版（MatrixGraph GARDeduce：匹配/X 求值/head 发射在 device） |
-| `gar_reason` | 演绎统一入口（--mode full --engine cpu|gpu，输出与旧 app 逐字节一致；--threads 限 CPU 并行度） |
+| `gar_reason` | 演绎统一入口（--mode chase --engine cpu|gpu，输出与旧 app 逐字节一致；--threads 限 CPU 并行度） |
 | `gar_analyze` | 分析工具链（rules-stats / gen-goals / gen-workload / chain-cmp / verify 三方对账） |
 | `validate_rules` | 规则检验：重算 pivot-pair support/confidence 与挖掘值对账（PASS/DRIFT） |
-| `kg_loader` | TripleGraph ↔ MatrixGraph ImmutableCSR 转换与 CLI 展示 |
+| `kg_loader` | Graph ↔ MatrixGraph ImmutableCSR 转换与 CLI 展示 |
 | `match_pattern` | 规则模式回放（复用 MatrixGraph GPU GARMatch）→ 匹配表 + 属性谓词统计 |
 | `mine_predicates` | 阶段三：规则匹配上的 const/var 属性谓词挖掘（X 回填） |
 | `load_rule` | 加载单条规则（目录形式）并打印 |

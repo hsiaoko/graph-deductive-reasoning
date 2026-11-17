@@ -8,7 +8,7 @@
 #include <iostream>
 #include <string>
 
-#include "gar/engine/agent/value_model.h"
+#include "gar/core/agent/value_model.h"
 
 int main(int argc, char** argv) {
   if (argc != 2 && argc != 3) {

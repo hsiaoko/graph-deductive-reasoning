@@ -7,12 +7,12 @@
 
 #include <cstdint>
 
-#include "gar/analysis/dependency_graph.h"
-#include "gar/analysis/predicate_table.h"
-#include "gar/engine/agent/motif.h"
-#include "gar/graph/pattern_matcher.h"
-#include "gar/graph/triple_graph.h"
-#include "gar/rule.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/analysis/predicate_table.h"
+#include "gar/core/agent/motif.h"
+#include "gar/core/graph/pattern_matcher.h"
+#include "gar/core/graph/graph.h"
+#include "gar/core/rule.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -63,7 +63,7 @@ inline gar::core::graph::PatternSpec BuildSpec(const GARule& r) {
 }
 
 // Vertex-label post-filter, the chase's convention.
-inline bool VertexLabelsOk(const GARule& r, const gar::core::graph::TripleGraph& g,
+inline bool VertexLabelsOk(const GARule& r, const gar::core::graph::Graph& g,
                            const std::uint32_t* emb) {
   if (!g.has_vertex_labels()) return true;
   const auto n = static_cast<std::uint32_t>(r.num_vertices());

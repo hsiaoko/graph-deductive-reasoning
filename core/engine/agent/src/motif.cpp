@@ -1,7 +1,7 @@
-#include "gar/engine/agent/motif.h"
+#include "gar/core/agent/motif.h"
 
-#include "gar/analysis/predicate_table.h"
-#include "gar/hdc/hypervector.h"
+#include "gar/core/analysis/predicate_table.h"
+#include "gar/core/hdc/hypervector.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -33,7 +33,7 @@ std::uint64_t MotifHash(std::uint32_t rule, const std::uint32_t* emb,
 }
 
 void GroundPremises(const gar::GARule& rule, const Motif& mu,
-                    const gar::core::graph::TripleGraph& g,
+                    const gar::core::graph::Graph& g,
                     const gar::core::analysis::PredicateTable& table,
                     std::vector<Fact>* out) {
   out->clear();

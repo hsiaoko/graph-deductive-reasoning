@@ -1,4 +1,4 @@
-#include "gar/analysis/predicate_table.h"
+#include "gar/core/analysis/predicate_table.h"
 
 #include <algorithm>
 
@@ -24,7 +24,7 @@ const std::string& PredicateTable::Name(std::uint32_t id) const {
 
 namespace {
 
-// Strips the "^-1" inverse-slot suffix (TripleGraph::SlotName's spelling).
+// Strips the "^-1" inverse-slot suffix (Graph::SlotName's spelling).
 std::string BaseRelationName(std::string name) {
   constexpr char kInv[] = "^-1";
   if (name.size() > 3 && name.compare(name.size() - 3, 3, kInv) == 0) {
