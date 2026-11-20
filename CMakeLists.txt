@@ -68,7 +68,7 @@ endif ()
 # Project Components
 #######################
 # Everything (except third_party) lives under core/ (the gar::core::rule library
-# tree) and tools/ (executables and scripts). See docs/refactor_plan.md.
+# tree) and tools/ (executables and scripts). See docs/architecture.md.
 add_subdirectory(core)
 add_subdirectory(core/hdc)
 add_subdirectory(core/graph)

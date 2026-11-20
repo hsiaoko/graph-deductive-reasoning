@@ -1,208 +1,201 @@
-# OGBL-BioKG overall-performance 试验设计
+# OGBL-BioKG overall-performance experiment design
 
-状态：**DESIGN ONLY，待检查；不得据此启动试验或填入结果。**
+Status: **DESIGN ONLY. This document does not authorize launching the experiment or inserting results.**
 
-日期：2026-11-17。
+Date: 2026-11-17.
 
-## 1. 目的与范围
+## 1. Purpose and scope
 
-在同一 BioKG 图、同一冻结规则集和同一 36 个固定实例 goal 上，比较：
+Compare five methods on one BioKG graph, one frozen rule set, and the same 36 grounded test goals:
 
-1. **Deterministic**：exact handcrafted score 的确定性贪心 action 选择。
-2. **DepOnly**：只从 dependency tree 中选择 goal-relevant 规则并执行推理；其余优化全部关闭。
-3. **Random**：使用 exact score 的 softmax 随机 action 选择。
-4. **Learned**：现有 action-level numeric-Q，预测剩余求值成本。
-5. **AdaDeduceStar**：proof-star 扩展方法，包括 proof-DAG 学习到的 proof-efficiency star 排序、exact deterministic action 选择和全部执行器优化；学习只允许在相同 goal-distance 桶内重排，不能跨桶提升高产远目标 star。
+1. **Deterministic**: deterministic action selection using the exact handcrafted score.
+2. **DepOnly**: dependency-cone reasoning with every other optimization disabled.
+3. **Random**: softmax action selection using the exact score.
+4. **Learned**: action-level numeric-Q that predicts remaining evaluation cost.
+5. **AdaDeduceStar**: the proof-star extension with learned proof-efficiency star ordering, exact deterministic action selection, and executor optimizations. Learning may reorder within a goal-distance bucket but cannot promote a high-yield distant star across buckets.
 
-本试验不使用 LLM/Jev。Chase 只用于产生 ground truth 和提供非等价工作量参照，不列入五方法排名。
+This experiment does not use an LLM or JEV. Chase produces ground truth and a non-equivalent work reference; it is not ranked as a sixth goal-directed method.
 
-命名边界：AdaDeduce 执行器是多个 agent 臂共享的实现；本表中的 **AdaDeduceStar** 指 proof-star 扩展臂。**Learned** 专指 action-level numeric-Q，二者不混用。
+The AdaDeduce executor is shared by several agent arms. **AdaDeduceStar** names this proof-star variant, while **Learned** names action-level numeric-Q. They are not interchangeable.
 
-## 2. 固定输入
+## 2. Frozen inputs
 
-- 图：`/ssd_data/zhuxk/graphs/KG/ogbl-biokg/immutable_csr`。
-- 规模：93,773 个实体、51 种关系、4,762,677 条去重基础边。
-- 顶点类型：drug、protein、disease、sideeffect、function 五类。
-- 原始规则：`/ssd_data/zhuxk/graphs/KG/ogbl-biokg/rules`。
-- 原始规则共 56,601 条，均为类型化规则，挖掘参数为 min-support=200、min-confidence=0.3。
-- 所有方法共享相同的精确规则语义、顶点类型检查、前提求值和 goal 命中语义，但不共享优化能力：DepOnly 刻意关闭除 dependency-tree 过滤外的全部优化。
+- Graph: `/ssd_data/zhuxk/graphs/KG/ogbl-biokg/immutable_csr`.
+- Size: 93,773 entities, 51 base relations, and 4,762,677 deduplicated base edges.
+- Vertex types: drug, protein, disease, sideeffect, and function.
+- Original rules: `/ssd_data/zhuxk/graphs/KG/ogbl-biokg/rules`.
+- Original rule count: 56,601 typed rules, mined with minimum support 200 and minimum confidence 0.3.
 
-不得混用 FB15K-237 的规则、goal、模型或 ground truth。
+All methods share exact rule semantics, vertex-type checks, predicate evaluation, and goal-hit semantics. DepOnly deliberately disables optimizations other than dependency filtering.
 
-## 3. 规则数量与冻结选择算法
+Do not mix FB15K-237 rules, goals, models, or ground truth into this experiment.
 
-### 主规则预算
+## 3. Rule budget and deterministic selection
 
-主试验使用**最多 6,528 条规则**：
+The main rule budget is at most **6,528 rules**:
 
 ```text
-51 个基础关系 × 每个 consequent 关系最多 128 条 = 6,528
+51 base relations × at most 128 rules per consequent relation = 6,528
 ```
 
-这是预算上限，不要求凑满；规则不足的关系按实际数量保留，不把剩余配额转移给高频关系。
+This is an upper bound, not a quota to fill. Unused capacity is not transferred to high-frequency relations.
 
-初始 32 条/关系的预实验冻结了 720 条规则，完整 Chase 正常到达 fixpoint，但 deep 闭包只有两个 consequent 关系，无法同时满足 deep 训练与 relation-disjoint 测试。经检查后决定将配额扩大到 128 条/关系，并在独立工作目录重建规则和 GT；不降低 goal 隔离要求。
+An earlier 32-rules-per-relation pilot froze 720 rules. Chase reached a fixpoint, but the deep closure contained only two consequent relations and could not support deep training plus relation-disjoint testing. The quota was therefore increased to 128 per relation, with rules and ground truth rebuilt in an independent work directory.
 
-不直接使用全部 56,601 条，原因是本试验比较 policy，而不是评估规则挖掘覆盖率；全量规则会让完整闭包和 goal-cone 搜索被大量相似类型化规则主导。也不照搬 FB15K-237 的 640 条，因为 BioKG 的关系数和类型化规则结构不同。
+The full 56,601 rules are not used directly because this is a policy comparison, not a rule-mining coverage evaluation. The BioKG rule budget also need not match FB15K-237 because relation count and typed-rule structure differ.
 
-### 确定性选择
+Selection follows this deterministic procedure:
 
-1. 先剔除执行器不支持的规则，记录剔除数量与原因；不得为增加数量而放松语义。
-2. 按规范化 consequent 基础关系分组。
-3. 组内按 body 长度、顶点类型签名、依赖图递归性和依赖深度分桶，并在桶间确定性交错，避免 quota 被浅层或单一结构占满。
-4. 同桶只按稳定哈希排序；不再按 confidence/support 优先，避免把高置信度浅层规则集中选入。
-5. 对每个 consequent 组最多取 128 条；不使用任何 goal 或方法运行结果来选择规则。
-6. 冻结 `rule_ids.txt`、规则目录和 SHA-256；后续 GT、训练、测试只能读取这一冻结集合。
+1. Remove unsupported rules and record every removal reason without weakening semantics.
+2. Group rules by normalized base consequent relation.
+3. Stratify by body length, vertex-type signature, dependency recursion, and dependency depth. Interleave strata deterministically.
+4. Order within a stratum by stable hash, not confidence or support.
+5. Keep at most 128 rules per consequent group without using goals or method results.
+6. Freeze `rule_ids.txt`, the rule directory, and SHA-256 before generating ground truth or training data.
 
-规则选择盐：`20261117-biokg-overall-rules-v2`。
+Rule-selection salt: `20261117-biokg-overall-rules-v2`.
 
-在运行前记录实际规则总数、各 consequent 的规则数、body 长度分布和类型签名数。若实际规则数或结构与预期严重不符，应先修订设计，而不是静默调整。
+Before execution, record the actual rule count, per-consequent counts, body-length distribution, and type-signature count. Unexpected structure requires a design revision rather than a silent adjustment.
 
-## 4. Ground truth 与 goal 分层
+## 4. Ground truth and difficulty strata
 
-### Ground truth
+Run full Chase on the frozen rule set until fixpoint and preserve:
 
-在冻结的同一规则集上运行完整 Chase 至 fixpoint，得到：
+- the complete derived closure;
+- each fact's first Chase derivation round;
+- graph, rule, and closure SHA-256.
 
-- 完整派生闭包；
-- 每条事实首次派生的 Chase round；
-- 规则、图和闭包的 SHA-256。
+If full Chase cannot reach fixpoint within the resource envelope, mark ground truth **unavailable**. Do not use a partial closure for soundness or completeness claims.
 
-若完整 Chase 在资源包络内不能到达 fixpoint，则状态为 **GT unavailable**，不得把部分闭包当作完整 GT，也不得据此宣称 goal 完备性或 soundness 已对账。
+Difficulty strata are:
 
-Chase 时间与逐 goal agent 时间分开报告。Chase 计算完整闭包，agent 在单个 goal 派生后停止，二者输出工作量不同。
+- `round1`: first derived in round one;
+- `round2`: first derived in round two;
+- `deep`: first derived in round three or later.
 
-### 难度分层
+Derivation round is a proxy, not a strict shortest-proof distance. Goals must be grounded positive facts absent from the initial graph but present in the complete closure.
 
-按事实在完整闭包中的首次派生轮次分层：
+## 5. Test-goal construction
 
-- `round1`：第 1 轮；
-- `round2`：第 2 轮；
-- `deep`：第 3 轮或更晚。
+Freeze 36 test goals before evaluating any method, with 12 goals per stratum:
 
-该轮数是派生层次代理，不等于最短证明的严格边数。只能使用初始图中不存在、但在完整闭包中存在的固定实例正例作为 goal。
-
-## 5. 36 个测试 goal 如何确定
-
-测试集共 **36 个 goal**，在运行任何五方法测试前一次性冻结。每个 stratum 各 12 个，并同时保留两种隔离口径：
-
-| 测试 cohort | round1 | round2 | deep | 合计 |
+| Test cohort | round1 | round2 | deep | Total |
 |---|---:|---:|---:|---:|
-| instance-disjoint | 8 | 8 | 8 | 24 |
-| relation-disjoint | 4 | 4 | 4 | 12 |
-| 合计 | 12 | 12 | 12 | 36 |
+| Instance-disjoint | 8 | 8 | 8 | 24 |
+| Relation-disjoint | 4 | 4 | 4 | 12 |
+| Total | 12 | 12 | 12 | 36 |
 
-### instance-disjoint
+Instance-disjoint goals do not appear as training goal specs and may share consequent relations with training goals. Prefer predicate diversity, with at most two test goals per consequent relation.
 
-- 训练集不包含相同 goal spec；允许与训练 goal 共享 consequent 关系。
-- 优先保持谓词多样性，每个 consequent 关系最多选择 2 个测试 goal。
-- 用于检验对新实体实例的泛化。
+Relation-disjoint goals come from a small stable-hash sample of held-out consequent relations. Exclude every training goal and training trace for those relations.
 
-### relation-disjoint
+Candidates are ordered by stable hash, never by hit rate, wall time, derived count, or method outcome. Do not remove difficult or unfavorable goals.
 
-- 先按稳定哈希选择一小组 held-out consequent 关系，再从中采样 goal。
-- 这些关系的**所有训练 goal 和训练轨迹都必须排除**。
-- 用于检验模型是否只记住关系族。
+- Test salt: `20261117-biokg-overall-test-v1`.
+- Relation split salt: `20261117-biokg-overall-relation-split-v1`.
 
-候选按稳定哈希排序，不依据任何方法的命中、wall、派生数或胜负筛选。不得删除困难 goal、失败 goal 或模型表现差的 goal。
+If the cohort constraints are unsatisfiable, report that before execution and revise the design explicitly.
 
-测试盐：`20261117-biokg-overall-test-v1`；关系分组盐：`20261117-biokg-overall-relation-split-v1`。
+## 6. Training goals and model isolation
 
-若某一层无法同时满足数量和关系隔离约束，则在运行前报告约束不可满足并修订设计；不得在试验中静默放宽。
+Select another 24 training goals, eight per stratum. They must:
 
-## 6. 训练 goal 与模型隔离
+- differ from every test goal spec;
+- exclude all relation-disjoint test relations;
+- avoid sharing chains, proofs, Q traces, or derivation journals with test goals;
+- use the independent salt `20261117-biokg-overall-train-v1`.
 
-另选 **24 个训练 goal**，每个 stratum 各 8 个：
+### Learned numeric-Q
 
-- 与全部 36 个测试 spec 不重叠；
-- 不包含 relation-disjoint cohort 的 held-out 关系；
-- 不与测试 goal 共用 chain、proof、Q trace 或派生日志；
-- 使用独立盐 `20261117-biokg-overall-train-v1` 冻结。
+Run Deterministic and Random(seed=7) continuations for each training goal. Labels are the remaining actual evaluations from the selected action through goal arrival.
 
-### Learned / numeric-Q
+Sample at most 256 evenly spaced rows per successful trajectory. Do not assign artificial finite labels to failed trajectories or unobserved alternative actions. Fit features and normalization using training goals only.
 
-- 每个训练 goal 分别运行 Deterministic 和 Random(seed=7) continuation。
-- 标签为从当前已选 action（含）到 goal 的剩余实际求值次数。
-- 每条成功轨迹最多等距采样 256 行；未命中轨迹不赋予人工有限标签。
-- 数值特征标准化和模型拟合只读取训练 goal。
-- 不把未观察的 alternative action 伪造成有标签样本。
+### AdaDeduceStar proof-star model
 
-### AdaDeduceStar / proof-star
+Extract proof DAGs from successful training chains and aggregate proof hits and total derived facts by rule. The efficiency label is:
 
-- 从训练 goal 的成功链反向提取 proof DAG，并按规则统计 proof hits 与轨迹总派生量。
-- 效率标签为 `(proof_hits + 1e-6) / (1 + total_facts)`；proof 外规则只表示“不在本次提取的证明中”，不解释为逻辑上无用。
-- 运行时分数为 proof-membership 减去预测 log-work，包含五个 support/body/距离交互项；所有特征和拟合只读取训练轨迹。
-- `work_weight=0.1` 由训练 goal 的留出折中确定并冻结，不使用 BioKG 测试 goal 选择；`proof_star_weight=0.5` 只负责启用该排序。
-- star 先按 consequent-to-goal DG distance 分桶：`d=0` 的直接 goal stars 按 proof efficiency 降序；`d>=1` 的前序 stars 锚定 baseline 首 star，仅对其余 star 做 baseline+efficiency 残差排序，禁止跨桶提升。
-- 初始 `proof_star_min_cost=0`，不加入上一轮尚待验证的成本门控。
+```text
+(proof_hits + 1e-6) / (1 + total_facts)
+```
 
-两个模型的 `trained_on`、特征版本、训练行数、随机种子和模型哈希必须随结果保存。
+Absence from one extracted proof does not prove that a rule is logically useless. The runtime score combines proof membership, predicted log-work, and support/body/distance interactions. Fit every feature using training trajectories only.
 
-## 7. 五个方法臂的精确定义
+`work_weight=0.1` is selected on held-out training goals and frozen without BioKG test-goal tuning. `proof_star_weight=0.5` enables the ordering.
 
-| 方法 | 推理与选择配置 |
+Stars are bucketed by consequent-to-goal dependency distance. Direct goal-head stars use proof-efficiency order. For upstream buckets, retain the first baseline star as an anchor and blend efficiency into the remainder. Cross-bucket promotion is forbidden. Initially `proof_star_min_cost=0`.
+
+Persist `trained_on`, feature version, training rows, seed, and model hash for both models.
+
+## 7. Method configurations
+
+| Method | Configuration |
 |---|---|
-| DepOnly | 从 dependency tree 得到 goal-relevant 规则，按固定输入顺序执行 naive 完整模式匹配与派生；不使用 scoring、learning、优先级堆、增量 delta 匹配、前提缓存或 R/W 优化 |
-| Deterministic | `--policy deterministic --scorer exact --star-order goal`，使用优化执行器，但不使用学习模型 |
-| Random | `--policy random --scorer exact --star-order goal`，使用优化执行器和 score-based softmax |
-| Learned | `--policy learned --scorer exact --value-model <biokg-q-numeric> --star-order goal`，使用优化执行器和 action-level numeric-Q |
-| AdaDeduceStar | `--policy deterministic --scorer exact --star-order goal --proof-star-model <biokg-proof-efficiency-model> --proof-star-weight 0.5 --proof-star-min-cost 0`，优化全开：dependency 过滤、exact scoring、goal-head efficiency 排序与前序 baseline 锚定残差排序、增量匹配、优先级堆、前提复用、挂起/复活及其他执行器优化 |
+| DepOnly | `--mode dep-only`; fixed input order, single-threaded goal-cone Chase, no scoring, learning, ready heap, delta optimization, precondition cache, or R/W scheduler |
+| Deterministic | `--policy deterministic --scorer exact --star-order goal` with the optimized executor and no learning |
+| Random | `--policy random --scorer exact --star-order goal` with score-based softmax |
+| Learned | `--policy learned --scorer exact --star-order goal --value-model <biokg-q-numeric>` |
+| AdaDeduceStar | `--policy deterministic --scorer exact --star-order goal --proof-star-model <biokg-proof-efficiency-model> --proof-star-weight 0.5 --proof-star-min-cost 0` |
 
-DepOnly 只保留 goal 派生后的停止条件作为共同任务终止语义；candidate cap、wall 和内存限制只是资源保护，不算推理优化。`--scorer null` 仍运行在优化后的 AdaDeduce 执行器上，**不能冒充 DepOnly**。正式入口为 `--mode dep-only`，内部使用固定输入顺序、单线程的 goal-cone Chase。
+`--scorer null` still uses the optimized AdaDeduce executor and cannot represent DepOnly. All arms use CPU and no LLM.
 
-DepOnly 使用独立 naive CPU 路径；其余四臂使用修复后的 CPU AdaDeduce backend。除非另行声明，所有臂均不启用 GPU 或 LLM。
+Shared parameters:
 
-共同参数：
+- budget `1,000,000,000`;
+- candidate cap `100,000`;
+- fair interval `0`;
+- `print=0`;
+- internal wall limit 900 seconds and external limit 1000 seconds;
+- process-tree and system-used memory limits of 256 GiB;
+- serial execution, starting only when system-used memory is below 210 GiB;
+- never terminate another user's process.
 
-- budget=1,000,000,000；
-- candidate cap=100,000；
-- fair interval=0；
-- print=0；
-- 内部 wall limit=900s，外部进程上限=1000s；
-- 串行计时，进程树和整机已用内存上限均为 256 GiB；
-- 只有整机已用内存低于 210 GiB 才启动下一个 run，不终止其他用户进程。
+Resource guards are not reasoning optimizations. Goal-directed early termination is the shared task semantics.
 
-## 8. 运行规模与聚合
+## 8. Run count and aggregation
 
-- 五方法 × 36 goals × seeds `{7,13,42}`，共 **540 个 goal-directed run**。
-- Deterministic、DepOnly、Learned、AdaDeduceStar 不消费 action-policy 随机数，其三次运行是相同逻辑的计时重复。
-- Random 的三个 seed 产生不同采样轨迹，必须逐 seed 保留，不能只报最优值。
-- 每 goal、每方法先对三个 seed 的指标取中位数，再做 36-goal 等权宏平均。
-- 另外分别按 round1/round2/deep 和 instance-disjoint/relation-disjoint 聚合，避免总体平均掩盖泛化差异。
+Five methods × 36 goals × seeds `{7,13,42}` gives **540 goal-directed runs**.
 
-主指标：
+Deterministic, DepOnly, Learned, and AdaDeduceStar do not consume action-policy randomness; their three runs are timing repetitions. Random produces different trajectories, and every seed must be retained.
 
-- 外部 wall 与内部 wall；
-- 真实 action 求值数、派生事实数；
-- 选择分支、ready 插入、完整匹配数；
-- goal hit、soundness、timeout、candidate cap、OOM、RSS；
-- Learned/AdaDeduceStar 的模型推理时间与训练规模。
+For each goal and method, take the seed median and then an equally weighted macro average over the 36 goals. Also aggregate separately by:
 
-选择分支包含零成本跳过已知结论，不能与真实求值混用。DepOnly 没有 ready heap、挂起/复活等优化执行器指标，对应字段标为 N/A，不填 0。cap、timeout、未命中和 OOM 原样保留，不因某方法失败而删除 goal 或调整限制重跑。
+- round1, round2, and deep;
+- instance-disjoint and relation-disjoint cohorts.
 
-## 9. 正确性与报告判据
+Report:
 
-- 所有派生必须与同一冻结规则集的完整 Chase 闭包对账。
-- 任何方法不得通过减少逻辑事实、绕过类型约束或提前伪造 goal 来换取速度。
-- 主比较是同一 goal 上的配对 wall 和派生/求值变化，而不是只比较宏平均。
-- AdaDeduceStar 的核心问题是：相对 Deterministic 和 Learned，能否减少 deep goal 的实际派生工作并转化为端到端 wall 收益。
-- relation-disjoint 与 instance-disjoint 分开下结论；前者失败不能由后者成功替代。
-- 所有五方法均报告完整分布、逐 goal 表和实际运行总时间，不用单一平均数替代完整结果。
+- external and internal wall time;
+- evaluated actions and derived facts;
+- selection branches, ready insertions, and match embeddings;
+- goal hits, soundness, timeouts, caps, OOM, and RSS;
+- model inference time and training size for learned arms.
 
-## 10. 预期产物（运行后才会生成）
+Selection branches include zero-cost known-head skips and are not real evaluations. DepOnly does not have ready-heap or suspension metrics; report those fields as N/A rather than zero. Preserve every cap, timeout, miss, and OOM.
+
+## 9. Correctness and reporting
+
+- Check every derived fact against the complete Chase closure from the same frozen rules.
+- Do not obtain speed by dropping logical facts, bypassing type constraints, or fabricating an early goal.
+- Compare paired per-goal wall time and work, not only macro averages.
+- Ask whether AdaDeduceStar reduces deep-goal work enough to produce an end-to-end benefit over Deterministic and Learned.
+- Report relation-disjoint and instance-disjoint results separately.
+- Publish the full distribution, per-goal table, and actual total runtime.
+
+## 10. Expected outputs after execution
 
 ```text
 .work_hdcv/overall-performance/ogbl-biokg/
-  rules/                 # 冻结规则及哈希
-  ground_truth/          # 完整 Chase 闭包
-  goals.tsv              # 36 个冻结测试 goal 及 cohort/stratum
-  train_goals.tsv        # 24 个冻结训练 goal
-  models/                # numeric-Q 与 proof-star 模型及训练清单
-  runs/                  # 540 个原始 run
+  rules/                 # Frozen rules and hashes
+  ground_truth/          # Complete Chase closure
+  goals.tsv              # 36 test goals with cohort and stratum
+  train_goals.tsv        # 24 frozen training goals
+  models/                # Numeric-Q and proof-star models with manifests
+  runs/                  # 540 raw runs
   rows.tsv
   paired.tsv
   summary.json
   summary.md
 ```
 
-本目录当前只保存试验设计，不包含任何 BioKG 性能结果。
+This directory currently stores only the experiment design. It contains no BioKG performance results.

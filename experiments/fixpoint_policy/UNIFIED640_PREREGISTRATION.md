@@ -1,40 +1,45 @@
-# Unified GoalChase / Deterministic / Random / Learned（rules640）
+# Unified GoalChase / Deterministic / Random / Learned (rules640)
 
-日期：2026-11-08。目的：消除旧报告中单次/三重复、fair interval 和执行批次混用的问题。本文件在运行前冻结统一协议；旧实验保留，但不与新表混合计算。
+Date: 2026-11-08.
 
-## 输入与共同执行参数
+This preregistration froze one protocol so that older reports would not mix single runs, three repetitions, fair intervals, and execution batches. Older experiments remain separate and are not merged into the new tables.
 
-- 图：`/ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr`。
-- 规则：`.work_hdcv/fixpoint_rules640/rules640`，640 条。
-- 测试 goal：`.work_hdcv/fixpoint_rules640/goals.tsv` 的同一 36 个 goal。
-- Ground truth：`.work_hdcv/fixpoint_rules640/runs/chase/rep1` 的完整 Chase 闭包。
-- 所有方法均为 `--executor fixpoint --fixpoint-star-order goal`。
-- 共同参数：budget=1,000,000,000、candidate cap=100,000、fair interval=0、print=0。
-- 所有方法均使用 policy seeds `{7,13,42}`。Deterministic、GoalChase 和 Learned 不消费 policy 随机数，因此这三 run 是相同逻辑的计时重复；Random 的三个 seed 产生不同采样轨迹。
-- 每 run 外部 1000 秒、内部 900 秒；进程树及整机已用内存上限均为 256 GiB。串行运行，只有整机已用内存低于 210 GiB 才启动，不终止其他用户进程。
+This is a historical protocol. The retired `--executor fixpoint` option corresponds to the current `--mode agent`, and `--fixpoint-star-order goal` corresponds to `--star-order goal`.
 
-## 五个方法臂
+## Inputs and shared execution parameters
 
-只有 action 选择机制及其实现所需的 scorer/model 配置不同：
+- Graph: `/ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr`.
+- Rules: `.work_hdcv/fixpoint_rules640/rules640`, containing 640 rules.
+- Test goals: the same 36 goals in `.work_hdcv/fixpoint_rules640/goals.tsv`.
+- Ground truth: the complete Chase closure in `.work_hdcv/fixpoint_rules640/runs/chase/rep1`.
+- All methods use goal star order.
+- Shared limits: budget `1,000,000,000`, candidate cap `100,000`, fair interval `0`, and `print=0`.
+- All methods use policy seeds `{7,13,42}`. Deterministic, GoalChase, and Learned do not consume policy randomness, so these are repeated timing runs of the same logical search. Random produces different sampled trajectories.
+- Each run has an external limit of 1000 seconds and an internal limit of 900 seconds. Process-tree and system-used memory limits are both 256 GiB.
+- Runs are serial. A new run starts only when system-used memory is below 210 GiB. No other user's process is terminated.
 
-1. GoalChase：`--policy deterministic --scorer null`。
-2. Deterministic：`--policy deterministic --scorer exact`。
-3. Random：`--policy random --scorer exact`；在线 Gumbel-max 与 softmax(total/tau) 分布等价。
-4. Learned numeric-Q：`--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_numeric.meta`。
-5. Learned HDC-Q：`--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_hdc.meta --hdc-value-backend original`。为与已有 HDC 模型开销分析一致，本矩阵固定原始后端；bit-LUT 是另一个计算内核实验。
+## Five method arms
 
-所有臂共享 DG goal-relevance 过滤、候选生成、精确前提求值、事实派生、挂起/复活和 goal 提前停止。不重新选择规则、goal 或训练数据，不根据新结果替换模型。
+Only action selection and the scorer/model required by that selection differ.
 
-## 运行规模与聚合
+1. GoalChase: `--policy deterministic --scorer null`.
+2. Deterministic: `--policy deterministic --scorer exact`.
+3. Random: `--policy random --scorer exact`. Online Gumbel-max is distributionally equivalent to `softmax(total/tau)`.
+4. Learned numeric-Q: `--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_numeric.meta`.
+5. Learned HDC-Q: `--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_hdc.meta --hdc-value-backend original`. This matrix fixes the original backend for consistency with the existing HDC overhead analysis. Bit-LUT belongs to a separate kernel experiment.
 
-- 五臂 × 36 goals × 3 seeds = 540 个 goal-directed run。
-- Chase 是完整闭包，不属于逐 goal 五臂矩阵；沿用既有三次 cold 结果，仅作非等价工作量参照。
-- 每 goal、每方法先对 seeds `{7,13,42}` 的指标取中位数，再对 36 个 goal 等权宏平均。
-- 主指标：外部 wall、内部 wall、`fx_select_events` 选择分支、`fx_ready_insertions`、`fx_match_embeddings`、`fx_evaluate_events`、派生、goal hit、soundness、cap、timeout 和 RSS。
-- 选择分支包含零成本跳过已知结论；真实求值单列，二者不得混用。
-- 表中的 36-goal 代表时间是逐 goal 中位数之和；实际 108-run 总 wall 另行报告。
-- 所有派生必须属于完整 Chase 闭包。cap、timeout、未命中和 OOM 原样保留，不调高限制重跑。
+All arms share dependency-goal filtering, candidate generation, exact precondition evaluation, fact derivation, suspension/revival, and early goal termination. Rules, goals, training data, and models are not replaced after seeing test results.
 
-## 产物
+## Run count and aggregation
 
-统一输出到 `.work_hdcv/fixpoint_unified640/`，不覆盖旧实验。运行与汇总脚本为 `experiments/fixpoint_policy/run_unified640.py`。
+- Five arms × 36 goals × 3 seeds = 540 goal-directed runs.
+- Chase computes the full closure and is not part of the five-arm per-goal matrix. Its three existing cold runs provide a non-equivalent work reference only.
+- For each goal and method, take the median over seeds `{7,13,42}`, then take an equally weighted macro average over the 36 goals.
+- Primary metrics are external wall time, internal wall time, selection branches, ready insertions, match embeddings, evaluated actions, derived facts, goal hits, soundness, caps, timeouts, and RSS.
+- Selection branches include zero-cost skips of known conclusions. Real evaluations are reported separately and must not be conflated with them.
+- The representative 36-goal time is the sum of per-goal medians. Actual total wall time over all 108 runs per arm is reported separately.
+- Every derived fact must belong to the complete Chase closure. Caps, timeouts, misses, and OOM remain in the report; limits are not increased to replace inconvenient results.
+
+## Outputs
+
+Write unified outputs to `.work_hdcv/fixpoint_unified640/` without overwriting older experiments. The driver and aggregation script is `experiments/fixpoint_policy/run_unified640.py`.
