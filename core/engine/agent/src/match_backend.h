@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 
+#include "gar/core/agent/config.h"
 #include "gar/core/graph/fact.h"
 #include "gar/core/graph/graph.h"
 #include "gar/core/graph/pattern_matcher.h"
@@ -43,6 +43,6 @@ class MatchBackend {
 };
 
 std::unique_ptr<MatchBackend> MakeMatchBackend(
-    std::string_view engine, const gar::core::graph::Graph& graph);
+    MatchEngine engine, const gar::core::graph::Graph& graph);
 
 }  // namespace gar::core::engine::agent

@@ -79,7 +79,8 @@ PrecondState ClassifyPredicate(const gar::Predicate& pred,
                                const std::uint32_t* emb,
                                const gar::core::graph::VertexAttributes* attrs,
                                const gar::core::graph::Graph& g,
-                               const AgentContext& ctx);
+                               const AgentContext& ctx,
+                               const gar::core::graph::MlModelRegistry* models);
 
 // H: the precondition cache.
 class PreconditionCache {

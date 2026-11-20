@@ -16,6 +16,7 @@
 #include <cstdint>
 
 #include "gar/core/hdc/const.h"
+#include "gar/core/hdc/dense_vector.h"
 #include "gar/core/hdc/hypervector.h"
 
 namespace gar::core::hdc {
@@ -39,6 +40,12 @@ class HdcEncoder {
   [[nodiscard]] Hypervector EncodeFact(std::uint64_t pred_symbol,
                                        const std::uint64_t* arg_symbols,
                                        std::uint32_t arity) const;
+
+  // Paper §4: normalize(v_p + sum_i rho^i(v_ai)). The dense result keeps the
+  // sum instead of replacing it with binding or a packed majority vote.
+  [[nodiscard]] DenseVector EncodeFactDense(
+      std::uint64_t pred_symbol, const std::uint64_t* arg_symbols,
+      std::uint32_t arity) const;
 
   [[nodiscard]] std::uint32_t dim() const { return cfg_.dim; }
   [[nodiscard]] std::uint64_t seed() const { return cfg_.seed; }

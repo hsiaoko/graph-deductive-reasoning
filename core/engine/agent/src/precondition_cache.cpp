@@ -97,8 +97,10 @@ PrecondState ClassifyPredicate(const gar::Predicate& pred,
                                const std::uint32_t* emb,
                                const gar::core::graph::VertexAttributes* attrs,
                                const gar::core::graph::Graph& g,
-                               const AgentContext& ctx) {
-  const bool ok = gar::core::graph::EvalAntecedent({pred}, emb, attrs, g);
+                               const AgentContext& ctx,
+                               const gar::core::graph::MlModelRegistry* models) {
+  const bool ok =
+      gar::core::graph::EvalAntecedent({pred}, emb, attrs, g, models);
   const bool dyn = IsDynamicPredicate(pred, rule, ctx);
   if (dyn) {
     return ok ? PrecondState::kDynamicPresent : PrecondState::kDynamicMissing;

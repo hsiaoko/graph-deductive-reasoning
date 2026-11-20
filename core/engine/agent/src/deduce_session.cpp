@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <stdexcept>
 #include <utility>
 
@@ -54,6 +55,7 @@ bool DeduceSession::BudgetHit() const {
 }
 
 void DeduceSession::BuildPlans() {
+  if (kit_.paper_guide != nullptr) kit_.paper_guide->Prepare();
   const auto& rules = state_->rules();
   for (std::uint32_t i = 0; i < rules.size(); ++i) {
     deduce::RulePlan plan;
@@ -61,7 +63,7 @@ void DeduceSession::BuildPlans() {
       plans_.push_back(std::move(plan));
     }
   }
-  if (cfg_.star_order == "goal") {
+  if (cfg_.star_order == StarOrder::kGoal) {
     auto head_distance = [&](const deduce::RulePlan& plan) {
       const GARule& rule = rules[plan.rule];
       const std::uint32_t predicate = ctx_.table->Find(
@@ -75,6 +77,87 @@ void DeduceSession::BuildPlans() {
                          const deduce::RulePlan& b) {
                        return head_distance(a) < head_distance(b);
                      });
+  }
+  if (kit_.proof_star_model != nullptr) {
+    for (const auto& plan : plans_) {
+      res_.stats->proof_star_estimated_cost +=
+          EstimateStarCost(rules[plan.rule], g_);
+    }
+    res_.stats->proof_star_active =
+        res_.stats->proof_star_estimated_cost >= cfg_.proof_star_min_cost;
+  }
+  if (kit_.proof_star_model != nullptr && cfg_.proof_star_weight > 0.0 &&
+      res_.stats->proof_star_active && plans_.size() > 1) {
+    std::vector<double> efficiency(rules.size(), 0.0);
+    std::vector<std::uint32_t> distance(
+        rules.size(), gar::core::analysis::kUnreachable);
+    for (const auto& plan : plans_) {
+      const GARule& rule = rules[plan.rule];
+      ScoredRule score;
+      kit_.scorer->ScoreRule(rule, sctx_, &score);
+      const std::array<double, 11> features{
+          score.price, static_cast<double>(rule.num_edges()),
+          std::log1p(rule.quality.support), score.rel_fam,
+          rule.quality.confidence,
+          score.price - kit_.cost_model->RuleLowerBound(rule),
+          0.0, 0.0, 0.0, 0.0, 0.0};
+      efficiency[plan.rule] =
+          kit_.proof_star_model->PredictRemaining(features);
+      const std::uint32_t predicate = ctx_.table->Find(
+          gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
+      distance[plan.rule] =
+          predicate == gar::core::analysis::kInvalidPredicate
+              ? gar::core::analysis::kUnreachable
+              : ctx_.distances[predicate];
+    }
+    std::stable_sort(plans_.begin(), plans_.end(),
+                     [&](const deduce::RulePlan& a,
+                         const deduce::RulePlan& b) {
+                       return distance[a.rule] < distance[b.rule];
+                     });
+    std::vector<double> order_score(rules.size(), 0.0);
+    for (std::size_t begin = 0; begin < plans_.size();) {
+      std::size_t end = begin + 1;
+      while (end < plans_.size() &&
+             distance[plans_[end].rule] == distance[plans_[begin].rule]) {
+        ++end;
+      }
+      const auto [min_it, max_it] = std::minmax_element(
+          plans_.begin() + begin, plans_.begin() + end,
+          [&](const deduce::RulePlan& a, const deduce::RulePlan& b) {
+            return efficiency[a.rule] < efficiency[b.rule];
+          });
+      const double minimum = efficiency[min_it->rule];
+      const double span = efficiency[max_it->rule] - minimum;
+      if (distance[plans_[begin].rule] == 0) {
+        std::stable_sort(plans_.begin() + begin, plans_.begin() + end,
+                         [&](const deduce::RulePlan& a,
+                             const deduce::RulePlan& b) {
+                           return efficiency[a.rule] > efficiency[b.rule];
+                         });
+        begin = end;
+        continue;
+      }
+      for (std::size_t j = begin + 1; j < end; ++j) {
+        const double baseline =
+            end - begin == 1
+                ? 0.0
+                : static_cast<double>(end - 1 - j) /
+                      static_cast<double>(end - begin - 1);
+        const double proof = span > 0.0
+                                 ? (efficiency[plans_[j].rule] - minimum) /
+                                       span
+                                 : 0.0;
+        order_score[plans_[j].rule] =
+            baseline + cfg_.proof_star_weight * proof;
+      }
+      std::stable_sort(plans_.begin() + begin + 1, plans_.begin() + end,
+                       [&](const deduce::RulePlan& a,
+                           const deduce::RulePlan& b) {
+                         return order_score[a.rule] > order_score[b.rule];
+                       });
+      begin = end;
+    }
   }
   if (kit_.star_guide != nullptr && cfg_.guide_strength > 0.0 &&
       plans_.size() > 1) {
@@ -177,7 +260,9 @@ void DeduceSession::ScoreReady(deduce::ActionRecord* rec) {
   ++fx.scored_candidates;
   rec->selection_priority = kit_.policy->SelectionPriorityWithFeatures(
       rec->id, rec->score.total, ActionFeatures(*rec));
-  if (kit_.policy->PrefersHighestScore()) ws_.TouchReady(rec->id);
+  if (kit_.policy->PrefersHighestScore()) {
+    ws_.TouchReady(rec->id, kit_.policy->GuidePriority(rec->score));
+  }
 }
 
 void DeduceSession::WriteQTrace() const {
@@ -191,7 +276,8 @@ void DeduceSession::WriteQTrace() const {
     throw std::runtime_error("cannot write Q trace: " +
                              cfg_.q_trace_path);
   }
-  out << "# event\tgoal_derived\tremaining_evaluations\taction_id\trule"
+  out << "# event\tgoal_derived\tremaining_evaluations"
+      << "\tremaining_execution_ms\taction_id\trule"
       << "\tprice\tpattern_edges\tlog_support\trelfam\trelevd\tconf"
       << "\tdcost\ttotal\tdp0\twit\tpremises\n";
   out.precision(17);
@@ -199,8 +285,11 @@ void DeduceSession::WriteQTrace() const {
     const QTraceRow& row = q_trace_rows_[i];
     const std::uint64_t remaining =
         res_.goal_derived ? q_trace_rows_.size() - i : 0;
+    const double remaining_ms = res_.goal_derived
+        ? std::max(0.0, res_.execution_cost_ms - row.execution_ms_before)
+        : 0.0;
     out << i << '\t' << (res_.goal_derived ? 1 : 0) << '\t' << remaining
-        << '\t' << row.action_id << '\t' << row.rule;
+        << '\t' << remaining_ms << '\t' << row.action_id << '\t' << row.rule;
     for (const double value : row.features) out << '\t' << value;
     out << '\n';
   }
@@ -336,7 +425,8 @@ void DeduceSession::VerifyGeneration() {
   if (!verify_) return;
   // Only EXPANDED stars are checked: an unexpanded star generates on its
   // turn and sees the full current G∪Γ, so its matches need no coverage.
-  std::unique_ptr<MatchBackend> cpu_backend = MakeMatchBackend("cpu", g_);
+  std::unique_ptr<MatchBackend> cpu_backend =
+      MakeMatchBackend(MatchEngine::kCpu, g_);
   for (std::uint32_t pi = 0; pi < next_star_; ++pi) {
     const deduce::RulePlan& pl = plans_[pi];
     const GARule& r = state_->rules()[pl.rule];
@@ -639,7 +729,8 @@ int DeduceSession::Evaluate(const deduce::ActionRecord& rec) {
       continue;
     }
     const deduce::PrecondState st =
-        deduce::ClassifyPredicate(pred, r, emb, state_->attrs(), g_, ctx_);
+        deduce::ClassifyPredicate(pred, r, emb, state_->attrs(), g_, ctx_,
+                                  state_->ml_models());
     const bool ok = st == deduce::PrecondState::kStaticTrue ||
                     st == deduce::PrecondState::kDynamicPresent;
     H_.Record(pkey, ok, !dyn, state_->version());
@@ -710,12 +801,62 @@ gar::core::graph::DerivedEdge DeduceSession::Derive(const deduce::ActionRecord& 
   step.cost = kit_.cost_model->RuleLowerBound(r);
   step.derived = d;
   res_.chain.push_back(std::move(step));
-  fx.proof_cost += step.cost;
   ++fx.derive_events;
   Trace("derive\trule=" + r.name + "\tfact=" + g_.SlotName(d.slot) + "(" +
         g_.EntityName(d.src) + "," + g_.EntityName(d.dst) + ")");
   if (GoalSatisfied(goal_, d)) res_.goal_derived = true;
   return d;
+}
+
+double DeduceSession::GoalProofCost() const {
+  if (!res_.goal_derived || res_.chain.empty()) return 0.0;
+  std::vector<bool> queued(res_.chain.size(), false);
+  std::vector<std::size_t> pending;
+  for (std::size_t i = res_.chain.size(); i-- > 0;) {
+    const auto& derived = res_.chain[i].derived;
+    if (derived && GoalSatisfied(goal_, *derived)) {
+      queued[i] = true;
+      pending.push_back(i);
+      break;
+    }
+  }
+  auto derived_key = [](const gar::core::graph::DerivedEdge& edge) {
+    return KeyOf(MakeEdgeFact(edge.slot, edge.src, edge.dst));
+  };
+  while (!pending.empty()) {
+    const std::size_t index = pending.back();
+    pending.pop_back();
+    const AgentStep& step = res_.chain[index];
+    std::vector<Fact> premises;
+    GroundPremises(state_->rules()[step.motif.rule], step.motif, g_,
+                   *ctx_.table, &premises);
+    for (const Fact& fact : premises) {
+      if (fact.kind != FactKind::kEdge) continue;
+      const FactKey wanted = KeyOf(fact);
+      for (std::size_t j = index; j-- > 0;) {
+        const auto& candidate = res_.chain[j].derived;
+        if (!candidate || derived_key(*candidate) != wanted) continue;
+        if (!queued[j]) {
+          queued[j] = true;
+          pending.push_back(j);
+        }
+        break;
+      }
+    }
+  }
+  double cost = 0.0;
+  for (std::size_t i = 0; i < res_.chain.size(); ++i) {
+    if (queued[i]) cost += res_.chain[i].cost;
+  }
+  return cost;
+}
+
+double DeduceSession::MeasuredCostMs() const {
+  const auto& fx = *res_.stats;
+  return fx.prepare_wall_ms + fx.generation_wall_ms +
+         fx.selection_wall_ms + fx.ready_remove_wall_ms +
+         fx.evaluation_wall_ms + fx.derivation_wall_ms + fx.delta_wall_ms +
+         fx.revival_wall_ms;
 }
 
 bool DeduceSession::RevivalPass() {
@@ -731,6 +872,7 @@ bool DeduceSession::RevivalPass() {
   }
   std::uint64_t progressed = 0;
   std::vector<std::uint64_t> drop;
+  std::vector<deduce::ActionRecord> completed;
   for (auto& sw : ws_.suspended()) {
     bool fulfilled = true;
     bool any_alive_producer = false;
@@ -756,7 +898,10 @@ bool DeduceSession::RevivalPass() {
         Trace("revive\taction=" + std::to_string(sw.id));
         const std::uint32_t pi = prod_->PlanOfRule(sw.rule);
         if (pi != UINT32_MAX) {
-          EnqueueReady(std::move(sw.motif), plans_[pi].head);
+          deduce::ActionRecord rec;
+          rec.motif = sw.motif;
+          rec.head = plans_[pi].head;
+          completed.push_back(std::move(rec));
         }
         drop.push_back(sw.id);
         ++progressed;
@@ -814,11 +959,75 @@ bool DeduceSession::RevivalPass() {
     // (OnDerivation), not here.
   }
   for (std::uint64_t id : drop) ws_.RemoveSuspended(id);
+  for (const auto& rec : completed) {
+    if (state_->ContainsEdge(rec.head.slot,
+                             rec.motif.embedding[rec.head.pu],
+                             rec.motif.embedding[rec.head.pv])) {
+      continue;
+    }
+    const auto derived = Derive(rec);
+    OnDerivations({derived});
+    if (res_.goal_derived) break;
+  }
   return progressed > 0;
+}
+
+void DeduceSession::WriteDecisionTrace(
+    const deduce::ActionRecord& chosen) {
+  if (!decision_trace_.is_open()) return;
+  auto write = [&](const deduce::ActionRecord& rec, bool is_chosen) {
+    decision_trace_ << decision_index_ << '\t' << is_chosen << '\t'
+                    << res_.stats->evaluate_events << '\t' << rec.id << '\t'
+                    << rec.motif.rule << '\t';
+    for (std::size_t i = 0; i < rec.motif.embedding.size(); ++i) {
+      if (i != 0) decision_trace_ << ',';
+      decision_trace_ << rec.motif.embedding[i];
+    }
+    for (const double value : ActionFeatures(rec)) {
+      decision_trace_ << '\t' << value;
+    }
+    decision_trace_ << '\n';
+  };
+  write(chosen, true);
+  if (cfg_.decision_sample_stride != 0 &&
+      decision_index_ % cfg_.decision_sample_stride == 0) {
+    std::vector<const deduce::ActionRecord*> alternatives;
+    for (const auto& rec : ws_.ready()) {
+      if (rec.id == chosen.id || !rec.score.admissible) continue;
+      const std::uint32_t src = rec.motif.embedding[rec.head.pu];
+      const std::uint32_t dst = rec.motif.embedding[rec.head.pv];
+      if (state_->ContainsEdge(rec.head.slot, src, dst)) continue;
+      alternatives.push_back(&rec);
+    }
+    std::sort(alternatives.begin(), alternatives.end(),
+              [](const deduce::ActionRecord* a,
+                 const deduce::ActionRecord* b) {
+                if (a->selection_priority != b->selection_priority) {
+                  return a->selection_priority > b->selection_priority;
+                }
+                return a->id < b->id;
+              });
+    const std::size_t count = std::min<std::size_t>(
+        cfg_.decision_alternative_count, alternatives.size());
+    for (std::size_t i = 0; i < count; ++i) write(*alternatives[i], false);
+  }
+  ++decision_index_;
 }
 
 deduce::ActionRecord* DeduceSession::SelectReady() {
   auto& fx = *res_.stats;
+  if (const auto forced = kit_.policy->ForcedAction()) {
+    auto* chosen = ws_.FindReady(*forced);
+    if (chosen == nullptr) {
+      throw std::runtime_error("forced replay action is not ready: " +
+                               std::to_string(*forced));
+    }
+    ++fx.select_events;
+    kit_.policy->OnSelection(chosen->id);
+    WriteDecisionTrace(*chosen);
+    Trace("select\taction=" + std::to_string(chosen->id));
+    return chosen;
+  }
   if (cfg_.fair_interval > 0 && selects_since_fair_ >= cfg_.fair_interval) {
     selects_since_fair_ = 0;
     auto* chosen = &*std::min_element(
@@ -886,6 +1095,8 @@ deduce::ActionRecord* DeduceSession::SelectReady() {
   }
   ++fx.select_events;
   if (chosen == nullptr) return nullptr;
+  kit_.policy->OnSelection(chosen->id);
+  WriteDecisionTrace(*chosen);
   Trace("select\taction=" + std::to_string(chosen->id));
   return chosen;
 }
@@ -894,6 +1105,22 @@ AgentResult DeduceSession::Run() {
   res_.stats.emplace();
   t0_ = std::chrono::steady_clock::now();
   verify_ = std::getenv("GAR_VERIFY_DEDUCE") != nullptr;
+  if (!cfg_.decision_trace_path.empty()) {
+    const std::filesystem::path path(cfg_.decision_trace_path);
+    if (!path.parent_path().empty()) {
+      std::filesystem::create_directories(path.parent_path());
+    }
+    decision_trace_.open(path);
+    if (!decision_trace_) {
+      throw std::runtime_error("cannot open decision trace: " +
+                               cfg_.decision_trace_path);
+    }
+    decision_trace_ << std::setprecision(17)
+                    << "# decision\tchosen\tevaluations_before\taction_id"
+                    << "\trule\tembedding\tprice\tpattern_edges"
+                    << "\tlog_support\trelfam\trelevd\tconf\tdcost\ttotal"
+                    << "\tdp0\twit\tpremises\n";
+  }
 
   if (goal_.args[0] && goal_.args[1] &&
       state_->ContainsEdge(goal_.slot, *goal_.args[0], *goal_.args[1])) {
@@ -914,8 +1141,8 @@ AgentResult DeduceSession::Run() {
   // Star discipline (approved algorithm): expand ONE star on the current
   // G∪Γ, drain R via policy, then the next star; deltas from derivations
   // target only already-expanded stars (unexpanded stars' first-turn full
-  // enumeration covers any new facts). The W revival pass runs
-  // only once every star has been expanded and R is empty.
+  // enumeration covers any new facts). The W revival pass runs after all stars,
+  // or earlier when the configured soft suspension threshold is reached.
   while (true) {
     if (WallExceeded()) {
       res_.termination = "timeout";
@@ -926,8 +1153,23 @@ AgentResult DeduceSession::Run() {
       break;
     }
     if (ws_.ReadyEmpty()) {
-      if (cfg_.engine == "gpu") FlushDerivations();
+      if (cfg_.engine == MatchEngine::kGpu) FlushDerivations();
       if (!ws_.ReadyEmpty()) continue;
+      if (next_star_ < plans_.size() && cfg_.revival_threshold > 0 &&
+          ws_.suspended().size() >= cfg_.revival_threshold) {
+        const auto started = std::chrono::steady_clock::now();
+        const bool progressed = RevivalPass();
+        ++res_.stats->revival_passes;
+        res_.stats->revival_wall_ms +=
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - started)
+                .count();
+        if (res_.goal_derived) {
+          res_.termination = "goal";
+          break;
+        }
+        if (progressed && !ws_.ReadyEmpty()) continue;
+      }
       if (next_star_ < plans_.size()) {
         const auto started = std::chrono::steady_clock::now();
         GenerateStar(next_star_++);
@@ -945,6 +1187,10 @@ AgentResult DeduceSession::Run() {
           std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - started)
               .count();
+      if (res_.goal_derived) {
+        res_.termination = "goal";
+        break;
+      }
       if (!progressed) {
         res_.termination = res_.stats->candidate_caps > 0
                                ? "candidate_cap"
@@ -954,78 +1200,60 @@ AgentResult DeduceSession::Run() {
       continue;
     }
 
+    const double decision_cost_ms = MeasuredCostMs();
+    std::vector<deduce::ActionRecord> batch;
     const auto selection_started = std::chrono::steady_clock::now();
-    deduce::ActionRecord* chosen = SelectReady();
+    if (cfg_.batch_size == 1) {
+      deduce::ActionRecord* chosen = SelectReady();
+      if (chosen != nullptr) batch.push_back(*chosen);
+    } else {
+      batch = SelectReadyBatch();
+    }
     res_.stats->selection_wall_ms +=
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - selection_started)
             .count();
-    if (chosen == nullptr) {
-      // Policy declined the whole R: nothing else can progress here.
+    if (batch.empty()) {
       res_.termination = "no_candidates";
       break;
     }
     ++selects_since_fair_;
-    const deduce::ActionRecord rec = *chosen;  // copy; ws_ may reallocate
-    const auto removal_started = std::chrono::steady_clock::now();
-    UntrackReady(rec);
-    ws_.RemoveReady(rec.id);
-    res_.stats->ready_remove_wall_ms +=
-        std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - removal_started)
-            .count();
-    // The conclusion may have been derived by another action since
-    // generation; skip without charging (Γ only grows, so this is final).
-    if (state_->ContainsEdge(rec.head.slot,
-                             rec.motif.embedding.data()[rec.head.pu],
-                             rec.motif.embedding.data()[rec.head.pv])) {
-      Trace("skip-known\taction=" + std::to_string(rec.id));
-      continue;
-    }
-    const auto evaluation_started = std::chrono::steady_clock::now();
-    const int verdict = Evaluate(rec);
-    res_.stats->evaluation_wall_ms +=
-        std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - evaluation_started)
-            .count();
-    if (!cfg_.q_trace_path.empty()) {
-      q_trace_rows_.push_back(
-          QTraceRow{ActionFeatures(rec), rec.id, rec.motif.rule});
-    }
-    if (verdict == 2) {
-      const auto derivation_started = std::chrono::steady_clock::now();
-      const gar::core::graph::DerivedEdge d = Derive(rec);
-      res_.stats->derivation_wall_ms +=
+
+    // Selection uses one batch-start state. Remove every selected record before
+    // any member can derive facts and trigger new scores or delta candidates.
+    for (const auto& rec : batch) {
+      const auto removal_started = std::chrono::steady_clock::now();
+      UntrackReady(rec);
+      ws_.RemoveReady(rec.id);
+      res_.stats->ready_remove_wall_ms +=
           std::chrono::duration<double, std::milli>(
-              std::chrono::steady_clock::now() - derivation_started)
+              std::chrono::steady_clock::now() - removal_started)
               .count();
-      if (res_.goal_derived) {
-        // Paper line 8: return immediately — no unrelated delta generation
-        // after the goal is derived.
+    }
+    if (batch.size() > 1) {
+      const auto started = std::chrono::steady_clock::now();
+      PrepareStaticBatch(batch);
+      res_.stats->evaluation_wall_ms +=
+          std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - started)
+              .count();
+    }
+    for (const auto& rec : batch) {
+      if (BudgetHit()) {
+        res_.termination = "budget";
+        break;
+      }
+      if (ProcessAction(rec, decision_cost_ms)) {
         res_.termination = "goal";
         break;
       }
-      const auto delta_started = std::chrono::steady_clock::now();
-      if (cfg_.engine == "gpu") {
-        pending_derivations_.push_back(d);
-        if (pending_derivations_.size() >= 256) FlushDerivations();
-      } else {
-        OnDerivations({d});
-      }
-      res_.stats->delta_wall_ms +=
-          std::chrono::duration<double, std::milli>(
-              std::chrono::steady_clock::now() - delta_started)
-              .count();
-    } else if (verdict == 0 || verdict == 3) {
-      auto& fx = *res_.stats;
-      ++fx.prune_events;
-      Trace(verdict == 3 ? "prune-cached\taction=" + std::to_string(rec.id)
-                         : "prune\taction=" + std::to_string(rec.id));
     }
-    // verdict == 1: suspended inside Evaluate.
+    if (res_.goal_derived || res_.termination == "budget") break;
   }
 
-  res_.total_cost = res_.stats->search_cost;
+  res_.logical_cost = res_.stats->search_cost;
+  res_.execution_cost_ms = MeasuredCostMs();
+  res_.stats->proof_cost = GoalProofCost();
   res_.budget_exhausted = res_.termination == "budget";
   res_.derived = state_->journal();
   WriteQTrace();

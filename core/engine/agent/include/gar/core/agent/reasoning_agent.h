@@ -4,7 +4,7 @@
 // COMPOSITION ROOT of the agent engine: it owns the injected pluggable
 // components (scorer / policy / executor / cost model / initial star guide), holds
 // the dependency graph of the rule set, and per Run computes the goal's
-// d(.) table and wires the chain-level witness + failure registry.
+// d(.) table and builds the chain-level witness state.
 //
 // Layering: the agent engine knows gar::core::graph / gar::core::analysis / gar::core::hdc /
 // gar::core only. It never sees the sibling deduction engine; composing
@@ -30,7 +30,9 @@ class ReasoningAgent {
     std::unique_ptr<CostModel> cost_model;
     // Optional value model for AdaDeduce action ordering.
     std::shared_ptr<ValueModel> value_model;
+    std::shared_ptr<ValueModel> proof_star_model;
     std::unique_ptr<LlmStarGuide> star_guide;
+    std::unique_ptr<PaperGuide> paper_guide;
   };
 
   ReasoningAgent(Components comps, const gar::core::analysis::DependencyGraph* dg,
@@ -44,6 +46,22 @@ class ReasoningAgent {
   // goal's relation is not derivable by any rule (no d(.) table exists).
   AgentResult Run(AgentState* state, const Goal& goal,
                   const ExecConfig& cfg) const {
+    if (goal.args[0] && goal.args[1] &&
+        state->ContainsEdge(goal.slot, *goal.args[0], *goal.args[1])) {
+      AgentResult result;
+      result.goal_derived = true;
+      result.termination = "goal_already_in_graph";
+      return result;
+    }
+    for (const auto& rule : state->rules()) {
+      for (const auto& pred : rule.antecedent) {
+        if (pred.kind == gar::PredKind::kMl &&
+            (state->ml_models() == nullptr ||
+             state->ml_models()->Find(pred.model) == nullptr)) {
+          throw std::invalid_argument("unregistered ML model: " + pred.model);
+        }
+      }
+    }
     AgentContext ctx{dg_, {}, &dg_->table(), encoder_};
     const std::string& goal_name = state->graph().RelationName(goal.slot);
     const std::uint32_t gp = ctx.table->Find(goal_name);
@@ -65,12 +83,11 @@ class ReasoningAgent {
 
     WitnessLog witness(encoder_.dim(), &state->graph(), ctx.table,
                        comps_.scorer->NeedsHdcWitness());
-    FailureRegistry failures;
     const ExecKit kit{comps_.scorer.get(), comps_.policy.get(),
                       comps_.cost_model.get(), comps_.value_model.get(),
-                      comps_.star_guide.get()};
-    return comps_.executor->Run(goal, state, &witness, &failures, ctx, cfg,
-                                kit);
+                      comps_.proof_star_model.get(), comps_.star_guide.get(),
+                      comps_.paper_guide.get()};
+    return comps_.executor->Run(goal, state, &witness, ctx, cfg, kit);
   }
 
  private:

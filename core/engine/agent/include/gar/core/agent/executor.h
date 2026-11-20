@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/agent/config.h"
 #include "gar/core/agent/cost_model.h"
-#include "gar/core/agent/failure_registry.h"
 #include "gar/core/agent/goal.h"
 #include "gar/core/agent/motif.h"
 #include "gar/core/agent/policy.h"
@@ -35,12 +35,9 @@ struct AgentContext {
 
 struct ExecConfig {
   std::uint64_t budget = 100;
-  std::string engine = "cpu";
+  std::uint32_t batch_size = 1;
+  MatchEngine engine = MatchEngine::kCpu;
   std::uint32_t match_cap_per_rule = 256;
-  // Subgoal-utility decay (§3.2): a derived fact on predicate q earns
-  // w_q = utility_gamma^{d(q)}. Mirrors the scorer's gamma; the app wires
-  // HandcraftedConfig::gamma through.
-  double utility_gamma = 0.5;
   std::uint64_t seed = 42;
   // Wall-clock limit in seconds (0 = off). Checked inside the executor
   // loops so a wall-limited run still terminates cleanly (termination
@@ -51,15 +48,30 @@ struct ExecConfig {
   // ready action (0 = off, pure policy order). The fair picks are marked
   // in the event trace.
   std::uint32_t fair_interval = 0;
-  // "input" preserves rule-path order; "goal" stable-sorts stars by
+  // When R is empty, run completion before the next star once W reaches this
+  // soft size threshold. Zero defers completion until every star is expanded.
+  std::uint64_t revival_threshold = 0;
+  // Input preserves rule-path order; goal stable-sorts stars by
   // consequent-to-goal DG distance. Both expand every cone star unless the
   // goal, a cap, or a budget/wall limit stops the run.
-  std::string star_order = "input";
+  StarOrder star_order = StarOrder::kInput;
   // Initial LLM star-guide strength; zero disables the guide.
   double guide_strength = 0.0;
+  // Positive weight enables proof-efficiency ordering. Goal-head stars use
+  // pure efficiency; each upstream distance bucket anchors its first baseline
+  // star and blends efficiency into the remainder. Zero preserves baseline.
+  double proof_star_weight = 0.0;
+  double proof_star_min_cost = 0.0;
   // Optional per-evaluated-action trace for offline cost-to-go training.
   // Empty disables all tracing overhead; labels are finite only on goal hits.
   std::string q_trace_path;
+  // Optional decision replay trace. Every chosen action is recorded; sampled
+  // states additionally include their best unchosen ready actions.
+  std::string decision_trace_path;
+  std::uint64_t decision_sample_stride = 0;
+  std::uint32_t decision_alternative_count = 0;
+  std::uint32_t backward_max_depth = 64;
+  std::uint64_t backward_max_calls = 100000;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its
@@ -71,7 +83,9 @@ struct ExecKit {
   const CostModel* cost_model;
   // Optional value model for BNB branch or AdaDeduce action ordering.
   const ValueModel* value_model = nullptr;
+  const ValueModel* proof_star_model = nullptr;
   LlmStarGuide* star_guide = nullptr;
+  PaperGuide* paper_guide = nullptr;
 };
 
 struct AgentStep {
@@ -84,8 +98,8 @@ struct AgentStep {
 struct AgentResult {
   std::vector<AgentStep> chain;
   std::vector<gar::core::graph::DerivedEdge> derived;  // every fact derived, in order
-  double total_cost = 0.0;
-  double utility = 0.0;       // sum of w_q over derived facts (§3.2)
+  double logical_cost = 0.0;      // charged action cost used by the budget
+  double execution_cost_ms = 0.0;  // measured non-overlapping execution phases
   bool goal_derived = false;
   bool budget_exhausted = false;
   std::string termination;  // "goal" | "no_candidates" | "budget" |
@@ -94,10 +108,9 @@ struct AgentResult {
   // AdaDeduceExecutor instrumentation (only set by it): event trace
   // (select/fair_select/evaluate/suspend/revive/prune/derive, one text row
   // per event, written by the app to deduce_trace.tsv) and counters.
-  // Cost separation (the backward cost-semantics lesson): proof_cost =
-  // cost of the successful derivation chain; search_cost = every charged
-  // evaluation (incl. failed/suspended); selection/evaluation event counts
-  // are separate counters; wall is wall.
+  // search_cost is logical work charged for every evaluated action, including
+  // failed and suspended actions. proof_cost counts only distinct goal
+  // ancestors. Measured phase wall times feed AgentResult::execution_cost_ms.
   struct DeduceStats {
     std::uint64_t select_events = 0;
     std::uint64_t fair_select_events = 0;
@@ -130,6 +143,8 @@ struct AgentResult {
     double partial_complete_wall_ms = 0.0;
     double partial_grow_wall_ms = 0.0;
     double revival_wall_ms = 0.0;
+    double proof_star_estimated_cost = 0.0;
+    bool proof_star_active = false;
     std::vector<std::string> trace;
   };
   std::optional<DeduceStats> stats;
@@ -139,7 +154,7 @@ class Executor {
  public:
   virtual ~Executor() = default;
   virtual AgentResult Run(const Goal& goal, AgentState* state,
-                          WitnessLog* witness, FailureRegistry* failures,
+                          WitnessLog* witness,
                           const AgentContext& ctx, const ExecConfig& cfg,
                           const ExecKit& kit) = 0;
 };
@@ -156,7 +171,14 @@ class Executor {
 class AdaDeduceExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
-                  FailureRegistry* failures, const AgentContext& ctx,
+                  const AgentContext& ctx,
+                  const ExecConfig& cfg, const ExecKit& kit) override;
+};
+
+class BackwardExecutor final : public Executor {
+ public:
+  AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
+                  const AgentContext& ctx,
                   const ExecConfig& cfg, const ExecKit& kit) override;
 };
 

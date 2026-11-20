@@ -35,14 +35,17 @@ inline void WriteClosureOutputs(const gar::core::graph::Graph& g,
                                 const std::vector<std::string>& rule_ids,
                                 const gar::core::engine::chase::ChaseResult& res,
                                 const std::string& out_root,
-                                bool write_matches) {
+                                bool write_matches,
+                                const std::string& variant = "chase") {
   std::filesystem::create_directories(out_root);
   WriteClosureEdges(out_root, g, rule_ids, res.derived);
   {
     std::ofstream f(out_root + "/summary.yaml");
-    f << "rounds: " << res.rounds << "\nfixpoint: "
+    f << "mode: " << variant << "\nrounds: " << res.rounds << "\nfixpoint: "
       << (res.fixpoint ? "true" : "false")
       << "\nderived_total: " << res.derived.size()
+      << "\ngoal_hit: " << (res.goal_hit ? "true" : "false")
+      << "\nstopped_early: " << (res.stopped_early ? "true" : "false")
       << "\nembeddings_total: " << res.embeddings_total
       << "\nx_satisfied_total: " << res.x_satisfied_total
       << "\nderivation_candidates_total: " << res.derivation_candidates_total

@@ -20,11 +20,9 @@ namespace agent {
 
 AgentResult AdaDeduceExecutor::Run(const Goal& goal, AgentState* state,
                                   WitnessLog* witness,
-                                  FailureRegistry* failures,
                                   const AgentContext& ctx,
                                   const ExecConfig& cfg,
                                   const ExecKit& kit) {
-  (void)failures;  // motif-level registry unused; H is the fixpoint cache
   return DeduceSession(goal, state, witness, ctx, cfg, kit).Run();
 }
 

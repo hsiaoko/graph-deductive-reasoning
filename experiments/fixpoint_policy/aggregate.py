@@ -191,7 +191,7 @@ def main():
                 "soundness": (int(bnb_facts_by_run[(goal_id, arm)] <= bnb_found)
                               if (run / "closure_edges.tsv").exists() else ""),
                 "certified": int(meta.get("certified_optimal") == "true"),
-                "proof_cost": number(meta, "total_cost"),
+                "proof_cost": number(meta, "proof_cost"),
             }
             rows.append(row)
             bnb[(goal_id, arm)] = row

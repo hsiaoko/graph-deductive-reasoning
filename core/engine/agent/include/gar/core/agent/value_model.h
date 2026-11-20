@@ -56,6 +56,7 @@ class ValueModel {
   double PredictHdcBitLut(const std::array<double, 11>& raw) const;
 
   std::string kind_;  // "hdc" | "numeric"
+  std::string feature_schema_;
   std::uint32_t dim_ = 0;
   std::uint32_t bin_cap_ = 7;
   double bin_scale_ = 2.0;

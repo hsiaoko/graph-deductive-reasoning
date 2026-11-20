@@ -13,7 +13,7 @@
 //                            [--budget B] [--policy ..] [--scorer ..]
 //                            [--gpu] [--seed S] [--hdc-dim N]
 //                            [--max-candidates-per-rule N]
-//                            [--alpha..--nu2 F] [--tau-hdc F] [--no-confidence]
+//                            [--alpha..--lambda F] [--use-confidence]
 //                            [--report verify_report.yaml]
 //   gar_analyze verify       --from-dirs <agent_dir> <cpu_dir> [<gpu_dir>]
 //                            --goal 'rel(src,dst)' [--report F]
@@ -182,7 +182,7 @@ std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
             << ", sampled candidates: " << cands.size() << "\n";
 
   // Hold out every candidate (base + inverse mirror) at once.
-  gar::core::graph::Graph g_held = in.graph;  // clone (vector memcpy)
+  gar::core::graph::Graph g_held = in.graph;  // shared base, local tombstones
   std::unordered_map<std::uint32_t,
                      std::vector<std::pair<std::uint32_t, std::uint32_t>>>
       by_slot;
@@ -192,7 +192,7 @@ std::vector<SampledGoal> GenReachableGoals(const gar_apps::FullDeduceArgs& io,
 
   chase_cfg.keep_matches = false;  // matches are never needed here
   deduction::CpuChaseEngine engine(
-      g_held, in.attrs.columns.empty() ? nullptr : &in.attrs);
+      g_held, in.attrs.columns.empty() ? nullptr : &in.attrs, &in.ml_models);
   const auto closure = engine.Run(in.rules, chase_cfg);
   if (!closure.fixpoint) {
     std::cerr << "[gar_analyze] NOTE: closure stopped by a cap "
@@ -445,7 +445,7 @@ int CmdChainCmp(int argc, char** argv) {
     if (!found) missing.push_back(e);
   }
   const auto agent_cost =
-      ReadYamlScalar(agent_dir + "/summary.yaml", "total_cost");
+      ReadYamlScalar(agent_dir + "/summary.yaml", "logical_cost");
   const auto closure_total =
       ReadYamlScalar(closure_dir + "/summary.yaml", "derived_total");
 
@@ -456,7 +456,7 @@ int CmdChainCmp(int argc, char** argv) {
             << "  subset (soundness): "
             << (missing.empty() ? "PASS" : "FAIL") << "\n";
   if (agent_cost && closure_total) {
-    std::cout << "  cost: agent total_cost=" << *agent_cost
+    std::cout << "  cost: agent logical_cost=" << *agent_cost
               << " vs closure derived_total=" << *closure_total << "\n";
   }
   if (!missing.empty()) {
@@ -554,6 +554,7 @@ VerifyArgs ParseVerifyArgs(int argc, char** argv) {
     else if (k == "--report") a.report = next();
     else if (k == "--csr") a.io.csr_dir = next();
     else if (k == "--rules") a.io.rules_root = next();
+    else if (k == "--ml-config") a.io.ml_config = next();
     else if (ParseChaseCapOption(k, next, &a.chase_cfg)) {
     } else if (!gar_apps::ParseAgentModeOption(k, next, &a.agent)) {
       std::cerr << "unknown option: " << k << "\n";
@@ -583,7 +584,7 @@ void WriteVerifyReport(const std::string& path, const TextGoal& goal,
       << "\n";
   }
   f << "agent_goal_derived: " << (v.agent_goal ? "true" : "false") << "\n"
-    << "agent_total_cost: " << agent_cost << "\n"
+    << "agent_logical_cost: " << agent_cost << "\n"
     << "agent_steps: " << agent_steps << "\n"
     << "budget: " << v.budget << "\n"
     << "bstar_dg: "
@@ -612,6 +613,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
                        const std::vector<gar::GARule>& rules,
                        const std::vector<std::string>& rule_ids,
                        const gar::core::graph::VertexAttributes* attrs,
+                       const gar::core::graph::MlModelRegistry* ml_models,
                        const gar::core::analysis::DependencyGraph& dg,
                        const std::vector<std::uint32_t>& depths,
                        bool with_gpu, agent::AgentResult* agent_out,
@@ -632,16 +634,8 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
     gar::core::graph::Graph g_agent = g0;
     agent::ReasoningAgent rag = gar_apps::MakeReasoningAgent(
         agent_args, &dg, &goal, &g0, &rules, &rule_ids);
-    agent::AgentState state(g_agent, attrs, rules);
-    agent::ExecConfig ec;
-    ec.budget = agent_args.budget;
-    ec.engine = agent_args.engine;
-    ec.match_cap_per_rule = agent_args.max_candidates_per_rule;
-    ec.utility_gamma = agent_args.score.gamma;
-    ec.wall_limit_sec = agent_args.wall_limit_sec;
-    ec.fair_interval = agent_args.fair_interval;
-    ec.star_order = agent_args.star_order;
-    ec.seed = agent_args.PolicySeed();
+    agent::AgentState state(g_agent, attrs, rules, ml_models);
+    const agent::ExecConfig ec = gar_apps::MakeExecConfig(agent_args);
     *agent_out = rag.Run(&state, goal, ec);
   }
   v.agent_goal = agent_out->goal_derived;
@@ -651,7 +645,7 @@ VerdictInput VerifyOne(const gar_apps::FullDeduceArgs& io,
   deduction::ChaseConfig cfg = chase_cfg;
   cfg.keep_matches = false;
   gar::core::graph::Graph g_cpu = g0;
-  deduction::CpuChaseEngine cpu_engine(g_cpu, attrs);
+  deduction::CpuChaseEngine cpu_engine(g_cpu, attrs, ml_models);
   const auto cpu_res = cpu_engine.Run(rules, cfg);
   auto contains_goal = [](const gar::core::graph::Graph& g,
                           const auto& derived, const agent::Goal& gl) {
@@ -707,14 +701,14 @@ int CmdVerifyRun(const VerifyArgs& a) {
   const gar::core::graph::VertexAttributes* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
   const VerdictInput v =
-      VerifyOne(a.io, a.agent, goal, &in.graph, in.rules, in.rule_ids, attrs, dg, depths,
+      VerifyOne(a.io, a.agent, goal, &in.graph, in.rules, in.rule_ids, attrs, &in.ml_models, dg, depths,
                 a.gpu, &agent_res, a.chase_cfg);
   const std::string verdict = VerdictOf(v);
   WriteVerifyReport(a.report, ParseTextGoal(a.agent.goal_spec), v, verdict,
-                    agent_res.total_cost, agent_res.chain.size());
+                    agent_res.logical_cost, agent_res.chain.size());
   std::cout << "[gar_analyze] verify: goal " << a.agent.goal_spec << " -> "
             << verdict << " (agent steps=" << agent_res.chain.size()
-            << " cost=" << agent_res.total_cost
+            << " cost=" << agent_res.logical_cost
             << ", cpu closure goal=" << (v.goal_in_cpu ? "yes" : "no")
             << ")\n";
   std::cerr << "[gar_analyze] report written to " << a.report << "\n";
@@ -739,7 +733,7 @@ int CmdVerifyFromDirs(const VerifyArgs& a) {
                                         "budget_exhausted");
   v.budget_exhausted = exhausted && *exhausted == "true";
   const auto cost =
-      ReadYamlScalar(a.from_dirs[0] + "/summary.yaml", "total_cost");
+      ReadYamlScalar(a.from_dirs[0] + "/summary.yaml", "logical_cost");
   for (const auto& e : agent_edges) {
     if (!TextGoalIn({e.rel, e.src, e.dst}, cpu_edges)) {
       v.subset_ok = false;
@@ -848,7 +842,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
     VerdictInput v;
     if (goal_is_base && !a.shared_holdout) {
       v = VerifyOne(a.io, task_args, goal, &in.graph, in.rules, in.rule_ids,
-                    attrs, dg, depths, a.gpu, &agent_res, a.chase_cfg);
+                    attrs, &in.ml_models, dg, depths, a.gpu, &agent_res, a.chase_cfg);
     } else {
       if (!shared_closure_ready) {
         // Fast path: hold-out is a no-op → Γ0 = G. Shared-holdout path:
@@ -856,7 +850,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
         shared_g_cpu = a.shared_holdout ? g0_shared : in.graph;
         deduction::ChaseConfig cfg = a.chase_cfg;
         cfg.keep_matches = false;
-        deduction::CpuChaseEngine eng(*shared_g_cpu, attrs);
+        deduction::CpuChaseEngine eng(*shared_g_cpu, attrs, &in.ml_models);
         shared_cpu_res = eng.Run(in.rules, cfg);
         if (a.gpu) {
           shared_g_gpu = a.shared_holdout ? g0_shared : in.graph;
@@ -872,16 +866,8 @@ int CmdVerifyTasks(const VerifyArgs& a) {
         agent::ReasoningAgent rag =
             gar_apps::MakeReasoningAgent(task_args, &dg, &goal,
                                          &g_agent, &in.rules, &in.rule_ids);
-        agent::AgentState state(g_agent, attrs, in.rules);
-        agent::ExecConfig ec;
-        ec.budget = task_args.budget;
-        ec.engine = task_args.engine;
-        ec.match_cap_per_rule = task_args.max_candidates_per_rule;
-        ec.utility_gamma = task_args.score.gamma;
-        ec.wall_limit_sec = task_args.wall_limit_sec;
-        ec.fair_interval = task_args.fair_interval;
-        ec.star_order = task_args.star_order;
-        ec.seed = task_args.PolicySeed();
+        agent::AgentState state(g_agent, attrs, in.rules, &in.ml_models);
+        const agent::ExecConfig ec = gar_apps::MakeExecConfig(task_args);
         agent_res = rag.Run(&state, goal, ec);
       }
       agent_wall_ms = std::chrono::duration<double, std::milli>(
@@ -931,7 +917,7 @@ int CmdVerifyTasks(const VerifyArgs& a) {
       if (v.agent_goal) ++n_derived;
     }
     rep << spec << '\t' << task_args.budget << '\t' << verdict << '\t'
-        << agent_res.chain.size() << '\t' << agent_res.total_cost << '\t'
+        << agent_res.chain.size() << '\t' << agent_res.logical_cost << '\t'
         << agent_wall_ms << "\n";
   }
   std::cout << "[gar_analyze] verify --tasks: " << a.tasks_path << "\n"

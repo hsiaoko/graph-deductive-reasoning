@@ -139,8 +139,8 @@ ChaseResult GpuChaseEngine::Run(const std::vector<GARule>& rules,
     }
     for (const auto& pred : r.antecedent) {
       if (pred.kind == gar::PredKind::kMl) {
-        skip("ml predicate unsupported on GPU chase");
-        break;
+        throw std::invalid_argument(
+            "ML predicates on GPU chase require a host evaluation adapter");
       }
       if (pred.kind == gar::PredKind::kEdge &&
           pred.label == gar::kWildcardLabel) {

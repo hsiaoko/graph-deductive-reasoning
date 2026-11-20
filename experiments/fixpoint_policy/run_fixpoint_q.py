@@ -37,8 +37,9 @@ def run(name, command, root):
     result = directory / "resource.json"
     if result.exists():
         saved = json.loads(result.read_text())
-        print(f"skip {name}: {saved['status']}", flush=True)
-        return
+        if saved["status"] == "completed" and saved["returncode"] == 0:
+            print(f"skip {name}: {saved['status']}", flush=True)
+            return
     directory.mkdir(parents=True, exist_ok=True)
     bounded = ["python3", str(BOUNDED), "--log", str(directory / "run.log"),
                "--result", str(result), "--timeout-sec", "1000",
@@ -47,8 +48,9 @@ def run(name, command, root):
     print(f"run {name}", flush=True)
     subprocess.run(bounded, cwd=ROOT, check=False)
     saved = json.loads(result.read_text())
-    if saved["status"].startswith("oom"):
-        raise RuntimeError(f"stop after {name}: {saved['status']}")
+    if saved["status"] != "completed" or saved["returncode"] != 0:
+        raise RuntimeError(f"stop after {name}: {saved['status']}, "
+                           f"returncode={saved['returncode']}")
 
 
 def select_goals():

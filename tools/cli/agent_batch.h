@@ -116,9 +116,14 @@ inline void WriteTaskOutputs(
   std::ofstream output(directory / "summary.yaml");
   output << "goal_id: \"" << task.id << "\"\n"
          << "goal: \"" << task.spec << "\"\n"
-         << "engine: " << args.engine << "\n"
-         << "policy: " << args.policy << "\n"
-         << "scorer: " << args.scorer << "\n"
+         << "batch_size: " << args.batch_size << "\n"
+         << "revival_threshold: " << args.revival_threshold << "\n"
+         << "engine: "
+         << gar::core::engine::agent::MatchEngineName(args.engine) << "\n"
+         << "policy: " << gar::core::engine::agent::PolicyName(args.policy)
+         << "\n"
+         << "scorer: " << gar::core::engine::agent::ScorerName(args.scorer)
+         << "\n"
          << "goal_derived: " << (result.goal_derived ? "true" : "false")
          << "\ntermination: " << result.termination << "\n"
          << "derived: " << result.derived.size() << "\n"
@@ -141,6 +146,7 @@ inline TaskResult RunOne(
   out.id = task.id;
   out.spec = task.spec;
   try {
+    // Cheap fork: share the immutable input base, own this goal's delta.
     gar::core::graph::Graph graph = inputs.graph;
     const agent::Goal goal = ParseGoalSpec(task.spec, graph);
     AgentModeArgs task_args = args;
@@ -151,17 +157,8 @@ inline TaskResult RunOne(
     agent::AgentState state(graph, inputs.attrs.columns.empty()
                                        ? nullptr
                                        : &inputs.attrs,
-                            inputs.rules);
-    agent::ExecConfig config;
-    config.budget = args.budget;
-    config.engine = args.engine;
-    config.match_cap_per_rule = args.max_candidates_per_rule;
-    config.utility_gamma = args.score.gamma;
-    config.wall_limit_sec = args.wall_limit_sec;
-    config.fair_interval = args.fair_interval;
-    config.star_order = args.star_order;
-    config.guide_strength = args.llm_guide ? args.guide_strength : 0.0;
-    config.seed = args.PolicySeed();
+                            inputs.rules, &inputs.ml_models);
+    const agent::ExecConfig config = MakeExecConfig(args);
     const auto started = std::chrono::steady_clock::now();
     const agent::AgentResult result = reasoning.Run(&state, goal, config);
     out.wall_seconds = std::chrono::duration<double>(
@@ -236,9 +233,14 @@ inline int Run(const FullDeduceArgs& io, const AgentModeArgs& args) {
   std::filesystem::create_directories(io.out_root);
   std::ofstream report(std::filesystem::path(io.out_root) / "summary.yaml");
   report << "mode: agent-batch\n"
-         << "engine: " << args.engine << "\n"
-         << "policy: " << args.policy << "\n"
-         << "scorer: " << args.scorer << "\n"
+         << "batch_size: " << args.batch_size << "\n"
+         << "revival_threshold: " << args.revival_threshold << "\n"
+         << "engine: "
+         << gar::core::engine::agent::MatchEngineName(args.engine) << "\n"
+         << "policy: " << gar::core::engine::agent::PolicyName(args.policy)
+         << "\n"
+         << "scorer: " << gar::core::engine::agent::ScorerName(args.scorer)
+         << "\n"
          << "tasks: " << tasks.size() << "\n"
          << "workers: " << worker_count << "\n"
          << "wall_seconds: " << wall << "\n"

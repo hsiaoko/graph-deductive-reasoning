@@ -20,7 +20,6 @@ std::uint64_t Fnv1a64(const std::string& s) {
 WitnessLog::WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::Graph* g,
                        const gar::core::analysis::PredicateTable* table, bool use_hdc)
     : hdc_ev_(hdc_dim),
-      packed_cache_(hdc_dim),
       g_(g),
       table_(table),
       use_hdc_(use_hdc) {}
@@ -36,14 +35,14 @@ std::uint64_t FactPredicateSymbol(const Fact& f, const gar::core::graph::Graph& 
 
 bool WitnessLog::WitnessFact(const Fact& f, const gar::core::hdc::HdcEncoder& enc) {
   const bool inserted = exact_.insert(KeyOf(f)).second;
+  if (!inserted) return false;
   if (use_hdc_) {
     const std::uint64_t args[2] = {f.args[0], f.args[1]};
-    hdc_ev_.Witness(
-        enc.EncodeFact(FactPredicateSymbol(f, *g_, *table_), args, f.arity));
-    packed_dirty_ = true;
+    hdc_ev_.Witness(enc.EncodeFactDense(
+        FactPredicateSymbol(f, *g_, *table_), args, f.arity));
   }
   ++count_;
-  return inserted;
+  return true;
 }
 
 }  // namespace agent

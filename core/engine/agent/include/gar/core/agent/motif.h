@@ -27,12 +27,12 @@ struct Motif {
 // ScoredMotif: a motif with its score breakdown (paper §4.1).
 struct ScoredMotif {
   Motif motif;
-  double rel_fam = 0.0;   // familiarity: gamma^{sum_q d(q)} (App. H ScoreF)
-  double rel_evd = 0.0;   // evidence: witnessed-premise share / HDC cosine
-  double rel = 0.0;       // rel_fam + nu*rel_evd + nu2*conf (relevance part)
+  double rel_fam = 0.0;   // goal relevance: gamma^d(p0)
+  double rel_evd = 0.0;   // exact witnessed share or paper HDC estimate
+  double rel = 0.0;       // relevance plus optional experimental confidence
   double dcost = 0.0;     // estimated application cost, unwitnessed premises
   double price = 0.0;     // completion-price lower bound w0 + d(p0) (§3.4)
-  double total = 0.0;     // alpha*rel - beta*dcost
+  double total = 0.0;     // alpha*rel + beta*evidence - cost_weight*dcost
   bool admissible = false;  // d(p0) < inf and the grounded conclusion is new
   // Premise accounting behind rel_evd (filled by the scorers): the exact
   // counts, rendered "x/y" into the Jev state text.
@@ -47,7 +47,7 @@ struct ScoredMotif {
 // dcost stay motif-level (computed after matching, inside the rule).
 struct ScoredRule {
   std::uint32_t rule = 0;
-  double rel_fam = 0.0;   // gamma^{sum_q d(q)} over distinct predicates
+  double rel_fam = 0.0;   // consequent-only goal relevance: gamma^d(p0)
   double confidence = 0.0;
   double price = 0.0;     // w0 + d(p0) (§3.4)
   double priority = 0.0;  // alpha*(rel_fam + nu2*conf) — the ordering key

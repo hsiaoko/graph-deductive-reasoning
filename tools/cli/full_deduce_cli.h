@@ -14,12 +14,15 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "closure_output.h"
 #include "gar/core/graph/graph_loader.h"
+#include "gar/core/graph/predicate_evaluator.h"
 #include "gar/core/graph/vertex_attrs_loader.h"
+#include "yaml-cpp/yaml.h"
 #include "gar/core/chase/chase_engine.h"
 #include "gar/core/rule_loader.h"
 
@@ -29,9 +32,12 @@ struct FullDeduceArgs {
   std::string csr_dir;
   std::string rules_root;
   std::string out_root = "closure";
+  std::string variant = "chase";
+  std::string ml_config;
   // Optional goal spec "rel(src,dst)": filters the rule set to the goal's
   // dependency cone before chasing (GoalChase = cone-restricted closure).
   std::string goal;
+  bool goal_early_stop = false;
   gar::core::engine::chase::ChaseConfig cfg;
   std::size_t print_n = 20;
 };
@@ -51,6 +57,8 @@ bool ParseFullDeduceOption(const std::string& k, NextFn&& next,
   else if (k == "--max-matches")
     a->cfg.max_matches_per_rule = std::stoull(next());
   else if (k == "--no-matches") a->cfg.keep_matches = false;
+  else if (k == "--ml-config") a->ml_config = next();
+  else if (k == "--goal-early-stop") a->goal_early_stop = true;
   else if (k == "--print") a->print_n = std::stoull(next());
   else if (allow_threads && k == "--threads")
     a->cfg.threads = static_cast<std::uint32_t>(std::stoul(next()));
@@ -86,11 +94,32 @@ inline FullDeduceArgs ParseFullDeduceArgs(int argc, char** argv,
   return a;
 }
 
+inline gar::core::graph::MlModelRegistry LoadMlModelRegistry(
+    const std::string& path) {
+  gar::core::graph::MlModelRegistry registry;
+  if (path.empty()) return registry;
+  const YAML::Node config = YAML::LoadFile(path);
+  for (const auto& entry : config["models"]) {
+    const std::string name = entry["name"].as<std::string>();
+    const std::string kind = entry["kind"].as<std::string>();
+    if (kind != "constant") {
+      throw std::invalid_argument("unsupported ML model kind: " + kind);
+    }
+    const double score = entry["score"].as<double>();
+    registry.Register(name, [score](const std::vector<gar::core::graph::MlQuery>&
+                                        queries) {
+      return std::vector<double>(queries.size(), score);
+    });
+  }
+  return registry;
+}
+
 struct FullDeduceInputs {
   gar::core::graph::Graph graph;
   std::vector<gar::GARule> rules;
   std::vector<std::string> rule_ids;
   gar::core::graph::VertexAttributes attrs;
+  gar::core::graph::MlModelRegistry ml_models;
 };
 
 // Loads the graph (with inverse relations), the rule set and the vertex
@@ -99,7 +128,7 @@ inline FullDeduceInputs LoadFullDeduceInputs(const FullDeduceArgs& args,
                                              const char* log_tag) {
   FullDeduceInputs in{gar::core::graph::LoadGraph(args.csr_dir,
                                                    /*with_inverses=*/true),
-                      {}, {}, {}};
+                      {}, {}, {}, {}};
   std::cerr << "[" << log_tag << "] |V|=" << in.graph.num_entities()
             << " |R|=" << in.graph.num_relations()
             << " |E|=" << in.graph.num_edges() << "\n";
@@ -122,6 +151,7 @@ inline FullDeduceInputs LoadFullDeduceInputs(const FullDeduceArgs& args,
   in.attrs = gar::core::graph::LoadVertexAttributes(args.csr_dir);
   std::cerr << "[" << log_tag << "] " << in.attrs.columns.size()
             << " numeric attribute columns\n";
+  in.ml_models = LoadMlModelRegistry(args.ml_config);
   return in;
 }
 
@@ -133,12 +163,14 @@ inline void ReportFullDeduce(
     const char* summary_title) {
   std::cerr << "[" << log_tag << "] rounds=" << res.rounds
             << " derived=" << res.derived.size()
-            << (res.fixpoint ? " (fixpoint reached)" : " (STOPPED by cap)")
+            << (res.fixpoint ? " (fixpoint reached)"
+                             : res.stopped_early ? " (goal hit)"
+                                                 : " (STOPPED by cap)")
             << "\n";
 
   // ---- write outputs ----
   WriteClosureOutputs(in.graph, in.rule_ids, res, args.out_root,
-                      args.cfg.keep_matches);
+                      args.cfg.keep_matches, args.variant);
 
   // ---- CLI summary ----
   std::vector<std::size_t> order(in.rules.size());
@@ -148,7 +180,9 @@ inline void ReportFullDeduce(
   });
   std::cout << "===== " << summary_title << ": " << res.rounds << " rounds, "
             << res.derived.size() << " derived facts"
-            << (res.fixpoint ? " (fixpoint)" : " (capped)") << " =====\n";
+            << (res.fixpoint ? " (fixpoint)"
+                             : res.stopped_early ? " (goal hit)" : " (capped)")
+            << " =====\n";
   for (std::size_t k = 0; k < order.size() && k < args.print_n; ++k) {
     const std::size_t i = order[k];
     const auto& st = res.rules[i];

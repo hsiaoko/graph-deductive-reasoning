@@ -3,6 +3,8 @@
 // Generic decision-model interface. Candidate generation and all logical
 // checks stay symbolic; the model only ranks supplied options.
 #include <cstdint>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,35 @@ class LlmClient {
                                  const std::string& instructions,
                                  const std::vector<std::string>& options,
                                  const std::vector<std::string>& criteria) = 0;
+  // Returns the restricted guide JSON. Choice-only backends reject this call.
+  virtual std::string Guide(const std::string& state,
+                            const std::string& instructions) {
+    (void)state;
+    (void)instructions;
+    throw std::runtime_error("guide generation is unsupported by this backend");
+  }
+};
+
+// Reuses a real guide response across independent runs of the same goal.
+class CachedLlmClient final : public LlmClient {
+ public:
+  CachedLlmClient(std::string response_path,
+                  std::unique_ptr<LlmClient> fallback)
+      : response_path_(std::move(response_path)),
+        fallback_(std::move(fallback)) {}
+
+  LlmChoiceResult Choice(const std::string& state,
+                         const std::string& instructions,
+                         const std::vector<std::string>& options,
+                         const std::vector<std::string>& criteria) override {
+    return fallback_->Choice(state, instructions, options, criteria);
+  }
+  std::string Guide(const std::string& state,
+                    const std::string& instructions) override;
+
+ private:
+  std::string response_path_;
+  std::unique_ptr<LlmClient> fallback_;
 };
 
 // HTTP client for local Jev and System One-compatible endpoints.
@@ -59,6 +90,8 @@ class OpenAiLlmClient final : public LlmClient {
                          const std::string& instructions,
                          const std::vector<std::string>& options,
                          const std::vector<std::string>& criteria) override;
+  std::string Guide(const std::string& state,
+                    const std::string& instructions) override;
 
  private:
   std::string base_url_;
@@ -76,9 +109,15 @@ class MockLlmClient final : public LlmClient {
                          const std::string& instructions,
                          const std::vector<std::string>& options,
                          const std::vector<std::string>& criteria) override;
+  std::string Guide(const std::string& state,
+                    const std::string& instructions) override;
+  void SetGuideResponse(std::string response) {
+    guide_response_ = std::move(response);
+  }
 
  private:
   std::uint64_t seed_;
+  std::string guide_response_ = "{\"rules\":[]}";
 };
 
 using JevChoiceResult = LlmChoiceResult;

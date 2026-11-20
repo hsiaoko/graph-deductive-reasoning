@@ -1,5 +1,6 @@
 #include "gar/core/agent/scorer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <unordered_set>
@@ -14,32 +15,15 @@ namespace agent {
 
 namespace {
 
-// rel_fam = gamma^{sum_q d(q)} over the rule's DISTINCT predicates
-// (pattern edge labels + antecedent predicates + consequent); any
-// unreachable predicate zeroes the score (ScoreF's soft filter, App. H).
 double RelFam(const GARule& rule, const ScoringContext& ctx, double gamma) {
-  const auto& d = *ctx.distances;
-  const auto& table = *ctx.predicates;
-  std::unordered_set<std::string> seen;
-  double sum = 0.0;
-  auto add = [&](const std::string& name) {
-    if (!seen.insert(name).second) return;
-    const std::uint32_t id = table.Find(name);
-    if (id == gar::core::analysis::kInvalidPredicate || d[id] == gar::core::analysis::kUnreachable) {
-      sum = std::numeric_limits<double>::infinity();
-      return;
-    }
-    if (sum != std::numeric_limits<double>::infinity()) sum += d[id];
-  };
-  for (std::uint32_t e = 0; e < rule.num_edges(); ++e) {
-    add(gar::core::analysis::LabelNameOf(static_cast<LabelID>(rule.edge_labels[e]), rule));
+  if (!rule.consequent) return 0.0;
+  const std::uint32_t id = ctx.predicates->Find(
+      gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
+  if (id == gar::core::analysis::kInvalidPredicate ||
+      (*ctx.distances)[id] == gar::core::analysis::kUnreachable) {
+    return 0.0;
   }
-  for (const auto& pred : rule.antecedent) {
-    add(gar::core::analysis::PredicateIdOf(pred, rule));
-  }
-  if (rule.consequent) add(gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
-  if (sum == std::numeric_limits<double>::infinity()) return 0.0;
-  return std::pow(gamma, sum);
+  return std::pow(gamma, (*ctx.distances)[id]);
 }
 
 // d(p0): distance of the consequent's predicate to the goal.
@@ -80,17 +64,28 @@ double ResidualCost(const std::vector<Fact>& premises,
   return dcost;
 }
 
-double Total(const HandcraftedConfig& cfg, double confidence,
-             ScoredMotif* sm) {
-  sm->rel = sm->rel_fam + cfg.nu * sm->rel_evd +
-            cfg.nu2 * (cfg.use_confidence ? confidence : 0.0);
-  return cfg.alpha * sm->rel - cfg.beta * sm->dcost;
+std::vector<Fact> DistinctPremises(const GARule& rule, const Motif& mu,
+                                   const ScoringContext& ctx) {
+  std::vector<Fact> input;
+  GroundPremises(rule, mu, ctx.state->graph(), *ctx.predicates, &input);
+  std::unordered_set<FactKey, FactKeyHash> seen;
+  std::vector<Fact> output;
+  for (const Fact& fact : input) {
+    if (seen.insert(KeyOf(fact)).second) output.push_back(fact);
+  }
+  return output;
 }
 
-// Rule-level static score (ScoredRule): rel_fam + confidence + price, with
-// priority = alpha * (rel_fam + nu2 * conf) — the embedding-independent
-// part of the handcrafted score. Shared by ExactScorer and HdcScorer (HDC
-// evidence is embedding-level only).
+double Total(const HandcraftedConfig& cfg, double confidence,
+             ScoredMotif* sm) {
+  sm->rel = sm->rel_fam +
+            cfg.nu2 * (cfg.use_confidence ? confidence : 0.0);
+  return cfg.alpha * sm->rel + cfg.beta * sm->rel_evd -
+         cfg.cost_weight * sm->dcost;
+}
+
+// Rule-level static score contains only embedding-independent terms. HDC
+// evidence remains action-level.
 void FillScoredRule(const HandcraftedConfig& cfg, const CostModel& cost,
                     const GARule& rule, const ScoringContext& ctx,
                     ScoredRule* out) {
@@ -132,8 +127,7 @@ void ExactScorer::Score(const GARule& rule, const Motif& mu,
   out->rel_fam = RelFam(rule, ctx, cfg_.gamma);
   FillPriceAdmissible(rule, mu, ctx, *cost_, out);
 
-  std::vector<Fact> premises;
-  GroundPremises(rule, mu, ctx.state->graph(), *ctx.predicates, &premises);
+  const std::vector<Fact> premises = DistinctPremises(rule, mu, ctx);
   std::vector<char> hits(premises.size());
   std::uint64_t n_hits = 0;
   for (std::size_t i = 0; i < premises.size(); ++i) {
@@ -143,7 +137,7 @@ void ExactScorer::Score(const GARule& rule, const Motif& mu,
   out->premises_total = static_cast<std::uint32_t>(premises.size());
   out->premises_witnessed = static_cast<std::uint32_t>(n_hits);
   out->rel_evd =
-      premises.empty() ? 0.0
+      premises.empty() ? 1.0
                        : static_cast<double>(n_hits) / premises.size();
   out->dcost = ResidualCost(premises, hits, *cost_);
   out->total = Total(cfg_, rule.quality.confidence, out);
@@ -155,14 +149,8 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
   out->rel_fam = RelFam(rule, ctx, cfg_.gamma);
   FillPriceAdmissible(rule, mu, ctx, *cost_, out);
 
-  std::vector<Fact> premises;
-  GroundPremises(rule, mu, ctx.state->graph(), *ctx.predicates, &premises);
-  std::vector<char> hits(premises.size());
-
-  // Encode each premise fact ONCE (memoized; identical vectors by
-  // construction) and reuse for both the v_mu bundle and the per-premise
-  // witness-hit probes.
-  std::vector<const gar::core::hdc::Hypervector*> pvecs;
+  const std::vector<Fact> premises = DistinctPremises(rule, mu, ctx);
+  std::vector<const gar::core::hdc::DenseVector*> pvecs;
   pvecs.reserve(premises.size());
   for (const auto& p : premises) {
     const FactVecKey key{
@@ -175,29 +163,32 @@ void HdcScorer::Score(const GARule& rule, const Motif& mu,
       if (fact_cache_.size() >= (1u << 20)) fact_cache_.clear();
       const std::uint64_t args[2] = {p.args[0], p.args[1]};
       pvecs.push_back(&fact_cache_
-                           .emplace(key, enc_.EncodeFact(key.pred, args,
-                                                         key.arity))
+                           .emplace(key, enc_.EncodeFactDense(
+                                               key.pred, args, key.arity))
                            .first->second);
     }
   }
 
-  // Fresh chain convention (§4.1.1): E = 0 reads rel_evd = 0.
-  if (ctx.witness->Count() == 0 || premises.empty()) {
+  if (premises.empty()) {
+    out->rel_evd = 1.0;
+  } else if (ctx.witness->Count() == 0) {
     out->rel_evd = 0.0;
-    for (std::size_t i = 0; i < hits.size(); ++i) hits[i] = 0;
   } else {
-    // v_mu = bundle of the encoded premise facts; PackedHdc is the cached
-    // sign-packed evidence vector (re-packed only on new witness events).
-    const gar::core::hdc::Hypervector& packed_e = ctx.witness->PackedHdc();
     gar::core::hdc::EvidenceVector v_mu(enc_.dim());
-    for (const gar::core::hdc::Hypervector* v : pvecs) v_mu.Witness(*v);
-    out->rel_evd = gar::core::hdc::Hypervector::Cosine(packed_e, v_mu.Packed());
-    for (std::size_t i = 0; i < premises.size(); ++i) {
-      hits[i] = gar::core::hdc::Hypervector::Cosine(packed_e, *pvecs[i]) >= cfg_.tau_hdc;
-    }
+    for (const gar::core::hdc::DenseVector* v : pvecs) v_mu.Witness(*v);
+    out->rel_evd = std::clamp(v_mu.Dot(ctx.witness->hdc()) /
+                                  static_cast<double>(premises.size()),
+                              0.0, 1.0);
   }
+
+  // Approximate HDC evidence guides ranking only. Residual work and witness
+  // counts use exact set membership.
+  std::vector<char> hits(premises.size());
   std::uint32_t n_hits = 0;
-  for (const char h : hits) n_hits += h;
+  for (std::size_t i = 0; i < premises.size(); ++i) {
+    hits[i] = ctx.witness->Contains(premises[i]);
+    n_hits += hits[i];
+  }
   out->premises_total = static_cast<std::uint32_t>(premises.size());
   out->premises_witnessed = n_hits;
   out->dcost = ResidualCost(premises, hits, *cost_);

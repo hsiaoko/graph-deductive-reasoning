@@ -11,6 +11,7 @@
 #include "gar/core/graph/fact.h"
 #include "gar/core/graph/graph.h"
 #include "gar/core/graph/attributes.h"
+#include "gar/core/graph/predicate_evaluator.h"
 #include "gar/core/rule.h"
 
 namespace gar::core::engine {
@@ -18,15 +19,20 @@ namespace agent {
 
 class AgentState {
  public:
-  AgentState(gar::core::graph::Graph& g, const gar::core::graph::VertexAttributes* attrs,
-             const std::vector<GARule>& rules)
-      : g_(g), attrs_(attrs), rules_(rules),
+  AgentState(gar::core::graph::Graph& g,
+             const gar::core::graph::VertexAttributes* attrs,
+             const std::vector<GARule>& rules,
+             const gar::core::graph::MlModelRegistry* ml_models = nullptr)
+      : g_(g), attrs_(attrs), rules_(rules), ml_models_(ml_models),
         per_slot_derived_(g.num_slots(), 0) {}
 
   [[nodiscard]] gar::core::graph::Graph& graph() { return g_; }
   [[nodiscard]] const gar::core::graph::Graph& graph() const { return g_; }
   [[nodiscard]] const gar::core::graph::VertexAttributes* attrs() const { return attrs_; }
   [[nodiscard]] const std::vector<GARule>& rules() const { return rules_; }
+  [[nodiscard]] const gar::core::graph::MlModelRegistry* ml_models() const {
+    return ml_models_;
+  }
 
   // Gamma growth counter (number of facts derived so far).
   [[nodiscard]] std::uint64_t version() const { return version_; }
@@ -58,6 +64,7 @@ class AgentState {
   gar::core::graph::Graph& g_;
   const gar::core::graph::VertexAttributes* attrs_;
   const std::vector<GARule>& rules_;
+  const gar::core::graph::MlModelRegistry* ml_models_;
   std::uint64_t version_ = 0;
   std::vector<std::uint64_t> per_slot_derived_;
   std::vector<gar::core::graph::DerivedEdge> journal_;

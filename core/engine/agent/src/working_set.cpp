@@ -38,26 +38,32 @@ void WorkingSet::RebuildReadyHeap() {
   ready_heap_.reserve(ready_.size());
   for (std::size_t pos = 0; pos < ready_.size(); ++pos) {
     const auto& rec = ready_[pos];
-    ready_heap_.push_back(ReadyPriority{rec.selection_priority, pos, rec.id,
+    ready_heap_.push_back(ReadyPriority{rec.guide_priority,
+                                        rec.selection_priority, pos, rec.id,
                                         rec.score.admissible});
   }
   std::make_heap(ready_heap_.begin(), ready_heap_.end(),
                  [](const ReadyPriority& a, const ReadyPriority& b) {
+                   if (a.guide != b.guide) return a.guide < b.guide;
                    if (a.priority != b.priority) return a.priority < b.priority;
                    return a.position > b.position;
                  });
 }
 
-void WorkingSet::TouchReady(std::uint64_t id) {
+void WorkingSet::TouchReady(std::uint64_t id,
+                            std::optional<double> guide_priority) {
   const auto it = ready_positions_.find(id);
   if (it == ready_positions_.end()) return;
   ready_priority_enabled_ = true;
   const std::size_t pos = it->second;
-  const auto& rec = ready_[pos];
-  ready_heap_.push_back(ReadyPriority{rec.selection_priority, pos, id,
+  auto& rec = ready_[pos];
+  if (guide_priority) rec.guide_priority = *guide_priority;
+  ready_heap_.push_back(ReadyPriority{rec.guide_priority,
+                                      rec.selection_priority, pos, id,
                                       rec.score.admissible});
   std::push_heap(ready_heap_.begin(), ready_heap_.end(),
                  [](const ReadyPriority& a, const ReadyPriority& b) {
+                   if (a.guide != b.guide) return a.guide < b.guide;
                    if (a.priority != b.priority) return a.priority < b.priority;
                    return a.position > b.position;
                  });
@@ -66,6 +72,7 @@ void WorkingSet::TouchReady(std::uint64_t id) {
 
 ActionRecord* WorkingSet::HighestReady() {
   const auto less = [](const ReadyPriority& a, const ReadyPriority& b) {
+    if (a.guide != b.guide) return a.guide < b.guide;
     if (a.priority != b.priority) return a.priority < b.priority;
     return a.position > b.position;
   };
@@ -75,7 +82,8 @@ ActionRecord* WorkingSet::HighestReady() {
     if (it != ready_positions_.end()) {
       const std::size_t pos = it->second;
       auto& rec = ready_[pos];
-      if (top.position == pos && top.priority == rec.selection_priority &&
+      if (top.position == pos && top.guide == rec.guide_priority &&
+          top.priority == rec.selection_priority &&
           top.admissible == rec.score.admissible) {
         return &rec;
       }
@@ -89,6 +97,7 @@ ActionRecord* WorkingSet::HighestReady() {
 void WorkingSet::DiscardHighestReady() {
   if (HighestReady() == nullptr) return;
   const auto less = [](const ReadyPriority& a, const ReadyPriority& b) {
+    if (a.guide != b.guide) return a.guide < b.guide;
     if (a.priority != b.priority) return a.priority < b.priority;
     return a.position > b.position;
   };

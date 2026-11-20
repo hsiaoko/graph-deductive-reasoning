@@ -1,20 +1,10 @@
 #pragma once
 
-// Scorer: candidate-motif scoring (paper §4.1). The handcrafted score is
-//   f(S,g,mu) = alpha * rel(S,g,mu) - beta * dcost(mu,S)
-// with rel = rel_fam + nu * rel_evd + nu2 * confidence (confidence term
-// gated by use_confidence), where
-//   rel_fam = gamma^{sum_q d(q)}  over the rule's distinct predicates
-//             (pattern edge labels + antecedent + consequent); any
-//             unreachable predicate zeroes it (ScoreF, App. H — the soft
-//             filter);
-//   rel_evd = witnessed-premise share (ExactScorer) or the HDC cosine
-//             cos(v_mu, E) against the chain's evidence vector (HdcScorer);
-//   dcost   = sum over premises (1 - s_p) * T(p): the residual evaluation
-//             cost, s_p the witnessed-hit indicator (HdcScorer: cosine >=
-//             tau), T from the CostModel;
-//   price   = w0(phi) + d(p0): the completion-price lower bound (§3.4/5.4);
-//   admissible = d(p0) < inf and the grounded conclusion not yet in Gamma.
+// Scorer: candidate-motif scoring (paper §4). The canonical score is
+//   f(S,g,mu) = alpha * relevance + beta * evidence - cost_weight * dcost.
+// Relevance is gamma^d(p0). Evidence is the distinct witnessed-premise share
+// or the paper's set-based HDC estimate. Confidence is an optional experimental
+// term and is disabled by default. Similarity never establishes predicate truth.
 
 #include <cstdint>
 #include <unordered_map>
@@ -34,15 +24,11 @@ class WitnessLog;
 
 struct HandcraftedConfig {
   double alpha = 1.0;
-  double beta = 1.0;
-  double gamma = 0.5;   // rel_fam decay
-  double nu = 1.0;      // rel_evd weight
-  double nu2 = 0.5;     // confidence weight
-  bool use_confidence = true;
-  // HdcScorer witness-hit threshold: fixed at 0.15, on the order of the
-  // App I noise scale 1/sqrt(|E|) for chain evidence of tens-to-hundreds of
-  // facts (1/sqrt(50) ≈ 0.14).
-  double tau_hdc = 0.15;
+  double beta = 1.0;         // evidence weight
+  double gamma = 0.5;        // goal-distance decay
+  double cost_weight = 1.0;  // residual evaluation-cost weight
+  double nu2 = 0.5;          // experimental confidence weight
+  bool use_confidence = false;
 };
 
 // Rebuilt once per goal: the goal's d(.) table plus the predicate table it
@@ -83,8 +69,7 @@ class Scorer {
   // HDC scorer does; exact/null skip the 8192-dim bundle maintenance).
   virtual bool NeedsHdcWitness() const { return false; }
   // Exact/null scores can be maintained through new exact-witness facts.
-  // HDC evidence changes on every witness event, including duplicates, and
-  // therefore keeps the full-rescoring path.
+  // HDC currently uses the full-rescoring path after a new distinct witness.
   virtual bool SupportsIncrementalScoring() const { return false; }
 };
 
@@ -144,7 +129,7 @@ class HdcScorer final : public Scorer {
   bool NeedsHdcWitness() const override { return true; }
 
  private:
-  // Fact-vector memo key: EncodeFact is a pure function of (pred symbol,
+  // Fact-vector memo key: EncodeFactDense is a pure function of (pred symbol,
   // args, arity) under a fixed encoder; candidates repeat premise facts
   // heavily (same predicates, overlapping constants). Equality-compared, so
   // hash collisions never alias two facts. Capped — clearing only forces
@@ -167,8 +152,8 @@ class HdcScorer final : public Scorer {
   HandcraftedConfig cfg_;
   const CostModel* cost_;
   gar::core::hdc::HdcEncoder enc_;
-  mutable std::unordered_map<FactVecKey, gar::core::hdc::Hypervector, FactVecKeyHash>
-      fact_cache_;
+  mutable std::unordered_map<FactVecKey, gar::core::hdc::DenseVector,
+                             FactVecKeyHash> fact_cache_;
 };
 
 }  // namespace agent

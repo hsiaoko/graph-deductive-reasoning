@@ -44,6 +44,8 @@ bool ValueModel::Load(const std::string& meta_path) {
         return false;
       }
       kind_ = format == "hdc_value_v1" ? "hdc" : "numeric";
+    } else if (tag == "feature_schema") {
+      ls >> feature_schema_;
     } else if (tag == "dim") {
       ls >> dim_;
     } else if (tag == "n_keys") {
@@ -75,6 +77,11 @@ bool ValueModel::Load(const std::string& meta_path) {
       ls >> a >> b;
       conj_.emplace_back(a, b);
     }
+  }
+  if (feature_schema_.empty()) {
+    std::fprintf(stderr, "[value_model] missing feature_schema in %s\n",
+                 meta_path.c_str());
+    return false;
   }
   if (names_.empty() || names_.size() > 11) {
     std::fprintf(stderr, "[value_model] incomplete meta %s\n",

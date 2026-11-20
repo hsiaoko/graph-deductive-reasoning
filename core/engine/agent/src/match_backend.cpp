@@ -1,7 +1,6 @@
 #include "match_backend.h"
 
 #include <stdexcept>
-#include <string>
 
 #include "gpu_match_backend.h"
 
@@ -11,11 +10,12 @@ std::unique_ptr<MatchBackend> CreateCpuMatchBackend(
     const gar::core::graph::Graph& graph);
 
 std::unique_ptr<MatchBackend> MakeMatchBackend(
-    const std::string_view engine, const gar::core::graph::Graph& graph) {
-  if (engine == "cpu") return CreateCpuMatchBackend(graph);
-  if (engine == "gpu") return CreateGpuMatchBackend(graph);
-  throw std::invalid_argument("unknown agent match engine: " +
-                              std::string(engine));
+    const MatchEngine engine, const gar::core::graph::Graph& graph) {
+  switch (engine) {
+    case MatchEngine::kCpu: return CreateCpuMatchBackend(graph);
+    case MatchEngine::kGpu: return CreateGpuMatchBackend(graph);
+  }
+  throw std::invalid_argument("invalid agent match engine");
 }
 
 }  // namespace gar::core::engine::agent

@@ -105,4 +105,16 @@ Hypervector HdcEncoder::EncodeFact(std::uint64_t pred_symbol,
   return Hypervector::Bind(vp, BundleMajority(ops, tie));
 }
 
+DenseVector HdcEncoder::EncodeFactDense(
+    const std::uint64_t pred_symbol, const std::uint64_t* arg_symbols,
+    const std::uint32_t arity) const {
+  DenseVector sum =
+      DenseVector::FromHypervector(SymbolVector(pred_symbol));
+  for (std::uint32_t i = 0; i < arity; ++i) {
+    sum.Add(DenseVector::FromHypervector(Hypervector::Permute(
+        SymbolVector(arg_symbols[i]), i)));
+  }
+  return sum.Normalized();
+}
+
 }  // namespace gar::core::hdc

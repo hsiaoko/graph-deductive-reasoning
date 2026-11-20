@@ -48,8 +48,7 @@ class WitnessLog {
   WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::Graph* g,
              const gar::core::analysis::PredicateTable* table, bool use_hdc = true);
 
-  // Returns true iff the fact is new to the exact witness set. HDC evidence
-  // still accumulates every event, including an already witnessed fact.
+  // Adds only a new set member to HDC evidence and returns whether it was new.
   bool WitnessFact(const Fact& f, const gar::core::hdc::HdcEncoder& enc);
 
   [[nodiscard]] bool Contains(const Fact& f) const {
@@ -57,23 +56,10 @@ class WitnessLog {
   }
   [[nodiscard]] std::uint64_t Count() const { return count_; }
   [[nodiscard]] const gar::core::hdc::EvidenceVector& hdc() const { return hdc_ev_; }
-  // Sign-packed majority of the evidence bundle, cached until the next
-  // witnessed fact. Scoring does several cosine readouts per candidate;
-  // re-packing per readout is pure waste — identical value by construction
-  // (Packed is a pure function of the accumulator).
-  [[nodiscard]] const gar::core::hdc::Hypervector& PackedHdc() const {
-    if (packed_dirty_) {
-      packed_cache_ = hdc_ev_.Packed();
-      packed_dirty_ = false;
-    }
-    return packed_cache_;
-  }
 
  private:
   std::unordered_set<FactKey, FactKeyHash> exact_;
   gar::core::hdc::EvidenceVector hdc_ev_;
-  mutable gar::core::hdc::Hypervector packed_cache_;
-  mutable bool packed_dirty_ = true;
   std::uint64_t count_ = 0;
   const gar::core::graph::Graph* g_;
   const gar::core::analysis::PredicateTable* table_;

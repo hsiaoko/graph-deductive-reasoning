@@ -1,11 +1,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 #include "gar/core/agent/policy.h"
 
 #include "gar/core/analysis/predicate_table.h"
 #include "gar/core/agent/value_model.h"
+#include "rule_support.h"
 
 #include <stdexcept>
 
@@ -20,27 +22,43 @@ std::string FormatDouble(double v, int digits = 3) {
   return buf;
 }
 
-// A pre-match upper-level cost signal: the first edge contributes its full
-// cardinality, while subsequent edges contribute average degree. It is used
-// only for gating and ordering, never as a logical satisfiability proof.
-double EstimateStarCost(const GARule& rule,
-                        const gar::core::graph::Graph& graph) {
-  if (rule.num_edges() == 0) return 0.0;
-  double log_estimate = 0.0;
-  const double log_vertices =
-      std::log(static_cast<double>(std::max(1u, graph.num_entities())));
-  for (std::size_t i = 0; i < rule.num_edges(); ++i) {
-    const auto cardinality = static_cast<double>(std::max<std::size_t>(
-        1, graph.RelationPairSet(rule.edge_labels[i]).size()));
-    const double contribution = i == 0
-        ? std::log(cardinality)
-        : std::max(0.0, std::log(cardinality) - log_vertices);
-    log_estimate += contribution;
-  }
-  return std::exp(std::min(log_estimate, 50.0));
-}
-
 }  // namespace
+
+std::vector<std::size_t> RandomizedPolicy::SelectBatch(
+    const std::vector<BatchCandidate>& cands, std::size_t max_actions) {
+  std::vector<std::size_t> remaining(cands.size());
+  for (std::size_t i = 0; i < remaining.size(); ++i) remaining[i] = i;
+  std::vector<std::size_t> selected;
+  while (!remaining.empty() && selected.size() < max_actions) {
+    double maximum = cands[remaining.front()].score->total;
+    for (const std::size_t index : remaining) {
+      maximum = std::max(maximum, cands[index].score->total);
+    }
+    std::vector<double> weights;
+    weights.reserve(remaining.size());
+    double sum = 0.0;
+    for (const std::size_t index : remaining) {
+      const double weight =
+          std::exp((cands[index].score->total - maximum) / tau_);
+      weights.push_back(weight);
+      sum += weight;
+    }
+    std::uniform_real_distribution<double> distribution(0.0, sum);
+    const double draw = distribution(rng_);
+    double cumulative = 0.0;
+    std::size_t position = remaining.size() - 1;
+    for (std::size_t i = 0; i < remaining.size(); ++i) {
+      cumulative += weights[i];
+      if (draw < cumulative) {
+        position = i;
+        break;
+      }
+    }
+    selected.push_back(remaining[position]);
+    remaining.erase(remaining.begin() + static_cast<std::ptrdiff_t>(position));
+  }
+  return selected;
+}
 
 void JevPolicy::EnsureGoalTables() {
   if (!distances_.empty()) return;
@@ -351,9 +369,9 @@ std::optional<std::size_t> AdaptivePolicy::SelectScores(
   return Current().SelectScores(totals, admissible);
 }
 
-std::optional<std::size_t> AdaptivePolicy::SelectRule(
-    const std::vector<ScoredRule>& rules) {
-  return Current().SelectRule(rules);
+std::vector<std::size_t> AdaptivePolicy::SelectBatch(
+    const std::vector<BatchCandidate>& cands, std::size_t max_actions) {
+  return Current().SelectBatch(cands, max_actions);
 }
 
 void AdaptivePolicy::OnApplication(const Motif& mu, bool success, double cost) {
@@ -366,6 +384,21 @@ void AdaptivePolicy::OnApplication(const Motif& mu, bool success, double cost) {
 
 namespace gar::core::engine {
 namespace agent {
+
+void ReplayPolicy::OnSelection(std::uint64_t action_id) {
+  if (next_ >= actions_.size()) return;
+  if (actions_[next_].action_id != action_id) {
+    throw std::runtime_error("replay action is not selected at decision " +
+                             std::to_string(next_));
+  }
+  ++next_;
+}
+
+std::optional<std::size_t> ReplayPolicy::Select(
+    const std::vector<ScoredMotif>& cands) {
+  (void)cands;
+  throw std::logic_error("ReplayPolicy requires incremental action IDs");
+}
 
 double LearnedQPolicy::SelectionPriorityWithFeatures(
     std::uint64_t action_id, double total,
@@ -386,6 +419,25 @@ std::optional<std::size_t> LearnedQPolicy::SelectScores(
   (void)totals;
   (void)admissible;
   throw std::logic_error("LearnedQPolicy requires AdaDeduce feature selection");
+}
+
+std::vector<std::size_t> LearnedQPolicy::SelectBatch(
+    const std::vector<BatchCandidate>& cands, std::size_t max_actions) {
+  std::vector<std::pair<double, std::size_t>> predictions;
+  predictions.reserve(cands.size());
+  for (std::size_t i = 0; i < cands.size(); ++i) {
+    predictions.emplace_back(model_->PredictRemaining(*cands[i].features), i);
+  }
+  std::stable_sort(predictions.begin(), predictions.end(),
+                   [](const auto& a, const auto& b) { return a.first < b.first; });
+  std::vector<std::size_t> indices;
+  indices.reserve(std::min(max_actions, predictions.size()));
+  for (const auto& [prediction, index] : predictions) {
+    (void)prediction;
+    indices.push_back(index);
+  }
+  indices.resize(std::min(max_actions, indices.size()));
+  return indices;
 }
 
 }  // namespace agent

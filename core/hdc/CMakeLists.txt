@@ -10,6 +10,7 @@ project(gar_hdc LANGUAGES CXX)
 #######################
 add_library(gar_hdc STATIC
     src/hypervector.cpp
+    src/dense_vector.cpp
     src/encoder.cpp
     src/evidence.cpp
     src/value_kernels.cpp
@@ -25,7 +26,7 @@ target_compile_features(gar_hdc PUBLIC cxx_std_20)
 # auto-vectorize under AVX2): pure integer arithmetic, scoring semantics
 # unchanged. OFF when the binary must run on a different machine than the
 # build host.
-option(GAR_HDC_NATIVE "build gar_hdc with -march=native" ON)
+option(GAR_HDC_NATIVE "build gar_hdc with -march=native" OFF)
 if(GAR_HDC_NATIVE)
   target_compile_options(gar_hdc PRIVATE -march=native)
 endif()

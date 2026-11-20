@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "core/data_structures/gar_graph_arrays.h"
@@ -42,111 +44,90 @@ inline std::uint64_t PackPair(std::uint32_t src, std::uint32_t dst) {
 }
 
 class Graph {
+ private:
+  struct Base {
+    std::uint32_t num_entities = 0;
+    std::uint32_t num_relations = 0;
+    std::uint64_t num_edges = 0;
+    std::vector<std::string> entity_names;
+    std::vector<std::string> relation_names;
+    std::vector<std::vector<std::uint64_t>> rel_pairs;
+    std::vector<std::unordered_set<std::uint64_t>> rel_pair_sets;
+    std::vector<std::uint32_t> all_out_offsets;
+    std::vector<std::uint32_t> all_out_dsts;
+    std::vector<std::uint32_t> all_out_slots;
+    std::vector<std::uint32_t> array_src;
+    std::vector<std::uint32_t> array_dst;
+    std::vector<std::int32_t> array_labels;
+    sics::matrixgraph::core::data_structures::GARGraphArrays arrays{};
+  };
+
+  struct SlotDelta {
+    std::unordered_set<std::uint64_t> added;
+    std::unordered_set<std::uint64_t> removed;
+  };
+
  public:
-  Graph() = default;
-  Graph(const Graph& other) { *this = other; }
-  Graph(Graph&& other) noexcept { *this = std::move(other); }
+  Graph() : base_(std::make_shared<Base>()) {}
+  Graph(const Graph& other) { CopyFrom(other); }
+  Graph(Graph&& other) noexcept = default;
   Graph& operator=(const Graph& other) {
-    if (this != &other) {
-      entity_names_ = other.entity_names_;
-      relation_names_ = other.relation_names_;
-      num_entities_ = other.num_entities_;
-      num_relations_ = other.num_relations_;
-      num_edges_ = other.num_edges_;
-      rel_pairs_ = other.rel_pairs_;
-      rel_pair_sets_ = other.rel_pair_sets_;
-      all_out_offsets_ = other.all_out_offsets_;
-      all_out_dsts_ = other.all_out_dsts_;
-      all_out_slots_ = other.all_out_slots_;
-      out_dirty_ = other.out_dirty_;
-      vertex_labels_ = other.vertex_labels_;
-      label_names_ = other.label_names_;
-      num_labels_ = other.num_labels_;
-      has_vertex_labels_ = other.has_vertex_labels_;
-      array_src_ = other.array_src_;
-      array_dst_ = other.array_dst_;
-      array_labels_ = other.array_labels_;
-      arrays_ = other.arrays_;
-      version_ = other.version_;
-      RebindArrays();
-    }
+    if (this != &other) CopyFrom(other);
     return *this;
   }
-  Graph& operator=(Graph&& other) noexcept {
-    if (this != &other) {
-      entity_names_ = std::move(other.entity_names_);
-      relation_names_ = std::move(other.relation_names_);
-      num_entities_ = other.num_entities_;
-      num_relations_ = other.num_relations_;
-      num_edges_ = other.num_edges_;
-      rel_pairs_ = std::move(other.rel_pairs_);
-      rel_pair_sets_ = std::move(other.rel_pair_sets_);
-      all_out_offsets_ = std::move(other.all_out_offsets_);
-      all_out_dsts_ = std::move(other.all_out_dsts_);
-      all_out_slots_ = std::move(other.all_out_slots_);
-      out_dirty_ = other.out_dirty_;
-      vertex_labels_ = std::move(other.vertex_labels_);
-      label_names_ = std::move(other.label_names_);
-      num_labels_ = other.num_labels_;
-      has_vertex_labels_ = other.has_vertex_labels_;
-      array_src_ = std::move(other.array_src_);
-      array_dst_ = std::move(other.array_dst_);
-      array_labels_ = std::move(other.array_labels_);
-      arrays_ = other.arrays_;
-      version_ = other.version_;
-      RebindArrays();
-    }
-    return *this;
-  }
+  Graph& operator=(Graph&& other) noexcept = default;
 
   static Graph Load(const std::filesystem::path& dir,
-                          bool with_inverses = true);
+                    bool with_inverses = true);
 
   // Builds the index structures from dictionary-encoded triples
   // [src, rel, dst] * m. Shared by all loaders.
   static Graph Build(std::vector<std::string> entity_names,
-                           std::vector<std::string> relation_names,
-                           std::vector<std::uint32_t> triples,
-                           bool with_inverses);
+                     std::vector<std::string> relation_names,
+                     std::vector<std::uint32_t> triples,
+                     bool with_inverses);
 
-  [[nodiscard]] std::uint32_t num_entities() const { return num_entities_; }
+  [[nodiscard]] std::uint32_t num_entities() const {
+    return base_->num_entities;
+  }
   [[nodiscard]] std::uint32_t num_relations() const {
-    return num_relations_;  // excludes inverses
+    return base_->num_relations;  // excludes inverses
   }
   [[nodiscard]] std::uint32_t num_slots() const {
-    return static_cast<std::uint32_t>(rel_pairs_.size());  // incl. inverses
+    return static_cast<std::uint32_t>(base_->rel_pairs.size());
   }
   [[nodiscard]] std::uint64_t num_edges() const { return num_edges_; }
 
   [[nodiscard]] bool IsInverse(std::uint32_t rel) const {
-    return rel >= num_relations_;
+    return rel >= num_relations();
   }
   [[nodiscard]] std::uint32_t BaseRelation(std::uint32_t rel) const {
-    return IsInverse(rel) ? rel - num_relations_ : rel;
+    return IsInverse(rel) ? rel - num_relations() : rel;
   }
 
-  // Sorted unique packed (src,dst) pairs of a relation slot.
+  // Sorted unique packed (src,dst) pairs of a relation slot. The view is the
+  // shared base plus this Graph's additions, with its tombstones applied.
   [[nodiscard]] const std::vector<std::uint64_t>& RelationPairs(
       std::uint32_t rel) const {
-    return rel_pairs_[rel];
+    EnsureSlotView(rel);
+    return slot_views_valid_[rel] ? rel_pairs_[rel] : base_->rel_pairs[rel];
   }
   // Hash view of the same pairs, for O(1) membership tests.
   [[nodiscard]] const std::unordered_set<std::uint64_t>& RelationPairSet(
       std::uint32_t rel) const {
-    return rel_pair_sets_[rel];
+    EnsureSlotView(rel);
+    return slot_views_valid_[rel] ? rel_pair_sets_[rel]
+                                  : base_->rel_pair_sets[rel];
   }
 
-  // Out-neighbors of v via relation slot rel. `rel_pairs_[rel]` is sorted by
-  // (src,dst) — the same src-major layout a CSR would give — so the slice is
-  // a binary search away; no per-slot offsets array is materialized (that
-  // would cost slots × (n+1) × 4B, which is quadratic in the relation
-  // vocabulary and infeasible for high-|R| KGs).
+  // Out-neighbors of v via relation slot rel. RelationPairs is sorted by
+  // (src,dst), so the slice is a binary search away.
   //
   // The destination ids are copied into a thread_local buffer: the returned
   // slice is invalidated by the next OutNeighbors call on the same thread.
   [[nodiscard]] std::pair<const std::uint32_t*, std::size_t> OutNeighbors(
       std::uint32_t v, std::uint32_t rel) const {
-    const auto& pairs = rel_pairs_[rel];
+    const auto& pairs = RelationPairs(rel);
     thread_local std::vector<std::uint32_t> buf;
     buf.clear();
     for (auto it = std::lower_bound(pairs.begin(), pairs.end(), PackPair(v, 0));
@@ -157,26 +138,24 @@ class Graph {
   }
 
   // All out-edges of v across every slot, as parallel (dst, slot) slices
-  // sorted by dst — one binary search finds the slots between v and any w.
-  // The unified adjacency is LAZY: single-edge AddEdges (the agent's
-  // per-derivation path) only updates the per-slot pair arrays/hashes and
-  // defers the rebuild to the first unified-adjacency read, so every read
-  // here always sees the latest edges. AddEdgesBatch (the chase's per-round
-  // bulk merge) rebuilds eagerly, exactly once per round as before.
-  // Mutation-while-reading was never supported and stays unsupported:
-  // writers run outside parallel read sections in every caller.
+  // sorted by dst. Unmodified graphs read the shared base adjacency directly.
+  // A Graph with a delta builds its own adjacency lazily after AddEdges, or
+  // eagerly after AddEdgesBatch and RemoveEdgesBatch.
+  // Mutation-while-reading is unsupported, as before.
   [[nodiscard]] std::pair<std::size_t, std::size_t> OutEdgeRange(
       std::uint32_t v) const {
     EnsureOutAdjacency();
-    return {all_out_offsets_[v], all_out_offsets_[v + 1]};
+    const auto& offsets =
+        has_delta_ ? all_out_offsets_ : base_->all_out_offsets;
+    return {offsets[v], offsets[v + 1]};
   }
   [[nodiscard]] const std::uint32_t* OutEdgeDsts() const {
     EnsureOutAdjacency();
-    return all_out_dsts_.data();
+    return has_delta_ ? all_out_dsts_.data() : base_->all_out_dsts.data();
   }
   [[nodiscard]] const std::uint32_t* OutEdgeSlots() const {
     EnsureOutAdjacency();
-    return all_out_slots_.data();
+    return has_delta_ ? all_out_slots_.data() : base_->all_out_slots.data();
   }
 
   // Counts, for each relation slot, how many of `pairs` are also linked by
@@ -188,54 +167,48 @@ class Graph {
       const auto s = static_cast<std::uint32_t>(p >> 32);
       const auto d = static_cast<std::uint32_t>(p);
       const auto [b, e] = OutEdgeRange(s);
-      const std::uint32_t* dsts = all_out_dsts_.data();
+      const std::uint32_t* dsts = OutEdgeDsts();
+      const std::uint32_t* slots = OutEdgeSlots();
       auto lo = std::lower_bound(dsts + b, dsts + e, d);
       for (auto it = lo; it != dsts + e && *it == d; ++it) {
-        ++(*out)[all_out_slots_[(it - dsts)]];
+        ++(*out)[slots[it - dsts]];
       }
     }
   }
 
-  // Adds edges (src, dst) to relation slot `slot`, mirroring each into the
+  // Adds edges (src, dst) to this Graph's delta, mirroring each into the
   // inverse slot when the graph was built with inverses. Existing edges are
-  // skipped. The per-slot pair arrays and hash sets are updated immediately;
-  // the unified out-adjacency is only marked dirty and rebuilt lazily on the
-  // next unified-adjacency read (OutEdgeRange/OutEdgeDsts/OutEdgeSlots/
-  // CountHeads) — per-derivation full-graph rebuilds were the agent's
-  // dominant index cost. Returns the number of genuinely new edges.
+  // skipped. Unified out-adjacency is rebuilt lazily on its next read.
+  // Returns the number of genuinely new edges, including inverse mirrors.
   std::uint64_t AddEdges(
       std::uint32_t slot,
       const std::vector<std::pair<std::uint32_t, std::uint32_t>>& edges);
 
-  // Batch form: merges edges for several slots and rebuilds the unified
-  // out-adjacency exactly once. Strongly preferred over repeated AddEdges
-  // calls (one chase round typically touches hundreds of slots).
+  // Batch form: merges edges for several slots and rebuilds this Graph's
+  // unified out-adjacency exactly once.
   std::uint64_t AddEdgesBatch(
       const std::unordered_map<
           std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
           by_slot);
 
-  // Batch edge removal (the hold-out operation of workload construction,
-  // paper §7: "we held out X triples as target facts; a task takes one of
-  // them as g and the rest of the graph as Γ0"): removes each (src, dst)
-  // from the slot, mirroring the inverse slot when built with inverses;
-  // missing edges are skipped; the unified out-adjacency is rebuilt once
-  // when anything changed. Returns the number of edges actually removed.
+  // Batch edge removal records tombstones without modifying the shared base.
+  // Missing edges are skipped; unified out-adjacency is rebuilt once when
+  // anything changed. Returns the number of edges actually removed.
   std::uint64_t RemoveEdgesBatch(
       const std::unordered_map<
           std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
           by_slot);
 
   [[nodiscard]] const std::string& EntityName(std::uint32_t id) const {
-    return entity_names_[id];
+    return base_->entity_names[id];
   }
   [[nodiscard]] const std::string& RelationName(std::uint32_t rel) const {
-    return relation_names_[rel];
+    return base_->relation_names[rel];
   }
   // Display name; inverse relations are suffixed with "^-1".
   [[nodiscard]] std::string SlotName(std::uint32_t rel) const {
-    return IsInverse(rel) ? relation_names_[rel - num_relations_] + "^-1"
-                          : relation_names_[rel];
+    return IsInverse(rel) ? base_->relation_names[rel - num_relations()] + "^-1"
+                          : base_->relation_names[rel];
   }
 
   // Vertex labels (e.g. entity types), loaded from label/0.bin when present.
@@ -256,7 +229,7 @@ class Graph {
 
   [[nodiscard]] sics::matrixgraph::core::data_structures::GARGraphArrays
   Arrays() const {
-    auto arrays = arrays_;
+    auto arrays = base_->arrays;
     arrays.v_label_idx = vertex_labels_.empty()
                              ? nullptr
                              : reinterpret_cast<const std::int32_t*>(
@@ -269,49 +242,61 @@ class Graph {
   // The core ImmutableCSR loader fills the vertex-label fields after Build().
   friend Graph LoadGraph(const std::filesystem::path&, bool);
 
-  void RebindArrays() {
-    arrays_.n_vertices = static_cast<int>(num_entities_);
-    arrays_.e_src = array_src_.data();
-    arrays_.e_dst = array_dst_.data();
-    arrays_.e_label_idx = array_labels_.data();
-    arrays_.n_edges = static_cast<int>(array_src_.size());
+  void CopyFrom(const Graph& other) {
+    base_ = other.base_;
+    num_edges_ = other.num_edges_;
+    deltas_ = other.deltas_;
+    has_delta_ = other.has_delta_;
+    version_ = other.version_;
+    vertex_labels_ = other.vertex_labels_;
+    label_names_ = other.label_names_;
+    num_labels_ = other.num_labels_;
+    has_vertex_labels_ = other.has_vertex_labels_;
+    ResetViews();
   }
 
-  // Rebuilds all_out_* from rel_pairs_ (after bulk edge insertion).
+  void ResetViews() {
+    rel_pairs_.clear();
+    rel_pairs_.resize(num_slots());
+    rel_pair_sets_.clear();
+    rel_pair_sets_.resize(num_slots());
+    slot_views_valid_.assign(num_slots(), 0);
+    all_out_offsets_.clear();
+    all_out_dsts_.clear();
+    all_out_slots_.clear();
+    out_dirty_ = has_delta_;
+  }
+
   void RebuildOutAdjacency();
-  // Shared merge core of AddEdges/AddEdgesBatch: updates rel_pairs_ and
-  // rel_pair_sets_ (both slots' mirrors), returns the new-edge count.
-  // Does NOT touch the unified out-adjacency (caller's contract).
+  void EnsureSlotView(std::uint32_t rel) const;
+  bool AddDeltaEdge(std::uint32_t slot, std::uint64_t pair);
+  bool RemoveDeltaEdge(std::uint32_t slot, std::uint64_t pair);
   std::uint64_t MergeEdges(
       const std::unordered_map<
           std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>>&
           by_slot);
-  // Lazily rebuilds the unified out-adjacency when a single-slot AddEdges
-  // marked it dirty. Called by every unified-adjacency accessor.
   void EnsureOutAdjacency() const {
-    if (out_dirty_) {
+    if (has_delta_ && out_dirty_) {
       const_cast<Graph*>(this)->RebuildOutAdjacency();
-      out_dirty_ = false;
     }
   }
 
-  std::uint32_t num_entities_ = 0;
-  std::uint32_t num_relations_ = 0;  // base relations, excluding inverses
-  std::uint64_t num_edges_ = 0;      // base edges, excluding inverses
+  // The base is immutable after loading. Copies share it but own their delta
+  // and all mutable views. CopyFrom deliberately discards materialized views.
+  std::shared_ptr<const Base> base_;
+  std::uint64_t num_edges_ = 0;
+  std::vector<SlotDelta> deltas_;
+  bool has_delta_ = false;
 
-  std::vector<std::string> entity_names_;
-  std::vector<std::string> relation_names_;
+  // Per-slot merged views are built only for slots with a local delta.
+  mutable std::vector<std::vector<std::uint64_t>> rel_pairs_;
+  mutable std::vector<std::unordered_set<std::uint64_t>> rel_pair_sets_;
+  mutable std::vector<char> slot_views_valid_;
 
-  // Indexed by relation slot (base + inverses).
-  std::vector<std::vector<std::uint64_t>> rel_pairs_;
-  std::vector<std::unordered_set<std::uint64_t>> rel_pair_sets_;
-
-  // Unified out-adjacency across all slots, sorted by dst per vertex.
-  // Lazily rebuilt: `out_dirty_` is set by single-slot AddEdges and cleared
-  // by EnsureOutAdjacency/RebuildOutAdjacency.
-  std::vector<std::uint32_t> all_out_offsets_;  // n+1
-  std::vector<std::uint32_t> all_out_dsts_;
-  std::vector<std::uint32_t> all_out_slots_;
+  // Local unified adjacency, used only when has_delta_ is true.
+  mutable std::vector<std::uint32_t> all_out_offsets_;
+  mutable std::vector<std::uint32_t> all_out_dsts_;
+  mutable std::vector<std::uint32_t> all_out_slots_;
   mutable bool out_dirty_ = false;
 
   // Optional vertex labels (size == num_entities when loaded).
@@ -320,10 +305,6 @@ class Graph {
   std::uint32_t num_labels_ = 0;
   bool has_vertex_labels_ = false;
 
-  std::vector<std::uint32_t> array_src_;
-  std::vector<std::uint32_t> array_dst_;
-  std::vector<std::int32_t> array_labels_;
-  sics::matrixgraph::core::data_structures::GARGraphArrays arrays_{};
   std::uint64_t version_ = 0;
 };
 

@@ -5,6 +5,8 @@
 //     (gar::core::engine::chase::GpuChaseEngine, MatrixGraph task::GARDeduce);
 //     both share the semantics and the output layout of the legacy
 //     deduce / deduce_gpu apps.
+// --mode dep-only runs the CPU goal-cone Chase in fixed input order, with one
+//     thread and goal early stop.
 // --mode agent runs policy-guided deduction (gar::core::engine::agent): a single
 //     greedy chain toward a goal fact under a budget, with pluggable
 //     policy / scorer / executor.
@@ -21,8 +23,8 @@
 //              [--policy deterministic|random|hybrid|jev|learned] [--scorer exact|hdc|null]
 //              [--hdc-dim N] [--seed 42]
 //              [--max-candidates-per-rule 256]
-//              [--alpha A] [--beta B] [--gamma G] [--nu N] [--nu2 N2]
-//              [--tau-hdc T] [--no-confidence]
+//              [--alpha A] [--beta B] [--lambda L] [--gamma G] [--nu2 N2]
+//              [--use-confidence]
 //              [--out <dir>] [--verify-against-closure] [--print 20]
 //
 // Agent-mode goal arguments are entity names; '_' leaves an argument open.
@@ -54,16 +56,18 @@ void PrintUsage() {
          "--rules <rules_root> --out <out_dir> [--max-rounds N] "
          "[--max-derivations N] [--max-matches N] [--no-matches] "
          "[--print N] [--threads N]\n"
+         "  gar_reason --mode dep-only --csr <csr_dir> --rules <rules_root> "
+         "--goal 'rel_name(src,dst)' --out <out_dir>\n"
          "  gar_reason --mode agent [--engine cpu|gpu] --csr <csr_dir> "
          "--rules <rules_root> --goal 'rel_name(src,dst)' --budget B [--policy "
          "deterministic|random|hybrid|jev|learned|adaptive] [--scorer exact|hdc|null] [--hdc-dim N] "
          "[--seed N] [--policy-seed N] [--hdc-seed N] "
          "[--max-candidates-per-rule N] [--value-model PATH] "
          "[--hdc-value-backend original|simd|bit-lut] "
-         "[--wall-limit S] [--fair-interval N] "
+         "[--wall-limit S] [--fair-interval N] [--batch-size K] "
          "[--star-order input|goal] [--q-trace PATH] "
-         "[--alpha F] [--beta F] [--gamma F] [--nu F] [--nu2 F] "
-         "[--tau-hdc F] [--no-confidence] [--out <dir>] "
+         "[--alpha F] [--beta F] [--lambda F] [--gamma F] [--nu2 F] "
+         "[--use-confidence] [--out <dir>] "
          "[--verify-against-closure] [--print N]\n"
          "  gar_reason --mode agent-batch [--engine cpu|gpu] --csr <csr_dir> "
          "--rules <rules_root> --tasks goals.tsv --out <dir> "
@@ -90,7 +94,7 @@ Args ParseArgs(int argc, char** argv) {
     if (k == "--mode") a.mode = next();
     else if (k == "--engine") {
       a.engine = next();
-      a.agent.engine = a.engine;
+      a.agent.engine = gar_apps::ParseMatchEngine(a.engine);
     }
     else if (k == "--goal") {
       // Routed by mode (--mode precedes --goal in every invocation): chase
@@ -111,23 +115,25 @@ Args ParseArgs(int argc, char** argv) {
       PrintUsage();
       std::exit(2);
     }
+  } else if (a.mode == "dep-only") {
+    if (a.engine.empty()) a.engine = "cpu";
+    a.full.variant = "dep-only";
+    a.full.goal_early_stop = true;
+    a.full.cfg.threads = 1;
+    if (a.engine != "cpu" || a.full.csr_dir.empty() ||
+        a.full.rules_root.empty() || a.full.goal.empty()) {
+      PrintUsage();
+      std::exit(2);
+    }
   } else if (a.mode == "agent") {
     if (a.full.csr_dir.empty() || a.full.rules_root.empty() ||
-        a.agent.goal_spec.empty() || a.agent.budget == 0 ||
-        (a.agent.engine != "cpu" && a.agent.engine != "gpu") ||
-        (a.agent.policy != "deterministic" && a.agent.policy != "random" &&
-         a.agent.policy != "hybrid" && a.agent.policy != "jev" &&
-         a.agent.policy != "learned" && a.agent.policy != "adaptive" &&
-         a.agent.policy != "q-hdc" && a.agent.policy != "q-numeric") ||
-        (a.agent.scorer != "exact" && a.agent.scorer != "hdc" &&
-         a.agent.scorer != "null")) {
+        a.agent.goal_spec.empty() || a.agent.budget == 0) {
       PrintUsage();
       std::exit(2);
     }
   } else if (a.mode == "agent-batch") {
     if (a.full.csr_dir.empty() || a.full.rules_root.empty() ||
-        a.agent.tasks_path.empty() || a.agent.workers == 0 ||
-        (a.agent.engine != "cpu" && a.agent.engine != "gpu")) {
+        a.agent.tasks_path.empty() || a.agent.workers == 0) {
       PrintUsage();
       std::exit(2);
     }
@@ -150,7 +156,7 @@ int RunFullMode(const Args& args) {
       gar_apps::LoadFullDeduceInputs(args.full, log_tag);
 
   // GoalChase: restrict the rule set to the goal's dependency cone, then
-  // run the plain chase to fixpoint on that subset (no goal early stop).
+  // run the plain chase to fixpoint or the explicitly requested goal stop.
   if (!args.full.goal.empty()) {
     const std::string goal_pred =
         args.full.goal.substr(0, args.full.goal.find('('));
@@ -169,6 +175,19 @@ int RunFullMode(const Args& args) {
     in.rules = std::move(filtered_rules);
     in.rule_ids = std::move(filtered_ids);
   }
+  auto chase_cfg = args.full.cfg;
+  if (args.full.goal_early_stop) {
+    if (!cpu || args.full.goal.empty()) {
+      throw std::invalid_argument(
+          "--goal-early-stop requires CPU chase and --goal");
+    }
+    const auto goal = gar_apps::ParseGoalSpec(args.full.goal, in.graph);
+    if (!goal.args[0] || !goal.args[1]) {
+      throw std::invalid_argument("--goal-early-stop requires a bound goal");
+    }
+    chase_cfg.stop_edge = std::array<std::uint32_t, 3>{
+        goal.slot, *goal.args[0], *goal.args[1]};
+  }
 
   const gar::core::graph::VertexAttributes* attrs =
       in.attrs.columns.empty() ? nullptr : &in.attrs;
@@ -176,11 +195,12 @@ int RunFullMode(const Args& args) {
   namespace deduction = gar::core::engine::chase;
   std::unique_ptr<deduction::ChaseEngine> engine;
   if (cpu) {
-    engine = std::make_unique<deduction::CpuChaseEngine>(in.graph, attrs);
+    engine = std::make_unique<deduction::CpuChaseEngine>(
+        in.graph, attrs, &in.ml_models);
   } else {
     engine = std::make_unique<deduction::GpuChaseEngine>(in.graph, attrs);
   }
-  const auto res = engine->Run(in.rules, args.full.cfg);
+  const auto res = engine->Run(in.rules, chase_cfg);
   gar_apps::ReportFullDeduce(args.full, in, res, log_tag, summary_title);
   return 0;
 }
@@ -188,8 +208,8 @@ int RunFullMode(const Args& args) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const Args args = ParseArgs(argc, argv);
   try {
+    const Args args = ParseArgs(argc, argv);
     if (args.mode == "agent") {
       return gar_apps::RunAgentMode(args.full, args.agent);
     }

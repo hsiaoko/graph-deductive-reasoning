@@ -15,9 +15,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-if (NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release")
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
 endif ()
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+    Debug Release RelWithDebInfo MinSizeRel)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -41,10 +43,26 @@ if (NOT EXISTS ${MATRIXGRAPH_ROOT}/CMakeLists.txt)
         "  (cd third_party/MatrixGraph && git submodule update --init)")
 endif ()
 enable_language(CUDA)
-if (NOT DEFINED CUDA_ARCHITECTURES)
-    set(CUDA_ARCHITECTURES "sm_70")
+if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "70" CACHE STRING
+        "CUDA architectures to compile for")
+endif ()
+
+# MatrixGraph currently forces BUILD_TESTING off in the cache. Restore the
+# caller's setting after adding it so the subproject does not own root policy.
+set(_gar_build_testing_defined FALSE)
+if (DEFINED BUILD_TESTING)
+    set(_gar_build_testing_defined TRUE)
+    set(_gar_build_testing "${BUILD_TESTING}")
 endif ()
 add_subdirectory(${MATRIXGRAPH_ROOT} EXCLUDE_FROM_ALL)
+if (_gar_build_testing_defined)
+    set(BUILD_TESTING "${_gar_build_testing}" CACHE BOOL
+        "Enable testing" FORCE)
+else ()
+    unset(BUILD_TESTING CACHE)
+    unset(BUILD_TESTING)
+endif ()
 
 #######################
 # Project Components

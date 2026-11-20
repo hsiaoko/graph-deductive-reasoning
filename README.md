@@ -66,6 +66,9 @@ cmake --build build -j
 
 - MatrixGraph/CUDA 为必需依赖，不再提供纯 CPU 构建开关。
 - `-DGAR_BUILD_EXAMPLES=ON/OFF`
+- `-DCMAKE_CUDA_ARCHITECTURES=52` 等标准 CMake 架构列表；未指定时默认为 70。
+- `-DGAR_HDC_NATIVE=ON` 显式启用 `-march=native`；默认 OFF，保证二进制可迁移。
+- Release 使用 CMake 标准的 `-O3 -DNDEBUG`，无需额外添加全局优化参数。
 
 ## 规则格式
 
@@ -92,6 +95,17 @@ rule:
   quality:                    # 挖掘阶段回填
     {support: 1234, confidence: 0.87, dataset: "...", miner: "..."}
 ```
+
+含 ML predicate 的规则通过 `--ml-config models.yaml` 注入精确模型。当前内置
+`constant` 适配器供受控验证使用，未注册模型会报错，不会按 false 或跳过规则处理：
+
+```yaml
+models:
+  - {name: M_anom, kind: constant, score: 0.9}
+```
+
+CPU Chase 和 agent 共用该求值接口。GPU agent 在主机端求值 ML；GPU Chase 当前要求
+显式 host adapter，不能直接运行含 ML 的规则。
 
 规则存储为**一条 GAR 一个目录**：`<root>/gar_000001/rule.yaml + csr_offsets.bin +
 csr_indices.bin [+ csr_edge_labels.bin]`（`mine_rules` 的输出布局，`RuleLoader::Load(dir)`
@@ -398,6 +412,11 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 ./build/bin/gar_reason --mode chase --engine cpu \
     --csr /tmp/synth_csr --rules /tmp/synth_rules --out /tmp/synth_full
 
+# DepOnly：固定输入顺序、单线程 goal-cone Chase，在 goal 首次派生后停止
+./build/bin/gar_reason --mode dep-only \
+    --csr /tmp/synth_csr --rules /tmp/synth_rules \
+    --goal 'lives_in(p0,t1)' --out /tmp/synth_dep_only
+
 # 3. 策略制导演绎：朝一个闭包第二轮才导出的事实做目标推理
 ./build/bin/gar_reason --mode agent \
     --csr /tmp/synth_csr --rules /tmp/synth_rules \
@@ -407,6 +426,8 @@ python3 tools/prepare_triples.py --format tsv --in train.txt --out <out_dir>
 #    → goal_derived=true，soundness=pass
 # agent 增加 --engine gpu 后由 GARAgent 自己的 GPU 后端执行 full/partial/delta
 # 匹配；策略、精确谓词求值、R/W 挂起复活与派生计账仍在主机端。
+# 默认 --batch-size 1；设为 K>1 时按 batch-start score 选择有序 top-k，
+# 先共享静态前置条件求值，再按顺序处理 action。
 
 # 可选：每个 goal 仅在起步时调用一次 LLM，为 star 排序生成偏好；
 # motif 选择仍由 --policy 控制。--llm-mock 用于无网络的确定性回归。

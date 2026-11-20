@@ -911,7 +911,7 @@ class GpuMatchBackend final : public MatchBackend {
     const std::vector<MatchRequest> slice(requests.begin() + begin,
                                           requests.begin() + end);
     std::unique_ptr<MatchBackend> cpu =
-        MakeMatchBackend("cpu", graph_.host_graph());
+        MakeMatchBackend(MatchEngine::kCpu, graph_.host_graph());
     const std::vector<MatchResult> expected = cpu->RunBatch(slice);
     for (std::size_t j = 0; j < expected.size(); ++j) {
       const int n = static_cast<int>(slice[j].spec.num_vertices);

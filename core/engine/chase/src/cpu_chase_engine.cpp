@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
 
 #include "gar/core/graph/fact_merger.h"
 #include "gar/core/graph/pattern_matcher.h"
@@ -75,10 +76,9 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
            static_cast<LabelID>(r.edge_labels[e])});
     }
     for (const auto& pred : r.antecedent) {
-      if (pred.kind == PredKind::kMl) {
-        result.rules[i].skipped = true;
-        result.rules[i].note = "ml predicate unsupported on CPU chase";
-        p.skip = true;
+      if (pred.kind == PredKind::kMl &&
+          (ml_models_ == nullptr || ml_models_->Find(pred.model) == nullptr)) {
+        throw std::invalid_argument("unregistered ML model: " + pred.model);
       }
       if (pred.kind == PredKind::kEdge && pred.label == kWildcardLabel) {
         result.rules[i].skipped = true;
@@ -102,7 +102,8 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
 
   // X evaluation against one embedding (shared with validate_rules).
   auto eval_x = [&](const GARule& r, const std::uint32_t* emb) {
-    return gar::core::graph::EvalAntecedent(r.antecedent, emb, attrs_, g_);
+    return gar::core::graph::EvalAntecedent(r.antecedent, emb, attrs_, g_,
+                                            ml_models_);
   };
   const bool typed = g_.has_vertex_labels();
   auto label_ok = [&](const GARule& r, std::uint32_t node,
@@ -117,6 +118,14 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
   // derived-fact candidates are merged in rule order afterwards, so dedup
   // credit is deterministic regardless of thread scheduling.
   std::atomic<bool> capped_out{false};
+  if (cfg.stop_edge) {
+    const auto [slot, src, dst] = *cfg.stop_edge;
+    if (HasEdge(g_, src, dst, slot)) {
+      result.goal_hit = true;
+      result.stopped_early = true;
+      return result;
+    }
+  }
   for (std::uint32_t round = 1; round <= cfg.max_rounds; ++round) {
     const auto round_t0 = std::chrono::steady_clock::now();
     std::vector<std::vector<gar::core::graph::DerivedEdge>> contribs(rules.size());
@@ -249,6 +258,16 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
                                   .count();
     if (merge.deriv_capped) capped_out = true;
     result.rounds = round;
+    if (cfg.stop_edge) {
+      const auto [slot, src, dst] = *cfg.stop_edge;
+      if (HasEdge(g_, src, dst, slot)) {
+        result.goal_hit = true;
+        result.stopped_early = true;
+        std::fprintf(stderr, "[chase] round %u: goal derived (early stop)\n",
+                     round);
+        break;
+      }
+    }
     if (merge.new_facts == 0) {
       std::fprintf(stderr,
                    "[chase] round %u: enumerate %.1fs, +0 facts (fixpoint)\n",

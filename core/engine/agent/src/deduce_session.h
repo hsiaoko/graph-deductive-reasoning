@@ -11,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -108,11 +109,18 @@ class DeduceSession {
   // 0 = static false (prune), 3 = static false answered from H.
   int Evaluate(const deduce::ActionRecord& rec);
   gar::core::graph::DerivedEdge Derive(const deduce::ActionRecord& rec);
+  double GoalProofCost() const;
+  double MeasuredCostMs() const;
   bool RevivalPass();  // true iff W made progress (revive or prune)
   deduce::ActionRecord* SelectReady();
+  std::vector<deduce::ActionRecord> SelectReadyBatch();
+  void PrepareStaticBatch(const std::vector<deduce::ActionRecord>& batch);
+  bool ProcessAction(const deduce::ActionRecord& rec,
+                     double decision_cost_ms);
 
   void Trace(std::string ev);
   void RefreshPeaks();
+  void WriteDecisionTrace(const deduce::ActionRecord& chosen);
 
   const Goal& goal_;
   AgentState* state_;
@@ -142,6 +150,7 @@ class DeduceSession {
     std::array<double, 11> features;
     std::uint64_t action_id = 0;
     std::uint32_t rule = 0;
+    double execution_ms_before = 0.0;
   };
   std::vector<QTraceRow> q_trace_rows_;
   std::vector<gar::core::graph::DerivedEdge> pending_derivations_;
@@ -150,6 +159,8 @@ class DeduceSession {
   std::uint32_t next_star_ = 0;  // first unexpanded star (star discipline)
   std::uint64_t selects_since_fair_ = 0;
   std::uint64_t round_no_ = 0;
+  std::ofstream decision_trace_;
+  std::uint64_t decision_index_ = 0;
   bool verify_ = false;
 };
 

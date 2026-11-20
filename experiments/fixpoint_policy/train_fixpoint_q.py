@@ -49,7 +49,7 @@ def read_trace(path):
         for row in reader:
             if int(row["goal_derived"]) != 1:
                 continue
-            y = float(row["remaining_evaluations"])
+            y = float(row["remaining_execution_ms"])
             if y <= 0:
                 continue
             rows.append(([float(row[name]) for name in NAMES], y))
@@ -98,6 +98,7 @@ def main():
     trained_text = " ".join(trained_on)
     with (args.out / "q_hdc.meta").open("w") as stream:
         stream.write("format hdc_value_v1\n")
+        stream.write("feature_schema action_cost_to_go_v2\n")
         stream.write(f"dim {D}\nn_keys {len(keys)}\nbin_cap {BIN_CAP}\n")
         stream.write(f"bin_scale {BIN_SCALE}\nn_features {len(NAMES)}\n")
         stream.write("names " + " ".join(NAMES) + "\n")
@@ -105,7 +106,7 @@ def main():
             stream.write(f"key {index} {name} {bin_id}\n")
         for a, b in CONJ:
             stream.write(f"conj {a} {b}\n")
-        stream.write(f"lam {LAM}\ntarget remaining_evaluations\n")
+        stream.write(f"lam {LAM}\ntarget remaining_execution_ms\n")
         stream.write(f"trained_on {trained_text}\ntrain_nodes {len(y)}\n")
     with (args.out / "q_hdc.bin").open("wb") as stream:
         stream.write(base_vectors.tobytes())
@@ -118,13 +119,14 @@ def main():
     wn = ridge(F, y)
     with (args.out / "q_numeric.meta").open("w") as stream:
         stream.write("format numeric_ridge_v1\n")
+        stream.write("feature_schema action_cost_to_go_v2\n")
         stream.write(f"n_features {len(NAMES)}\n")
         stream.write("names " + " ".join(NAMES) + "\n")
         for a, b in CONJ:
             stream.write(f"conj {a} {b}\n")
         stream.write("mean " + " ".join(f"{v:.17g}" for v in mu) + "\n")
         stream.write("std " + " ".join(f"{v:.17g}" for v in sd) + "\n")
-        stream.write(f"lam {LAM}\ntarget remaining_evaluations\n")
+        stream.write(f"lam {LAM}\ntarget remaining_execution_ms\n")
         stream.write(f"trained_on {trained_text}\ntrain_nodes {len(y)}\n")
     with (args.out / "q_numeric.bin").open("wb") as stream:
         stream.write(np.asarray(wn, dtype=np.float64).tobytes())

@@ -64,6 +64,7 @@ struct ActionRecord {
   std::uint64_t seq = 0;   // R enqueue sequence (fairness)
   ScoredMotif score;       // maintained by DeduceSession for exact/null
   double selection_priority = 0.0;  // score plus any policy perturbation
+  double guide_priority = 0.0;      // optional first lexicographic key
   std::vector<FactKey> premise_keys;  // exact-witness update subscriptions
 };
 
@@ -89,7 +90,8 @@ class WorkingSet {
   ActionRecord* FindReady(std::uint64_t id);
   std::vector<ActionRecord>& ready() { return ready_; }
   bool ReadyEmpty() const { return ready_.empty(); }
-  void TouchReady(std::uint64_t id);
+  void TouchReady(std::uint64_t id,
+                  std::optional<double> guide_priority = std::nullopt);
   ActionRecord* HighestReady();
   void DiscardHighestReady();
 
@@ -105,6 +107,7 @@ class WorkingSet {
 
  private:
   struct ReadyPriority {
+    double guide = 0.0;
     double priority = 0.0;
     std::size_t position = 0;
     std::uint64_t id = 0;

@@ -12,6 +12,8 @@ add_library(gar_engine_agent STATIC
     src/witness.cpp
     src/scorer.cpp
     src/ada_deduce_executor.cpp
+    src/backward_executor.cpp
+    src/batch_session.cpp
     src/match_backend.cpp
     src/cpu_match_backend.cpp
     src/gpu_match_backend.cu
@@ -20,6 +22,8 @@ add_library(gar_engine_agent STATIC
     src/working_set.cpp
     src/precondition_cache.cpp
     src/producer_tracker.cpp
+    src/guide.cpp
+    src/guided_policy.cpp
     src/jev_client.cpp
     src/policy.cpp
     src/value_model.cpp

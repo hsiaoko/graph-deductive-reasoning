@@ -17,16 +17,17 @@ Jev / LLM 模块利用规则元数据、goal 和依赖图信息，为候选提�
 
 候选仍由符号系统生成，谓词仍由 CPU/GPU 精确求值，派生仍由规则执行器完成。模型输出只影响搜索顺序，不是逻辑证据。
 
-## 2. 两套入口不要混淆
+## 2. 三套入口不要混淆
 
-当前代码保留两套不同用途的入口。
+当前代码保留三套不同用途的入口。
 
 | 入口 | 调用时机 | 模型排序对象 | 当前定位 |
 | --- | --- | --- | --- |
-| `--llm-guide` | 每个 goal 启动时最多一次 | 所有 eligible 规则 star | 推荐的初始指引接口，可与 deterministic、learned 等 policy 组合 |
+| `--llm-guide` | 每个 goal 启动时最多一次 | 所有 eligible 规则 star | 初始 star 指引，可与 deterministic、learned 等 policy 组合 |
+| `--paper-guide` | 每个 goal 启动时最多一次 | 当前规则内的 grounded action | 论文附录 G 的受限条件编译与 action 排序 |
 | `--policy jev` | ready-set 非空时，可能每步调用 | 当前 top-k admissible motif | 旧的逐步决策 policy，对应论文中的 JevPolicy 路径 |
 
-二者共享 `LlmClient` 抽象，但调用频率、输入、协议默认值和统计字段不同。
+三者共享 `LlmClient` 抽象，但调用频率、输入、协议默认值和统计字段不同。`--paper-guide` 的输出是受限 JSON，不是 star 概率。`paper_guide_overhead` 与 `guide_overhead` 分别记录两类开销。
 
 本地 LLM2Jev 服务推荐使用第一种：
 
@@ -373,6 +374,9 @@ Mock 适用于验证：
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `--llm-guide` | 关闭 | 启用每 goal 一次的初始 star 指引 |
+| `--paper-guide` | 关闭 | 编译附录 G 的 action-level 条件指引 |
+| `--guide-lambda F` | `1.0` | 在 guide 与基础 policy 的有序 batch 分布间混合；范围 [0,1] |
+| `--paper-guide-response PATH` | 空 | mock 使用的响应 JSON；必须搭配 `--llm-mock` |
 | `--llm-backend openai\|jev` | `openai` | 选择 chat completions 或 System One 客户端 |
 | `--llm-base-url URL` | `https://api.deepseek.com` | 服务地址；本地 Jev 通常填 `http://127.0.0.1:30000` |
 | `--llm-model NAME` | `deepseek-chat` | 模型名；本地必须与 `JEV_MODEL_NAME` 一致 |
@@ -569,7 +573,10 @@ cmake --build build --target gar_reason -j4
 | --- | --- |
 | `core/engine/agent/include/gar/core/agent/jev_client.h` | 通用 `LlmClient`、结果结构和三种客户端声明 |
 | `core/engine/agent/src/jev_client.cpp` | HTTP、OpenAI、JSON 编解码、概率对齐和 mock |
-| `core/engine/agent/include/gar/core/agent/policy.h` | `LlmStarGuide` 与旧 `JevPolicy` 接口 |
+| `core/engine/agent/include/gar/core/agent/guide.h` | 受限 guide 类型、特征目录和编译接口 |
+| `core/engine/agent/src/guide.cpp` | JSON 校验、条件求值和优先级归一化 |
+| `core/engine/agent/src/guided_policy.cpp` | 每 goal 编译、lexicographic 选择和 batch handover |
+| `core/engine/agent/include/gar/core/agent/policy.h` | `LlmStarGuide`、`PaperGuide` 与旧 `JevPolicy` 接口 |
 | `core/engine/agent/src/policy.cpp` | 状态构造、每 goal 缓存、概率校验、归一化和 fallback |
 | `core/engine/agent/src/deduce_session.cpp` | `BuildPlans()` 中融合基础顺序与模型偏好 |
 | `tools/cli/agent_mode.h` | CLI 参数、客户端组装、`summary.yaml` 统计 |

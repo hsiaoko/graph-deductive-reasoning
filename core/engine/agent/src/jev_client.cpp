@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -353,6 +355,22 @@ JevChoiceResult OpenAiLlmClient::Choice(
   return ParseChoice(content, options);
 }
 
+std::string CachedLlmClient::Guide(const std::string& state,
+                                   const std::string& instructions) {
+  std::ifstream input(response_path_);
+  if (input) {
+    return std::string((std::istreambuf_iterator<char>(input)),
+                       std::istreambuf_iterator<char>());
+  }
+  const std::string response = fallback_->Guide(state, instructions);
+  std::ofstream output(response_path_);
+  if (!output) {
+    throw std::runtime_error("cannot write guide cache: " + response_path_);
+  }
+  output << response;
+  return response;
+}
+
 LlmChoiceResult MockLlmClient::Choice(
     const std::string& state, const std::string& instructions,
     const std::vector<std::string>& options,
@@ -387,6 +405,52 @@ LlmChoiceResult MockLlmClient::Choice(
     out.confidence = best / sum;
   }
   return out;
+}
+
+std::string OpenAiLlmClient::Guide(const std::string& state,
+                                   const std::string& instructions) {
+  const char* api_key = std::getenv("DEEPSEEK_API_KEY");
+  if (api_key == nullptr || *api_key == '\0') {
+    throw std::runtime_error("openai: DEEPSEEK_API_KEY is not set");
+  }
+  nlohmann::json body{
+      {"model", model_},
+      {"messages",
+       {{{"role", "system"},
+         {"content", instructions +
+                         " Return one JSON object with a rules array. Each rule "
+                         "has rule, when, and weight. Do not use Markdown."}},
+        {{"role", "user"}, {"content", state}}}},
+      {"response_format", {{"type", "json_object"}}},
+      {"temperature", 0.0},
+      {"max_tokens", 8192},
+      {"stream", false}};
+  const std::string response =
+      OpenAiPost(OpenAiEndpoint(base_url_), body.dump(), api_key, timeout_ms_);
+  const auto outer = nlohmann::json::parse(response);
+  if (!outer.contains("choices") || !outer["choices"].is_array() ||
+      outer["choices"].empty()) {
+    throw std::runtime_error("openai: response has no choices");
+  }
+  const auto& choice = outer["choices"][0];
+  if (!choice.contains("message") || !choice["message"].contains("content") ||
+      !choice["message"]["content"].is_string()) {
+    throw std::runtime_error("openai: response has no message content");
+  }
+  std::string content = choice["message"]["content"].get<std::string>();
+  const std::size_t first = content.find('{');
+  const std::size_t last = content.rfind('}');
+  if (first == std::string::npos || last == std::string::npos || last < first) {
+    throw std::runtime_error("openai: message content is not a JSON object");
+  }
+  return content.substr(first, last - first + 1);
+}
+
+std::string MockLlmClient::Guide(const std::string& state,
+                                 const std::string& instructions) {
+  (void)state;
+  (void)instructions;
+  return guide_response_;
 }
 
 }  // namespace agent

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,9 @@ struct ChaseConfig {
   // CPU engine: oneTBB max_allowed_parallelism (0 = all cores). The GPU
   // engine ignores it (its host-side work is tiny).
   std::uint32_t threads = 0;
+  // Optional (slot, src, dst) goal. CPU naive chase stops after the round
+  // that derives it; nullopt preserves the ordinary full-closure behavior.
+  std::optional<std::array<std::uint32_t, 3>> stop_edge;
 };
 
 struct RuleChaseStats {
@@ -54,7 +59,9 @@ struct ChaseResult {
   std::uint64_t x_satisfied_total = 0;
   std::uint64_t derivation_candidates_total = 0;  // before round dedup
   std::uint32_t rounds = 0;
-  bool fixpoint = false;             // false when stopped by a cap
+  bool fixpoint = false;             // false when stopped by a cap or goal
+  bool goal_hit = false;
+  bool stopped_early = false;
 };
 
 class ChaseEngine {
