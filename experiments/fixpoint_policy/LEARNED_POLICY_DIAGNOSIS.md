@@ -133,7 +133,40 @@ backward 事实，合并时只拼 chain 与成本、不重复累加 derived。`r
 注：hybrid 代码（`config.h` 加 `kHybrid`、`executor.h`/`hybrid_executor.cpp`、`CMakeLists.txt`、
 `agent_mode.h` 选择器）与作者在这些核心文件上的在途改动交织，留工作树由作者一并提交。
 
-## 修复方向（研究决策，待定）
+### 增益来源分解与 backward-teacher 的排除
+
+逐 goal 对比 hybrid vs forward（三 seed 中位数）：
+
+| goal 类别 | 数量 | hybrid derived | forward derived |
+|---|---|---|---|
+| backward 命中（hybrid < 50% forward） | 19 | **23** | 16230 |
+| 回退（hybrid ≥ 50% forward） | 17 | 79099.8 | 79372.6 |
+
+- **增益 100% 来自 19 个简单 goal**（23 vs 16230）；17 个回退 goal（中心谓词/深层：round1×2、
+  round2×7、deep×8）hybrid ≈ forward，无降。
+- 据此**排除 backward-teacher 模仿**：①回退 goal 上 backward 全失败，无教师 trace；教师数据只能
+  来自结构不同的简单 goal，难泛化。②简单 goal 已近最优（23 事实），无空间。③根因三特征天花板
+  仍在——证明标签封顶 ≈ Det，换干净教师不改变 `(HDC action, HDC goal, f)` 的表达力上限。
+- 结论：hybrid 增益是**结构性**的（backward 廉价解简单 goal），不是在硬 goal 上可学到的。
+  最终采纳 hybrid 为增益方案，不再投入 backward-teacher。
+
+## 最终结论与论文就绪结果
+
+诊断闭环：learned relevance policy 负增益源于①数据稀缺②默认丢 f③证明标签≠下一步价值；
+证明结构标签（graded/binary）学会后仍封顶 ≈ Det。**真正的增益来自证明导向 hybrid**：
+
+| 方法（FB15k-237/rules640，36 goals×3 seeds） | hit | derived（宏平均） | execution（s，宏平均） |
+|---|---|---|---|
+| Deterministic（forward） | 1.0 | 46047.6 | 2.445 |
+| Learned graded（纯模型） | 1.0 | 49409.1 | 3.43 |
+| Learned binary（纯模型） | 1.0 | 46287.0 | 2.90 |
+| Learned blend（f+模型） | 1.0 | ~46130 | 2.84–2.93 |
+| **Hybrid（backward-first）** | **1.0** | **37364.8** | **2.098** |
+
+Hybrid 相对 Deterministic：**derived −18.9%、execution −14.2%、命中持平**。
+（论文 §6 表格可直接采用此行；paper.tex 未改动，由作者填入。）
+
+## 修复方向（已定：采纳 hybrid）
 
 头room 数据表明，边际改进 forward Det 已封顶；显著增益须转向证明导向。按性价比排序：
 
