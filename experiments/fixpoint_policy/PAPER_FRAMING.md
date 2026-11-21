@@ -68,7 +68,18 @@ backward 是否会成功，省去硬 goal 的白试并选最优策略。训练�
 - ❌ 把 hybrid 增益归因于学习——hybrid 无任何模型参与。
 - ⚠️ 锥过滤收益须限定非中心谓词（中心谓词锥过滤仅 ~11%，早期停止才是主导）。
 
-## 五、未来工作（A，诚实写明）
+## 五、已探索并证伪的方向（A，写成诚实负面结果）
 
-实例级价值学习奖金数量级（oracle 98% 浪费），但需①携带实例级证明信号的图特征（action↔goal
-实体图距离/PPR，未验证）②更优教师数据（backward 硬 goal 失败、探索给不出）。列为未来工作。
+实例级价值学习奖金数量级（oracle 98% 浪费），但已用探针证伪其可行性：HDC 余弦与多跳 BFS 图距离
+对证明成员身份的 AUC 都只在浅 goal 强（round2/3：0.73–0.92），深 goal（round4，硬 goal）≈随机
+（0.44 / 0.54）。深 goal 证明成员身份是规则可派生性，不是基图实体proximity，实例级图特征量错对象。
+建议写成「我们探索了实例级学习路线并发现其局限」——头room 真实但非排序学习可得，需结构证明搜索。
+这是有价值的诚实发现，比悬置的「未来工作」更扎实。可用英文素材：
+
+> We explored whether instance-level features could identify proof-relevant
+> actions on hard goals. Both HDC action-goal similarity and multi-hop graph
+> distance separate proof members on shallow goals (AUC 0.73-0.92) but fall to
+> chance on deep goals (0.44 / 0.54), where proof membership is governed by
+> rule derivability rather than entity proximity. The large oracle headroom
+> (98% waste) is thus not reachable by learned action ranking; it requires
+> structural proof-directed search, which is what the hybrid executor provides.
