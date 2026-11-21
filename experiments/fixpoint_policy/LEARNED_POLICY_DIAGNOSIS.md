@@ -110,14 +110,37 @@ off-proof 动作正是 Deterministic 的浪费来源，学会压低它们*可能
 方向应从「给 forward Det 学一个更好的排序」转向「让 forward 策略学会 backward 式的证明导向
 行为」，并解决中心谓词的完备性（backward 失败时回退 forward）。
 
+## Hybrid 实证：首个正增益（−18.9% 探索 / −14.2% 时间，100% 命中）
+
+落地 `HybridExecutor`（`--search-direction hybrid`）：backward 优先（受限 call 预算，默认
+100000，硬 goal 快速失败），失败则从 backward 留下的状态继续 forward AdaDeduce 到命中。
+两 executor 都报告 `derived = state->journal()`（共享 journal），故 forward 的 derived 已含
+backward 事实，合并时只拼 chain 与成本、不重复累加 derived。`run_hybrid_eval.py` 同脚本同
+设置跑 36 goals × 3 seeds：
+
+| 指标 | Hybrid | Forward（matched） | 增益 |
+|---|---|---|---|
+| hit | **1.0** | 1.0 | 持平（完备性保留） |
+| derived | **37364.8** | 46047.6 | **−18.9%** |
+| execution (s) | **2.098** | 2.445 | **−14.2%** |
+
+- 这是所有臂里**第一个真正赢 Deterministic** 的：探索量与时间双降，命中不减。
+- 机制：backward 解出的 ~19 goal 享受证明导向降探索（个位/十位事实），其余 17 个中心谓词
+  goal 干净回退 forward（≈ Det 成本 + 少量 backward 开销）。平均下来净降 18.9%。
+- 探针：p06 backward 命中 3 事实/1.2ms；p00 backward 失败→forward 回退命中 6236 事实/177ms。
+- 可靠性：backward 与 forward 各自已证可靠，hybrid 仅在共享状态上顺序组合两者，可靠性保持。
+
+注：hybrid 代码（`config.h` 加 `kHybrid`、`executor.h`/`hybrid_executor.cpp`、`CMakeLists.txt`、
+`agent_mode.h` 选择器）与作者在这些核心文件上的在途改动交织，留工作树由作者一并提交。
+
 ## 修复方向（研究决策，待定）
 
 头room 数据表明，边际改进 forward Det 已封顶；显著增益须转向证明导向。按性价比排序：
 
-0. **证明导向 hybrid（首选，头room ~2000×）**：backward 命中时仅 ~22 事实，但 53% 完备。
-   做「backward 优先 + 中心谓词/超限时回退 forward」的 hybrid，或把 backward 成功 trace 当
-   *更好教师* 教 forward learned policy 学会证明导向行为。需 backward trace 支持 + 完备性
-   回退策略。这是真正能大幅降 derived 的方向（不是边际调排序）。
+0. **证明导向 hybrid（首选，已验证正增益 −18.9%/−14.2%）**：backward 优先 + 中心谓词/超限
+   回退 forward 的 `HybridExecutor` 已落地并实测赢 Det（见上节）。后续可把 backward 成功 trace
+   当*更好教师* 教 forward learned policy 学会证明导向行为，进一步把回退 goal 的探索也降下来
+   （需 backward trace 支持）。这是真正能大幅降 derived 的方向（不是边际调排序）。
 1. **成本下降价值标签**：标签 = 选该动作后剩余搜索/证明成本的下降量（反事实 rollout 或信用
    分配），对齐「选它能省多少」。若以 backward 证明为参照分配信用，可与方向 0 结合。
 2. **模仿学习 / learning-to-rank**：以参考策略每个决策点选中候选为正例、被拒绝 ready-set
@@ -137,6 +160,8 @@ off-proof 动作正是 Deterministic 的浪费来源，学会压低它们*可能
   设权重、`--model` 指定模型、`--tag` 区分实验臂。
 - `run_backward_headroom.py`：36 test goals 上跑 backward，统计命中率/探索量，量化证明导向
   搜索的头room（`--wall-limit/--max-calls/--limit`）。
+- `run_hybrid_eval.py`：36 goals × 3 seeds 评测某 search-direction（hybrid/forward/backward），
+  `--direction/--tag/--backward-max-calls`，输出 execution/derived/hit 汇总。
 
 ```bash
 # 扩数据重训（确认根因一）
@@ -156,4 +181,7 @@ python3 experiments/fixpoint_policy/run_blend_ablation.py --handcrafted 0 --rele
 python3 experiments/fixpoint_policy/run_blend_ablation.py --handcrafted 1 --relevance 1 --tag binblend --model $B
 # 证明导向搜索头room（backward vs forward Det）
 python3 experiments/fixpoint_policy/run_backward_headroom.py --wall-limit 60
+# Hybrid 实证（首个正增益）+ matched forward 基线
+python3 experiments/fixpoint_policy/run_hybrid_eval.py --direction hybrid  --tag hybrid
+python3 experiments/fixpoint_policy/run_hybrid_eval.py --direction forward --tag forward
 ```
