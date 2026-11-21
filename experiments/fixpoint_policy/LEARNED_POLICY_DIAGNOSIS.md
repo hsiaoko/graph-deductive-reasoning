@@ -185,6 +185,45 @@ Hybrid 相对 Deterministic：**derived −18.9%、execution −14.2%、命中�
 主张 learned policy 优势前须过三关：数据充足（模型学会）→ 不丢 f → 标签是下一步价值。
 当前证据：前两关已过，第三关证明结构标签（graded/binary）不满足，需证明导向/成本下降信号。
 
+## 头room 与可学性：oracle 上界 + 两个去风险探针
+
+`run_oracle_bound.py`（forward trace 的 derivations 恰为证明 DAG，len = 完美策略最小探索）：
+
+| 分层 | derived（Det） | proof（oracle） | 浪费 |
+|---|---|---|---|
+| round1 | 7831 | 1 | 91.4% |
+| round2 | 7435 | 3.75 | 91.3% |
+| deep | 122877 | 43.6 | 98.2% |
+| 总体 | 46048 | 16.1 | 93.6% |
+
+逐 goal：p21 derived 575480 / proof 22，p34 356169 / proof 9。**证明锥处处很小、浪费处处
+巨大，硬 goal 也有海量头room**——「硬 goal 证明锥本就巨大」的悲观假设被推翻。
+
+但头room ≠ 可学。两个探针（`run_exploration_probe.py` 等）堵上了 obvious 学习路线：
+
+- **探针 1（f 实例级 AUC）= 0.553**（≈随机）：f 谓词级近视实锤，同谓词实例几乎无区分力。
+- **探针 2（探索 rollout）**：硬 goal random/uniform 多 seed，p09 最好 0.97×Det、p11 最好
+  0.82×Det（幸运 seed，中位数常更差）、p21 最好 1.0×Det。**探索找不出数量级更省的证明**。
+
+oracle 的 98% 头room 与探索最好 0.82× 之间的鸿沟**换排序跨不过**：浪费是实例级 brute-force，
+forward 不管怎么排都得先推完错实例才撞见证明。唯一能吃头room 的机制是**直接认出证明实例**
+（backward 常量绑定结构性做到，但硬 goal 反向爆炸失败）。
+
+## 最终收口（B/C，用户拍板）
+
+- **B（主张立到 hybrid）**：论文增益主张立在 hybrid 结构增益（−18.9%/−14.2%，100% 命中）；
+  learned relevance policy 降为**诚实消融/负面发现**——从成功链学 action relevance 封顶于手工
+  分数，因为①训练链由手工策略生成（蒸馏天花板）②f 相关性谓词级、模型继承近视③探索给不出更优
+  教师。这是个有证据、有机制洞察的结果，只是「learned」不再是增益主角。
+- **C（可选新贡献）**：把 learned 改为 **goal 级策略选择器**（forward/backward/锥过滤），补
+  hybrid 的盲目先试 backward；36 goal 的 backward 成败标签现成。这是与 hybrid 互补、真有学习
+  含量的方向（未实现，列为后续）。
+- **A（实例级价值学习）列为未来工作**：奖金数量级，但两条已知路被否，仅剩「实例级图特征对证明
+  成员身份高 AUC」这一未验证前提（需 C++ 图距离工具，先验不乐观）。诚实写明头room 与障碍。
+
+论文表述建议见 `PAPER_FRAMING.md`（paper.tex 未改动，由作者采纳）。**不保留「learned relevance
+policy 带来增益」的无证据主张。**
+
 ## 复现脚本
 
 - `run_relevance_scale.py`：从闭包采样可派生 goal、生成 deterministic trace、重训并打印
@@ -195,6 +234,10 @@ Hybrid 相对 Deterministic：**derived −18.9%、execution −14.2%、命中�
   搜索的头room（`--wall-limit/--max-calls/--limit`）。
 - `run_hybrid_eval.py`：36 goals × 3 seeds 评测某 search-direction（hybrid/forward/backward），
   `--direction/--tag/--backward-max-calls`，输出 execution/derived/hit 汇总。
+- `run_oracle_bound.py`：36 test goals 的证明 DAG 大小（oracle 最小探索）vs Det derived，
+  量化可学头room（`--limit/--wall-limit`）。
+- `run_exploration_probe.py`：硬 goal 上 random/uniform-random 多 seed，检验探索能否找到比
+  Det 更省的证明（`--goals/--seeds/--policies/--wall-limit`）。
 
 ```bash
 # 扩数据重训（确认根因一）
@@ -217,4 +260,7 @@ python3 experiments/fixpoint_policy/run_backward_headroom.py --wall-limit 60
 # Hybrid 实证（首个正增益）+ matched forward 基线
 python3 experiments/fixpoint_policy/run_hybrid_eval.py --direction hybrid  --tag hybrid
 python3 experiments/fixpoint_policy/run_hybrid_eval.py --direction forward --tag forward
+# 头room 与可学性（oracle 上界 + 探索探针）
+python3 experiments/fixpoint_policy/run_oracle_bound.py
+python3 experiments/fixpoint_policy/run_exploration_probe.py --goals p09,p11,p21,p07
 ```
