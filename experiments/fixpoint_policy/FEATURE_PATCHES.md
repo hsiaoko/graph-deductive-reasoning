@@ -51,6 +51,18 @@
 - `run_relevance_scale.py`：从 chase 闭包采样可派生 goal 扩数据重训。
 - `run_backward_headroom.py`：backward 搜索头room 量化。
 - `run_hybrid_eval.py`：hybrid/forward/backward 端到端评测。
+- `run_oracle_bound.py`：证明 DAG 大小（oracle 最小探索）vs Det derived。
+- `run_exploration_probe.py`：硬 goal 探索 rollout vs Det。
+
+## 诊断探针代码（工作树，与作者 CMake 交织）
+
+一次性诊断工具（非产品面），证伪路径 A 用，构建绿：
+
+- `tools/cli/gar_hdc_probe.cpp`（新文件）：HDC 余弦 vs f 的证明成员身份 AUC，分层。
+- `tools/cli/gar_graph_probe.cpp`（新文件）：多跳 BFS 图距离 vs f 的证明成员身份 AUC，分层。
+- `tools/cli/CMakeLists.txt`：加 `gar_hdc_probe` / `gar_graph_probe` 两个 target（镜像
+  gar_train_policy，纯 C++ 链接 graph/analysis/engine::agent）。该文件含作者在途改动，
+  探针 target 为加性 hunk，留作者一并提交。
 
 ## 提交建议
 
