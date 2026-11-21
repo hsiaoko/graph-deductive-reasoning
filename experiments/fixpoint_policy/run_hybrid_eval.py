@@ -29,10 +29,11 @@ def yaml_summary(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--direction", default="hybrid",
-                    choices=("hybrid", "forward", "backward"))
+                    choices=("hybrid", "forward", "backward", "learned-strategy"))
     ap.add_argument("--tag", default=None)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--backward-max-calls", type=int, default=100000)
+    ap.add_argument("--strategy-model", default=None)
     args = ap.parse_args()
     tag = args.tag or args.direction
     out_root = WORK / tag
@@ -54,6 +55,8 @@ def main():
                    "--policy-seed", str(seed), "--fair-interval", "0",
                    "--search-direction", args.direction,
                    "--backward-max-calls", str(args.backward_max_calls)]
+            if args.strategy_model:
+                cmd += ["--strategy-model", args.strategy_model]
             subprocess.run(cmd, cwd=ROOT, capture_output=True)
     per_goal = []
     for goal in goals:

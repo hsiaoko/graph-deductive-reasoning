@@ -54,15 +54,33 @@
 - `run_oracle_bound.py`：证明 DAG 大小（oracle 最小探索）vs Det derived。
 - `run_exploration_probe.py`：硬 goal 探索 rollout vs Det。
 
+## Feature 3：learned 策略选择器（路径 C，`--search-direction learned-strategy`）
+
+实测赢 Det：derived −18.1% / execution −16.1% / hit 持平（37701 / 2.051s）。
+
+- `core/engine/agent/include/gar/core/agent/config.h`：`SearchDirection::kLearnedStrategy` +
+  SearchDirectionName case。
+- `core/engine/agent/include/gar/core/agent/executor.h`：`ExecConfig::strategy_model_path` 字段 +
+  `LearnedStrategyExecutor` 声明。
+- `core/engine/agent/src/learned_strategy_executor.cpp`（新文件）：加载 gar_strategy_v1 logistic
+  模型，算 goal cone_size（GoalConeRuleIndices）+ pred_degree（RelationPairs），sigmoid 概率
+  ≥threshold 委托 HybridExecutor，否则 AdaDeduceExecutor forward。
+- `core/engine/agent/CMakeLists.txt`：加 `src/learned_strategy_executor.cpp`。
+- `tools/cli/agent_mode.h`：`--strategy-model` flag + ParseSearchDirection learned-strategy +
+  MakeExecConfig.strategy_model_path + executor 选择器分支。
+- 训练数据/工具：`run_backward_labels.py`（backward 成败标签）、`gar_goal_features.cpp`（cone+度
+  特征，CMake target）、sklearn logistic（参数存 .work_hdcv/strategy/strategy.model）。
+
 ## 诊断探针代码（工作树，与作者 CMake 交织）
 
 一次性诊断工具（非产品面），证伪路径 A 用，构建绿：
 
 - `tools/cli/gar_hdc_probe.cpp`（新文件）：HDC 余弦 vs f 的证明成员身份 AUC，分层。
 - `tools/cli/gar_graph_probe.cpp`（新文件）：多跳 BFS 图距离 vs f 的证明成员身份 AUC，分层。
-- `tools/cli/CMakeLists.txt`：加 `gar_hdc_probe` / `gar_graph_probe` 两个 target（镜像
-  gar_train_policy，纯 C++ 链接 graph/analysis/engine::agent）。该文件含作者在途改动，
-  探针 target 为加性 hunk，留作者一并提交。
+- `tools/cli/gar_goal_features.cpp`（新文件）：goal cone_size + pred_degree 特征（C 训练用）。
+- `tools/cli/CMakeLists.txt`：加 `gar_hdc_probe` / `gar_graph_probe` / `gar_goal_features` 三个
+  target（镜像 gar_train_policy，纯 C++ 链接 graph/analysis/engine::agent）。该文件含作者在途
+  改动，探针 target 为加性 hunk，留作者一并提交。
 
 ## 提交建议
 

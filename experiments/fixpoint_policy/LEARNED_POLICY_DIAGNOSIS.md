@@ -235,15 +235,37 @@ forward 不管怎么排都得先推完错实例才撞见证明。唯一能吃头
   learned relevance policy 降为**诚实消融/负面发现**——从成功链学 action relevance 封顶于手工
   分数，因为①训练链由手工策略生成（蒸馏天花板）②f 相关性谓词级、模型继承近视③探索给不出更优
   教师。这是个有证据、有机制洞察的结果，只是「learned」不再是增益主角。
-- **C（learned 的实在落点）**：把 learned 改为 **goal 级策略选择器**（forward/backward/锥过滤），
-  补 hybrid 的盲目先试 backward；36 goal 的 backward 成败标签现成。绕开蒸馏天花板、真学习含量，
-  增益小但真。这是实例级排序证伪后，learned 唯一剩下的实在贡献（未实现，列为后续）。
+- **C（learned 的实在落点，已建成实测赢 Det）**：把 learned 改为 **goal 级策略选择器**——
+  logistic 分类器（cone_size + log-degree → backward 成功，CV 准确率 0.853 / AUC 0.893）驱动
+  `LearnedStrategyExecutor`：预测成功→hybrid（backward+回退），预测失败→直接 forward。绕开蒸馏
+  天花板，真学习含量。实测见下节。
 - **A（实例级价值学习）已探索并证伪**：HDC 与多跳图距离探针证明深 goal 无实例级证明信号（见上节）。
   论文宜写成「已探索的负面结果」——头room 真实但非排序学习可得，需结构证明搜索。这本身是有价值
   的诚实发现，而非未验证的悬置前提。
 
 论文表述建议见 `PAPER_FRAMING.md`（paper.tex 未改动，由作者采纳）。**不保留「learned relevance
 policy 带来增益」的无证据主张。**
+
+## C 实测：learned 策略选择器赢 Det（−18.1% / −16.1%）
+
+`run_backward_labels.py` 跑 150 scale goals 得 backward 成败标签（62 成功）；`gar_goal_features`
+提取 cone_size + pred_degree；sklearn logistic 5 折 CV **准确率 0.853 / AUC 0.893**（成功 goal 锥
+中位 30、失败 198）。参数存 strategy.model（gar_strategy_v1）。`LearnedStrategyExecutor`
+（`--search-direction learned-strategy --strategy-model`）按概率路由。`run_hybrid_eval.py
+--direction learned-strategy` 36 goals×3 seeds：
+
+| 方法 | hit | derived | execution (s) |
+|---|---|---|---|
+| Deterministic | 1.0 | 46047.6 | 2.445 |
+| Hybrid（固定规则） | 1.0 | 37364.8 | 2.098 |
+| **Learned-strategy（C）** | **1.0** | **37701.0** | **2.051** |
+
+- **Learned-strategy vs Det：derived −18.1%、execution −16.1%、命中持平。learned 真赢 Det。**
+- vs hybrid：derived +0.9%（分类器漏判几个 backward 会成功的 goal）、execution −2.2%（跳过中心
+  谓词盲目 backward 省时）。增益量级与 hybrid 同源（浅 goal 选 backward），但**决策是学出来的**
+  （AUC 0.89 分类器）非写死规则。
+- 论文 learned policy 定位＝**学习到的 goal 级策略选择器**（赢 score-based Det）；原动作排序
+  relevance model 作为消融（封顶 Det）。张力解开：learned 有实在贡献，增益诚实归因于学习到的自适应路由。
 
 ## 复现脚本
 

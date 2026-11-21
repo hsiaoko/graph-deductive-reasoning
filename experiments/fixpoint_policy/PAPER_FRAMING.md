@@ -13,8 +13,11 @@
 | Learned relevance (pure) | 1.00 | 49,409.1 | 3.43 |
 | Learned relevance (blend w/ score) | 1.00 | ~46,130 | 2.84–2.93 |
 | **Hybrid (backward-first + fallback)** | **1.00** | **37,364.8** | **2.098** |
+| **Learned strategy selector (C)** | **1.00** | **37,701.0** | **2.051** |
 
 Hybrid vs Deterministic：derived **−18.9%**、execution **−14.2%**、hit 持平。
+Learned strategy selector vs Deterministic：derived **−18.1%**、execution **−16.1%**、hit 持平
+（学习到的 goal 级策略选择器，backward 成功分类器 AUC 0.89；≈hybrid，决策为学习而非固定规则）。
 （Chase 行按 UNIFIED640 协议；若 §6 用「36-goal 代表 wall 合计」口径，把各臂逐 goal 三 seed
 中位数求和即可，脚本 run_hybrid_eval.py 的 per-goal 数据已具备。）
 
@@ -47,19 +50,24 @@ Hybrid vs Deterministic：derived **−18.9%**、execution **−14.2%**、hit �
 
 ## 三、C（可选）：把 learned 改为策略选择器
 
-若要保留一个**有学习含量**的贡献，把 learned 对象从「动作排序」换成「**goal 级搜索策略选择**」
-（forward / backward / cone-filter）。hybrid 现在盲目先试 backward；一个 goal 级分类器可预测
-backward 是否会成功，省去硬 goal 的白试并选最优策略。训练标签现成（36 goal 的 backward 成败）。
-表述方向：
+**C 已建成实测，是 learned 的实在贡献.** 把 learned 对象从「动作排序」换成「**goal 级搜索策略
+选择**」。`LearnedStrategyExecutor` 用 logistic 分类器（cone_size + log-degree → backward 成功，
+5 折 CV 准确率 0.853 / AUC 0.893）路由：预测成功→backward+回退，预测失败→直接 forward。
+实测 derived 37701 / execution 2.051s / hit 1.0，**vs Det −18.1% / −16.1%**，≈hybrid（决策为
+学习而非固定规则）。表述方向：
 
 > Rather than learning to rank individual actions, we learn to select the
-> search strategy per goal. A goal-level classifier predicts whether
-> proof-directed backward search will succeed, allowing the agent to skip
-> futile backward attempts on central predicates and choose the most efficient
-> strategy. This complements the hybrid executor and is a learnable component
-> with direct evidence (backward succeeds on 19/36 goals).
+> search strategy per goal. A goal-level classifier (dependency-cone size and
+> predicate degree; cross-validated AUC 0.89) predicts whether proof-directed
+> backward search will succeed, routing the agent to backward with a forward
+> fallback when it will, and to forward directly otherwise. This learned
+> strategy selector reduces derived facts by 18.1% and execution time by 16.1%
+> over the score-based policy while preserving goal completeness, skipping
+> futile backward attempts on central predicates.
 
-（C 尚未实现；如采纳需补实验。当前数据只支持「backward 53% 完备」这一前提。）
+诚实归因：增益机制与 hybrid 同源（浅 goal 选 backward），学习贡献在于**自适应路由**（AUC 0.89
+分类器），而非新的搜索机制。论文宜把 learned policy 定位为策略选择器，动作排序 relevance model
+作为消融。
 
 ## 四、不要主张
 
