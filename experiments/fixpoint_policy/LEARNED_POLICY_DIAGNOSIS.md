@@ -63,14 +63,43 @@ round 2–4 哈希采样，70 个关系，排除 train/test 防泄漏），正�
 `rel_fam=γ^{Σd(q)}`（family 距离）高度重叠，模型本质上在重新学一个 f 已经编码的、带噪声
 的版本，自然学不出超越 f 的排序。pairwise accuracy 高 ≠ 更好的下一步排序。
 
+## 追加验证：二值证明有用性标签（仍封顶 ≈ Det）
+
+为检验「换个更干净的证明标签能否突破」，新增 `--label binary`
+（`BuildBinaryProofDataset`，复用证明 BFS，目标改为 on-proof=1 / off-proof=0）。动机：
+off-proof 动作正是 Deterministic 的浪费来源，学会压低它们*可能*减少探索。结果：
+
+| 配置 | 标签 | 权重 (f / 模型) | execution (s) | derived |
+|---|---|---|---|---|
+| Deterministic | — | — | **2.39** | **46047.6** |
+| newpure |  graded γ^d | 0 / 1 | 3.43 | 49409.1 |
+| binpure | binary | 0 / 1 | 2.90 | 46287.0 |
+| newblend | graded γ^d | 1 / 1 | 2.88 | 46125.0 |
+| binblend | binary | 1 / 1 | 2.84 | 46137.8 |
+
+- 二值标签显著优于 graded：纯 learned（binpure，**不用 f**）derived 46287 vs graded
+  49409，几乎追平 Det（+0.52%）——说明 graded 距离回归引入了额外噪声。
+- 但**所有臂仍不赢 Det**：binblend derived 46137.8 ≈ newblend 46125 ≈ Det 46047.6
+  （均 +0.2% 内）；execution 各 blend 2.84–2.93 vs Det 2.39（+19–22%）。
+
+强化结论：无论 graded 还是 binary，**证明结构标签都封顶 ≈ Det**。模型最多学会复现 f 的
+排序，无法超越；derived 不降则 MLP 在线推理成本（每候选一次 Predict）成为纯开销，故更慢。
+要正增益必须让 derived **低于** Det，即标签对齐「边际下一步价值/成本下降」，而非证明邻近度。
+
+注：`--label binary` 与 `BuildBinaryProofDataset` 的代码改动落在 `learning/` 模块与
+`gar_train_policy.cpp`（当前均为未跟踪的在途文件），随该模块一并由作者提交。
+
 ## 修复方向（研究决策，待定）
 
 把学习目标从「回归 proof-DAG 距离」换成「下一步价值」信号，候选：
 
-1. **模仿学习 / learning-to-rank**：以 Deterministic（或更优策略）在每个决策点实际选中
-   的候选为正例，学排序而非回归距离——直接对齐「该选谁」。
+1. **模仿学习 / learning-to-rank**：以 Deterministic 在每个决策点实际选中的候选为正例、
+   被拒绝的 ready-set 候选为负例，学排序而非回归距离。注意：现有 trace 事后从已执行步骤
+   重建，**只记录已采取动作（全 selected=true），不含被拒绝候选**——真行为克隆需先在选择
+   时刻记录 ready-set 快照（改 deduce_session 选择路径 + trace 机制）。且纯模仿 Det 理论上
+   封顶 ≈ Det（f 已是输入特征），只能作干净下界检验，不能单独带来增益。
 2. **成本下降价值**：标签 = 选该动作后剩余搜索成本 / 证明成本的下降量（需要反事实 rollout
-   或信用分配），对齐「选它能省多少」。
+   或信用分配），对齐「选它能省多少」——这是能突破 Det 的方向。
 3. 保留 f 为主、模型只学 f 的**残差**（修正 f 的系统性偏差），而非取代 f。
 
 主张 learned policy 优势前须过三关：数据充足（模型学会）→ 不丢 f → 标签是下一步价值。
@@ -89,4 +118,13 @@ python3 experiments/fixpoint_policy/run_relevance_scale.py --goals 150 --hidden 
 M=.work_hdcv/relevance_scale/model_h32_now/relevance.meta
 python3 experiments/fixpoint_policy/run_blend_ablation.py --handcrafted 0 --relevance 1 --tag newpure  --model $M
 python3 experiments/fixpoint_policy/run_blend_ablation.py --handcrafted 1 --relevance 1 --tag newblend --model $M
+# 二值证明有用性标签（追加验证）
+./build/bin/gar_train_policy --csr /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr \
+  --rules .work_hdcv/fixpoint_rules640/rules640 --traces .work_hdcv/relevance_scale/traces \
+  --test-goals .work_hdcv/fixpoint_q640/test_goals.tsv \
+  --out .work_hdcv/relevance_scale/model_binary/relevance.meta --label binary \
+  --epochs 20 --batch-size 64 --hidden 32 --negative-ratio 4 --seed 42
+B=.work_hdcv/relevance_scale/model_binary/relevance.meta
+python3 experiments/fixpoint_policy/run_blend_ablation.py --handcrafted 0 --relevance 1 --tag binpure  --model $B
+python3 experiments/fixpoint_policy/run_blend_ablation.py --handcrafted 1 --relevance 1 --tag binblend --model $B
 ```
