@@ -18,12 +18,14 @@
 #include <unordered_set>
 #include <vector>
 
+#include "gar/core/agent/executor.h"
+#include "gar/core/agent/fact_encoder.h"
+#include "gar/core/agent/learning/policy_trace.h"
+#include "match_backend.h"
 #include "partial_matcher.h"
 #include "precondition_cache.h"
 #include "producer_tracker.h"
 #include "working_set.h"
-#include "match_backend.h"
-#include "gar/core/agent/executor.h"
 
 namespace gar::core::engine {
 namespace agent {
@@ -31,8 +33,8 @@ namespace agent {
 class DeduceSession {
  public:
   DeduceSession(const Goal& goal, AgentState* state, WitnessLog* witness,
-                  const AgentContext& ctx, const ExecConfig& cfg,
-                  const ExecKit& kit)
+                const AgentContext& ctx, const ExecConfig& cfg,
+                const ExecKit& kit)
       : goal_(goal),
         state_(state),
         witness_(witness),
@@ -54,9 +56,9 @@ class DeduceSession {
     bool Insert(std::uint32_t rule, std::vector<std::uint32_t>&& emb);
 
    private:
-    std::unordered_map<std::uint64_t,
-                       std::vector<std::pair<std::uint32_t,
-                                             std::vector<std::uint32_t>>>>
+    std::unordered_map<
+        std::uint64_t,
+        std::vector<std::pair<std::uint32_t, std::vector<std::uint32_t>>>>
         m_;
   };
 
@@ -69,15 +71,12 @@ class DeduceSession {
   bool IncrementalScores() const;
   deduce::ActionRecord& EnqueueReady(Motif mu, RuleHead head);
   void ScoreReady(deduce::ActionRecord* rec);
-  std::array<double, 11> ActionFeatures(
-      const deduce::ActionRecord& rec) const;
-  void WriteQTrace() const;
+  std::array<double, 11> ActionFeatures(const deduce::ActionRecord& rec) const;
   void UntrackReady(const deduce::ActionRecord& rec);
   void RecordWitness(const Fact& fact);
 
   void AddComplete(std::uint32_t pi, const std::vector<std::uint32_t>& emb);
-  void AddPartialMatches(std::uint32_t pi,
-                         const deduce::DeferrableEdge& de,
+  void AddPartialMatches(std::uint32_t pi, const deduce::DeferrableEdge& de,
                          const std::vector<std::uint32_t>& embeddings);
   void GenerateStar(std::uint32_t pi);
   void VerifyGeneration();
@@ -91,18 +90,15 @@ class DeduceSession {
     bool partial = false;
   };
 
-  void OnDerivations(
-      const std::vector<gar::core::graph::DerivedEdge>& derived);
-  void CompleteDeltas(
-      const std::vector<gar::core::graph::DerivedEdge>& derived,
-      std::vector<MatchRequest>* requests,
-      std::vector<DeltaMatchJob>* jobs);
+  void OnDerivations(const std::vector<gar::core::graph::DerivedEdge>& derived);
+  void CompleteDeltas(const std::vector<gar::core::graph::DerivedEdge>& derived,
+                      std::vector<MatchRequest>* requests,
+                      std::vector<DeltaMatchJob>* jobs);
   void CompletePartials(const gar::core::graph::DerivedEdge& d,
                         std::uint32_t mirror);
-  void GrowPartials(
-      const std::vector<gar::core::graph::DerivedEdge>& derived,
-      std::vector<MatchRequest>* requests,
-      std::vector<DeltaMatchJob>* jobs);
+  void GrowPartials(const std::vector<gar::core::graph::DerivedEdge>& derived,
+                    std::vector<MatchRequest>* requests,
+                    std::vector<DeltaMatchJob>* jobs);
   void FlushDerivations();
 
   // 2 = all present (derive), 1 = dynamic missing (suspended),
@@ -115,12 +111,12 @@ class DeduceSession {
   deduce::ActionRecord* SelectReady();
   std::vector<deduce::ActionRecord> SelectReadyBatch();
   void PrepareStaticBatch(const std::vector<deduce::ActionRecord>& batch);
-  bool ProcessAction(const deduce::ActionRecord& rec,
-                     double decision_cost_ms);
+  bool ProcessAction(const deduce::ActionRecord& rec);
 
   void Trace(std::string ev);
   void RefreshPeaks();
   void WriteDecisionTrace(const deduce::ActionRecord& chosen);
+  void WritePolicyTrace();
 
   const Goal& goal_;
   AgentState* state_;
@@ -146,13 +142,6 @@ class DeduceSession {
   std::unordered_map<std::uint32_t, std::vector<std::uint32_t>>
       partial_slot_users_;
 
-  struct QTraceRow {
-    std::array<double, 11> features;
-    std::uint64_t action_id = 0;
-    std::uint32_t rule = 0;
-    double execution_ms_before = 0.0;
-  };
-  std::vector<QTraceRow> q_trace_rows_;
   std::vector<gar::core::graph::DerivedEdge> pending_derivations_;
 
   std::chrono::steady_clock::time_point t0_;
@@ -161,6 +150,7 @@ class DeduceSession {
   std::uint64_t round_no_ = 0;
   std::ofstream decision_trace_;
   std::uint64_t decision_index_ = 0;
+  std::optional<learning::PolicyTrace> policy_trace_;
   bool verify_ = false;
 };
 

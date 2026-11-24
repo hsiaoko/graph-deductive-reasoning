@@ -4,7 +4,6 @@
 // remains available as batch size 1 and as the optimized executor fast path.
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -26,11 +25,12 @@
 namespace gar::core::engine {
 namespace agent {
 
-class ValueModel;
-
 struct BatchCandidate {
   const ScoredMotif* score;
-  const std::array<double, 11>* features;
+  std::uint64_t action_id = 0;
+  // Cached selection priority (Score plus policy perturbation) maintained by
+  // ScoreReady. Policies that rank by this priority can skip re-scoring.
+  double priority = 0.0;
 };
 
 class Policy {
@@ -41,7 +41,7 @@ class Policy {
   [[nodiscard]] virtual std::optional<std::size_t> Select(
       const std::vector<ScoredMotif>& cands) = 0;
   // Returns up to max_actions distinct ordered indices. All draws observe the
-  // same batch-start scores and non-owning feature views.
+  // same batch-start scores and non-owning score views.
   [[nodiscard]] virtual std::vector<std::size_t> SelectBatch(
       const std::vector<BatchCandidate>& cands, std::size_t max_actions) {
     std::vector<std::size_t> remaining(cands.size());
@@ -69,15 +69,13 @@ class Policy {
     (void)action_id;
     return total;
   }
+  virtual double SelectionPriorityForCandidate(
+      std::uint64_t action_id, const ScoredMotif& candidate) {
+    return SelectionPriority(action_id, candidate.total);
+  }
   virtual double GuidePriority(const ScoredMotif& candidate) {
     (void)candidate;
     return 0.0;
-  }
-  virtual double SelectionPriorityWithFeatures(
-      std::uint64_t action_id, double total,
-      const std::array<double, 11>& features) {
-    (void)features;
-    return SelectionPriority(action_id, total);
   }
   virtual void ReleaseSelectionPriority(std::uint64_t action_id) {
     (void)action_id;
@@ -238,6 +236,40 @@ class RandomizedPolicy final : public Policy {
   double tau_;
 };
 
+class UniformRandomPolicy final : public Policy {
+ public:
+  explicit UniformRandomPolicy(std::uint64_t seed) : rng_(seed) {}
+
+  bool SupportsScoreView() const override { return true; }
+
+  std::optional<std::size_t> SelectScores(
+      const std::vector<double>& totals,
+      const std::vector<char>& admissible) override {
+    (void)admissible;
+    if (totals.empty()) return std::nullopt;
+    return std::uniform_int_distribution<std::size_t>(0, totals.size() - 1)(rng_);
+  }
+
+  std::optional<std::size_t> Select(
+      const std::vector<ScoredMotif>& candidates) override {
+    if (candidates.empty()) return std::nullopt;
+    return std::uniform_int_distribution<std::size_t>(0, candidates.size() - 1)(rng_);
+  }
+
+  std::vector<std::size_t> SelectBatch(
+      const std::vector<BatchCandidate>& candidates,
+      std::size_t max_actions) override {
+    std::vector<std::size_t> indices(candidates.size());
+    for (std::size_t i = 0; i < indices.size(); ++i) indices[i] = i;
+    std::shuffle(indices.begin(), indices.end(), rng_);
+    indices.resize(std::min(max_actions, indices.size()));
+    return indices;
+  }
+
+ private:
+  std::mt19937 rng_;
+};
+
 // Hybrid neuro-symbolic: hard-filter to `admissible` motifs first (the
 // symbolic guarantee — d(p0) < inf and the conclusion is new; deduction
 // stays complete, Corollary 4), then argmax of the score inside.
@@ -283,32 +315,6 @@ class HybridNeuroSymbolicPolicy final : public Policy {
     indices.resize(std::min(max_actions, indices.size()));
     return indices;
   }
-};
-
-// Learned action-conditioned cost-to-go ordering for AdaDeduce. The model is
-// ordering-only; symbolic admissibility and exact predicate evaluation stay
-// in the executor. Non-owning pointer: ReasoningAgent owns the model.
-class LearnedQPolicy final : public Policy {
- public:
-  explicit LearnedQPolicy(const ValueModel* model) : model_(model) {}
-
-  bool SupportsScoreView() const override { return true; }
-  bool PrefersHighestScore() const override { return true; }
-  bool RequiresAdmissible() const override { return true; }
-  double SelectionPriorityWithFeatures(
-      std::uint64_t action_id, double total,
-      const std::array<double, 11>& features) override;
-  std::optional<std::size_t> Select(
-      const std::vector<ScoredMotif>& cands) override;
-  std::optional<std::size_t> SelectScores(
-      const std::vector<double>& totals,
-      const std::vector<char>& admissible) override;
-  std::vector<std::size_t> SelectBatch(
-      const std::vector<BatchCandidate>& cands,
-      std::size_t max_actions) override;
-
- private:
-  const ValueModel* model_;
 };
 
 struct JevConfig {
@@ -505,9 +511,8 @@ class GuidedPolicy final : public Policy {
     return base_->RequiresAdmissible();
   }
   double SelectionPriority(std::uint64_t action_id, double total) override;
-  double SelectionPriorityWithFeatures(
-      std::uint64_t action_id, double total,
-      const std::array<double, 11>& features) override;
+  double SelectionPriorityForCandidate(
+      std::uint64_t action_id, const ScoredMotif& candidate) override;
   void ReleaseSelectionPriority(std::uint64_t action_id) override;
   std::optional<std::uint64_t> ForcedAction() override {
     return base_->ForcedAction();
@@ -548,8 +553,8 @@ class GuidedPolicy final : public Policy {
   std::vector<std::uint32_t> distances_;
 };
 
-// Uses the cheap deterministic policy when the symbolic cost gate is closed,
-// and the injected learned policy only after an active initial guide.
+// Uses the fallback policy when the symbolic cost gate is closed, and the
+// injected guided policy only after an active initial guide.
 class AdaptivePolicy final : public Policy {
  public:
   AdaptivePolicy(std::unique_ptr<Policy> fallback,
@@ -560,9 +565,8 @@ class AdaptivePolicy final : public Policy {
   bool PrefersHighestScore() const override { return true; }
   bool RequiresAdmissible() const override;
   double SelectionPriority(std::uint64_t action_id, double total) override;
-  double SelectionPriorityWithFeatures(
-      std::uint64_t action_id, double total,
-      const std::array<double, 11>& features) override;
+  double SelectionPriorityForCandidate(
+      std::uint64_t action_id, const ScoredMotif& candidate) override;
   void ReleaseSelectionPriority(std::uint64_t action_id) override;
   std::optional<std::size_t> Select(
       const std::vector<ScoredMotif>& cands) override;

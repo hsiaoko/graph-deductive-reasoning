@@ -7,20 +7,12 @@
 // Witnessed = the pattern facts a chain's applications matched, successful
 // or failed ("a match computed is information gained"), plus the evaluated
 // antecedent premises and the facts successful applications derived.
-//
-// Fact -> SymbolId mapping lives HERE (the hdc module stays dependency-free
-// and sees bare uint64 symbols):
-//   * predicate symbol = splitmix64(FNV-1a(name)) with bit 63 set, the name
-//     being the relation name (edge facts) resp. the predicate-table name
-//     (attr/ml facts);
-//   * vertex symbol    = the vertex id itself.
-// Bit 63 namespaces predicates away from vertex ids (vertex counts are far
-// below 2^63).
 
 #include <cstdint>
 #include <unordered_set>
 
 #include "gar/core/agent/fact.h"
+#include "gar/core/agent/fact_encoder.h"
 #include "gar/core/graph/graph.h"
 #include "gar/core/hdc/encoder.h"
 #include "gar/core/hdc/evidence.h"
@@ -31,12 +23,6 @@ class PredicateTable;
 
 namespace gar::core::engine {
 namespace agent {
-
-// Name-based predicate symbol, namespaced by bit 63 (see header comment):
-// splitmix64(FNV-1a(name)) | (1<<63), where the name is the relation name
-// for edge facts resp. the predicate-table name for attr/ml facts.
-std::uint64_t FactPredicateSymbol(const Fact& f, const gar::core::graph::Graph& g,
-                                  const gar::core::analysis::PredicateTable& table);
 
 class WitnessLog {
  public:

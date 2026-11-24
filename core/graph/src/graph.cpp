@@ -181,6 +181,7 @@ void Graph::EnsureSlotView(std::uint32_t rel) const {
   rel_pair_sets_[rel].reserve(rel_pairs_[rel].size() * 2);
   rel_pair_sets_[rel].insert(rel_pairs_[rel].begin(), rel_pairs_[rel].end());
   slot_views_valid_[rel] = 1;
+  slot_sorted_len_[rel] = rel_pairs_[rel].size();
 }
 
 bool Graph::AddDeltaEdge(std::uint32_t slot, std::uint64_t pair) {
@@ -197,9 +198,10 @@ bool Graph::AddDeltaEdge(std::uint32_t slot, std::uint64_t pair) {
     delta.added.insert(pair);
   }
   if (slot_views_valid_[slot]) {
-    rel_pairs_[slot].insert(
-        std::lower_bound(rel_pairs_[slot].begin(), rel_pairs_[slot].end(), pair),
-        pair);
+    // O(1) append + eager hash; the sorted view is re-sorted lazily on ordered
+    // reads (RelationPairs). An eager sorted-vector insert here is O(n) per fact
+    // and O(n^2) over a derivation-heavy run.
+    rel_pairs_[slot].push_back(pair);
     rel_pair_sets_[slot].insert(pair);
   }
   has_delta_ = true;
@@ -220,9 +222,9 @@ bool Graph::RemoveDeltaEdge(std::uint32_t slot, std::uint64_t pair) {
     delta.added.erase(pair);
   }
   if (slot_views_valid_[slot]) {
-    rel_pair_sets_[slot].erase(pair);
-    auto& pairs = rel_pairs_[slot];
-    pairs.erase(std::lower_bound(pairs.begin(), pairs.end(), pair));
+    // Removal is rare: invalidate the view so EnsureSlotView rebuilds it with
+    // delta.removed applied, rather than erasing from a possibly-unsorted vector.
+    slot_views_valid_[slot] = 0;
   }
   has_delta_ = true;
   return true;

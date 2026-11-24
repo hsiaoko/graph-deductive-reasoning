@@ -11,9 +11,9 @@ std::vector<deduce::ActionRecord> DeduceSession::SelectReadyBatch() {
   std::vector<deduce::ActionRecord*> candidates;
   candidates.reserve(ws_.ready().size());
   for (auto& rec : ws_.ready()) {
-    const bool head_known = state_->ContainsEdge(
-        rec.head.slot, rec.motif.embedding[rec.head.pu],
-        rec.motif.embedding[rec.head.pv]);
+    const bool head_known =
+        state_->ContainsEdge(rec.head.slot, rec.motif.embedding[rec.head.pu],
+                             rec.motif.embedding[rec.head.pv]);
     rec.score.admissible = rec.score.admissible && !head_known;
     if (kit_.policy->RequiresAdmissible() && !rec.score.admissible) continue;
     candidates.push_back(&rec);
@@ -27,18 +27,16 @@ std::vector<deduce::ActionRecord> DeduceSession::SelectReadyBatch() {
                          &rec->score);
     }
     fx.score_wall_ms += std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - started).count();
+                            std::chrono::steady_clock::now() - started)
+                            .count();
     fx.score_calls += candidates.size();
     fx.scored_candidates += candidates.size();
   }
 
-  std::vector<std::array<double, 11>> features;
   std::vector<BatchCandidate> views;
-  features.reserve(candidates.size());
   views.reserve(candidates.size());
   for (const auto* rec : candidates) {
-    features.push_back(ActionFeatures(*rec));
-    views.push_back(BatchCandidate{&rec->score, &features.back()});
+    views.push_back(BatchCandidate{&rec->score, rec->id, rec->selection_priority});
   }
   const auto picks = kit_.policy->SelectBatch(views, cfg_.batch_size);
   std::unordered_set<std::size_t> unique;
@@ -53,13 +51,11 @@ std::vector<deduce::ActionRecord> DeduceSession::SelectReadyBatch() {
   for (const std::size_t pick : picks) selected.push_back(*candidates[pick]);
   if (cfg_.fair_interval > 0 && selects_since_fair_ >= cfg_.fair_interval) {
     const auto* oldest = *std::min_element(
-        candidates.begin(), candidates.end(), [](const auto* a, const auto* b) {
-          return a->seq < b->seq;
-        });
-    const auto present = std::find_if(
-        selected.begin(), selected.end(), [&](const auto& rec) {
-          return rec.id == oldest->id;
-        });
+        candidates.begin(), candidates.end(),
+        [](const auto* a, const auto* b) { return a->seq < b->seq; });
+    const auto present =
+        std::find_if(selected.begin(), selected.end(),
+                     [&](const auto& rec) { return rec.id == oldest->id; });
     if (present == selected.end()) {
       if (selected.size() >= cfg_.batch_size && !selected.empty()) {
         selected.pop_back();
@@ -86,8 +82,8 @@ void DeduceSession::PrepareStaticBatch(
     const GARule& rule = state_->rules()[rec.motif.rule];
     for (const auto& pred : rule.antecedent) {
       if (IsDynamicPredicate(pred, rule, ctx_)) continue;
-      const auto key = deduce::MakePreconditionKey(
-          pred, rec.motif.embedding.data());
+      const auto key =
+          deduce::MakePreconditionKey(pred, rec.motif.embedding.data());
       if (H_.Lookup(key, true, state_->version())) continue;
       const auto state = deduce::ClassifyPredicate(
           pred, rule, rec.motif.embedding.data(), state_->attrs(), g_, ctx_,
@@ -98,10 +94,8 @@ void DeduceSession::PrepareStaticBatch(
   }
 }
 
-bool DeduceSession::ProcessAction(const deduce::ActionRecord& rec,
-                                  double decision_cost_ms) {
-  if (state_->ContainsEdge(rec.head.slot,
-                           rec.motif.embedding[rec.head.pu],
+bool DeduceSession::ProcessAction(const deduce::ActionRecord& rec) {
+  if (state_->ContainsEdge(rec.head.slot, rec.motif.embedding[rec.head.pu],
                            rec.motif.embedding[rec.head.pv])) {
     Trace("skip-known\taction=" + std::to_string(rec.id));
     return false;
@@ -110,31 +104,30 @@ bool DeduceSession::ProcessAction(const deduce::ActionRecord& rec,
   const int verdict = Evaluate(rec);
   res_.stats->evaluation_wall_ms +=
       std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - evaluation_started).count();
+          std::chrono::steady_clock::now() - evaluation_started)
+          .count();
   kit_.policy->OnApplication(
       rec.motif, verdict == 2,
       kit_.cost_model->RuleLowerBound(state_->rules()[rec.motif.rule]));
-  if (!cfg_.q_trace_path.empty()) {
-    q_trace_rows_.push_back(QTraceRow{ActionFeatures(rec), rec.id,
-                                     rec.motif.rule, decision_cost_ms});
-  }
   if (verdict == 2) {
     const auto derivation_started = std::chrono::steady_clock::now();
     const auto derived = Derive(rec);
     res_.stats->derivation_wall_ms +=
         std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - derivation_started).count();
+            std::chrono::steady_clock::now() - derivation_started)
+            .count();
     if (res_.goal_derived) return true;
     const auto delta_started = std::chrono::steady_clock::now();
-    if (cfg_.engine == MatchEngine::kGpu) {
-      pending_derivations_.push_back(derived);
-      if (pending_derivations_.size() >= 256) FlushDerivations();
-    } else {
-      OnDerivations({derived});
-    }
+    // Batch delta matching on CPU too: the graph's sorted slot views are rebuilt
+    // lazily on ordered reads, so flushing every 256 derivations amortizes the
+    // rebuild over the batch instead of re-sorting per fact. Goal early-stop is
+    // unaffected (checked per Derive above); ReadyEmpty flushes the remainder.
+    pending_derivations_.push_back(derived);
+    if (pending_derivations_.size() >= 256) FlushDerivations();
     res_.stats->delta_wall_ms +=
         std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - delta_started).count();
+            std::chrono::steady_clock::now() - delta_started)
+            .count();
   } else if (verdict == 0 || verdict == 3) {
     ++res_.stats->prune_events;
     Trace(verdict == 3 ? "prune-cached\taction=" + std::to_string(rec.id)

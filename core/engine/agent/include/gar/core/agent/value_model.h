@@ -1,7 +1,8 @@
 #pragma once
 
-// ValueModel: serialized HDC random-feature or numeric ridge for ordering
-// BNB branches and AdaDeduce actions. The meta file declares dimension,
+// ValueModel loads serialized HDC random-feature or numeric ridge models.
+// Proof-star uses numeric models for rule-star ordering; standalone utilities
+// expose model validation and benchmarking. The meta file declares dimension,
 // binning, feature order and conjunctions; the sibling bin file stores int8
 // base vectors and float64 weights. Predictions never affect logical
 // validation, derivation, pruning certificates or soundness.

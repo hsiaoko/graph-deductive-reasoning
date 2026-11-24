@@ -20,6 +20,9 @@
 
 namespace gar::core::engine {
 namespace agent {
+namespace learning {
+class RelevanceModel;
+}  // namespace learning
 
 class ReasoningAgent {
  public:
@@ -28,9 +31,8 @@ class ReasoningAgent {
     std::unique_ptr<Policy> policy;
     std::unique_ptr<Executor> executor;
     std::unique_ptr<CostModel> cost_model;
-    // Optional value model for AdaDeduce action ordering.
-    std::shared_ptr<ValueModel> value_model;
     std::shared_ptr<ValueModel> proof_star_model;
+    std::shared_ptr<learning::RelevanceModel> relevance_model;
     std::unique_ptr<LlmStarGuide> star_guide;
     std::unique_ptr<PaperGuide> paper_guide;
   };
@@ -46,7 +48,7 @@ class ReasoningAgent {
   // goal's relation is not derivable by any rule (no d(.) table exists).
   AgentResult Run(AgentState* state, const Goal& goal,
                   const ExecConfig& cfg) const {
-    if (goal.args[0] && goal.args[1] &&
+    if (goal.args[0] && goal.args[1] && cfg.policy_trace_path.empty() &&
         state->ContainsEdge(goal.slot, *goal.args[0], *goal.args[1])) {
       AgentResult result;
       result.goal_derived = true;
@@ -84,8 +86,8 @@ class ReasoningAgent {
     WitnessLog witness(encoder_.dim(), &state->graph(), ctx.table,
                        comps_.scorer->NeedsHdcWitness());
     const ExecKit kit{comps_.scorer.get(), comps_.policy.get(),
-                      comps_.cost_model.get(), comps_.value_model.get(),
-                      comps_.proof_star_model.get(), comps_.star_guide.get(),
+                      comps_.cost_model.get(), comps_.proof_star_model.get(),
+                      comps_.relevance_model.get(), comps_.star_guide.get(),
                       comps_.paper_guide.get()};
     return comps_.executor->Run(goal, state, &witness, ctx, cfg, kit);
   }

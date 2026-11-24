@@ -5,33 +5,12 @@
 namespace gar::core::engine {
 namespace agent {
 
-namespace {
-
-std::uint64_t Fnv1a64(const std::string& s) {
-  std::uint64_t h = 0xCBF29CE484222325ull;
-  for (const unsigned char c : s) {
-    h = (h ^ c) * 0x100000001B3ull;
-  }
-  return h;
-}
-
-}  // namespace
-
 WitnessLog::WitnessLog(std::uint32_t hdc_dim, const gar::core::graph::Graph* g,
                        const gar::core::analysis::PredicateTable* table, bool use_hdc)
     : hdc_ev_(hdc_dim),
       g_(g),
       table_(table),
       use_hdc_(use_hdc) {}
-
-std::uint64_t FactPredicateSymbol(const Fact& f, const gar::core::graph::Graph& g,
-                                  const gar::core::analysis::PredicateTable& table) {
-  const std::string& name = f.kind == FactKind::kEdge
-                                ? g.RelationName(f.pred)
-                                : table.Name(f.pred);
-  std::uint64_t s = Fnv1a64(name);
-  return gar::core::hdc::SplitMix64Next(s) | (1ull << 63);
-}
 
 bool WitnessLog::WitnessFact(const Fact& f, const gar::core::hdc::HdcEncoder& enc) {
   const bool inserted = exact_.insert(KeyOf(f)).second;

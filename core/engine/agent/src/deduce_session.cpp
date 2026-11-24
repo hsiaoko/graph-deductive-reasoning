@@ -7,10 +7,14 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <random>
 #include <stdexcept>
 #include <utility>
 
+#include "gar/core/agent/learning/goal_logistic_model.h"
+#include "gar/core/agent/learning/relevance_model.h"
 #include "gar/core/agent/value_model.h"
+#include "gar/core/analysis/dependency_graph.h"
 #include "gar/core/graph/predicate_evaluator.h"
 #include "rule_support.h"
 
@@ -18,12 +22,12 @@ namespace gar::core::engine {
 namespace agent {
 
 bool DeduceSession::ActionIndex::Insert(std::uint32_t rule,
-                                          const std::vector<std::uint32_t>& e) {
+                                        const std::vector<std::uint32_t>& e) {
   return Insert(rule, std::vector<std::uint32_t>(e));
 }
 
 bool DeduceSession::ActionIndex::Insert(std::uint32_t rule,
-                                          std::vector<std::uint32_t>&& emb) {
+                                        std::vector<std::uint32_t>&& emb) {
   auto& bucket =
       m_[MotifHash(rule, emb.data(), static_cast<std::uint32_t>(emb.size()))];
   for (const auto& [r, e] : bucket) {
@@ -63,7 +67,24 @@ void DeduceSession::BuildPlans() {
       plans_.push_back(std::move(plan));
     }
   }
-  if (cfg_.star_order == StarOrder::kGoal) {
+  // Learned star order resolves to input or goal per goal via a goal-level
+  // logistic model; the rest of the plan build is identical to the fixed order.
+  StarOrder effective_order = cfg_.star_order;
+  if (effective_order == StarOrder::kLearned) {
+    if (cfg_.star_order_model_path.empty())
+      throw std::invalid_argument(
+          "star-order learned requires --star-order-model");
+    const auto model = learning::GoalLogisticModel::Load(
+        cfg_.star_order_model_path, "gar_star_order_v1");
+    const auto cone = gar::core::analysis::GoalConeRuleIndices(
+        rules, g_.RelationName(goal_.slot));
+    const double degree = static_cast<double>(g_.RelationPairs(goal_.slot).size());
+    const double p_input =
+        model.Probability(static_cast<double>(cone.size()), degree);
+    effective_order =
+        p_input >= model.threshold ? StarOrder::kInput : StarOrder::kGoal;
+  }
+  if (effective_order == StarOrder::kGoal) {
     auto head_distance = [&](const deduce::RulePlan& plan) {
       const GARule& rule = rules[plan.rule];
       const std::uint32_t predicate = ctx_.table->Find(
@@ -73,8 +94,7 @@ void DeduceSession::BuildPlans() {
                  : ctx_.distances[predicate];
     };
     std::stable_sort(plans_.begin(), plans_.end(),
-                     [&](const deduce::RulePlan& a,
-                         const deduce::RulePlan& b) {
+                     [&](const deduce::RulePlan& a, const deduce::RulePlan& b) {
                        return head_distance(a) < head_distance(b);
                      });
   }
@@ -89,30 +109,33 @@ void DeduceSession::BuildPlans() {
   if (kit_.proof_star_model != nullptr && cfg_.proof_star_weight > 0.0 &&
       res_.stats->proof_star_active && plans_.size() > 1) {
     std::vector<double> efficiency(rules.size(), 0.0);
-    std::vector<std::uint32_t> distance(
-        rules.size(), gar::core::analysis::kUnreachable);
+    std::vector<std::uint32_t> distance(rules.size(),
+                                        gar::core::analysis::kUnreachable);
     for (const auto& plan : plans_) {
       const GARule& rule = rules[plan.rule];
       ScoredRule score;
       kit_.scorer->ScoreRule(rule, sctx_, &score);
       const std::array<double, 11> features{
-          score.price, static_cast<double>(rule.num_edges()),
-          std::log1p(rule.quality.support), score.rel_fam,
+          score.price,
+          static_cast<double>(rule.num_edges()),
+          std::log1p(rule.quality.support),
+          score.rel_fam,
           rule.quality.confidence,
           score.price - kit_.cost_model->RuleLowerBound(rule),
-          0.0, 0.0, 0.0, 0.0, 0.0};
-      efficiency[plan.rule] =
-          kit_.proof_star_model->PredictRemaining(features);
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0};
+      efficiency[plan.rule] = kit_.proof_star_model->PredictRemaining(features);
       const std::uint32_t predicate = ctx_.table->Find(
           gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
-      distance[plan.rule] =
-          predicate == gar::core::analysis::kInvalidPredicate
-              ? gar::core::analysis::kUnreachable
-              : ctx_.distances[predicate];
+      distance[plan.rule] = predicate == gar::core::analysis::kInvalidPredicate
+                                ? gar::core::analysis::kUnreachable
+                                : ctx_.distances[predicate];
     }
     std::stable_sort(plans_.begin(), plans_.end(),
-                     [&](const deduce::RulePlan& a,
-                         const deduce::RulePlan& b) {
+                     [&](const deduce::RulePlan& a, const deduce::RulePlan& b) {
                        return distance[a.rule] < distance[b.rule];
                      });
     std::vector<double> order_score(rules.size(), 0.0);
@@ -130,32 +153,28 @@ void DeduceSession::BuildPlans() {
       const double minimum = efficiency[min_it->rule];
       const double span = efficiency[max_it->rule] - minimum;
       if (distance[plans_[begin].rule] == 0) {
-        std::stable_sort(plans_.begin() + begin, plans_.begin() + end,
-                         [&](const deduce::RulePlan& a,
-                             const deduce::RulePlan& b) {
-                           return efficiency[a.rule] > efficiency[b.rule];
-                         });
+        std::stable_sort(
+            plans_.begin() + begin, plans_.begin() + end,
+            [&](const deduce::RulePlan& a, const deduce::RulePlan& b) {
+              return efficiency[a.rule] > efficiency[b.rule];
+            });
         begin = end;
         continue;
       }
       for (std::size_t j = begin + 1; j < end; ++j) {
-        const double baseline =
-            end - begin == 1
-                ? 0.0
-                : static_cast<double>(end - 1 - j) /
-                      static_cast<double>(end - begin - 1);
-        const double proof = span > 0.0
-                                 ? (efficiency[plans_[j].rule] - minimum) /
-                                       span
-                                 : 0.0;
-        order_score[plans_[j].rule] =
-            baseline + cfg_.proof_star_weight * proof;
+        const double baseline = end - begin == 1
+                                    ? 0.0
+                                    : static_cast<double>(end - 1 - j) /
+                                          static_cast<double>(end - begin - 1);
+        const double proof =
+            span > 0.0 ? (efficiency[plans_[j].rule] - minimum) / span : 0.0;
+        order_score[plans_[j].rule] = baseline + cfg_.proof_star_weight * proof;
       }
-      std::stable_sort(plans_.begin() + begin + 1, plans_.begin() + end,
-                       [&](const deduce::RulePlan& a,
-                           const deduce::RulePlan& b) {
-                         return order_score[a.rule] > order_score[b.rule];
-                       });
+      std::stable_sort(
+          plans_.begin() + begin + 1, plans_.begin() + end,
+          [&](const deduce::RulePlan& a, const deduce::RulePlan& b) {
+            return order_score[a.rule] > order_score[b.rule];
+          });
       begin = end;
     }
   }
@@ -173,8 +192,7 @@ void DeduceSession::BuildPlans() {
           baseline + cfg_.guide_strength * preferences[plans_[j].rule];
     }
     std::stable_sort(plans_.begin(), plans_.end(),
-                     [&](const deduce::RulePlan& a,
-                         const deduce::RulePlan& b) {
+                     [&](const deduce::RulePlan& a, const deduce::RulePlan& b) {
                        return order_score[a.rule] > order_score[b.rule];
                      });
   }
@@ -258,40 +276,10 @@ void DeduceSession::ScoreReady(deduce::ActionRecord* rec) {
                           .count();
   ++fx.score_calls;
   ++fx.scored_candidates;
-  rec->selection_priority = kit_.policy->SelectionPriorityWithFeatures(
-      rec->id, rec->score.total, ActionFeatures(*rec));
+  rec->selection_priority =
+      kit_.policy->SelectionPriorityForCandidate(rec->id, rec->score);
   if (kit_.policy->PrefersHighestScore()) {
     ws_.TouchReady(rec->id, kit_.policy->GuidePriority(rec->score));
-  }
-}
-
-void DeduceSession::WriteQTrace() const {
-  if (cfg_.q_trace_path.empty()) return;
-  const std::filesystem::path path(cfg_.q_trace_path);
-  if (!path.parent_path().empty()) {
-    std::filesystem::create_directories(path.parent_path());
-  }
-  std::ofstream out(path);
-  if (!out) {
-    throw std::runtime_error("cannot write Q trace: " +
-                             cfg_.q_trace_path);
-  }
-  out << "# event\tgoal_derived\tremaining_evaluations"
-      << "\tremaining_execution_ms\taction_id\trule"
-      << "\tprice\tpattern_edges\tlog_support\trelfam\trelevd\tconf"
-      << "\tdcost\ttotal\tdp0\twit\tpremises\n";
-  out.precision(17);
-  for (std::size_t i = 0; i < q_trace_rows_.size(); ++i) {
-    const QTraceRow& row = q_trace_rows_[i];
-    const std::uint64_t remaining =
-        res_.goal_derived ? q_trace_rows_.size() - i : 0;
-    const double remaining_ms = res_.goal_derived
-        ? std::max(0.0, res_.execution_cost_ms - row.execution_ms_before)
-        : 0.0;
-    out << i << '\t' << (res_.goal_derived ? 1 : 0) << '\t' << remaining
-        << '\t' << remaining_ms << '\t' << row.action_id << '\t' << row.rule;
-    for (const double value : row.features) out << '\t' << value;
-    out << '\n';
   }
 }
 
@@ -341,7 +329,7 @@ void DeduceSession::RecordWitness(const Fact& fact) {
 }
 
 void DeduceSession::AddComplete(std::uint32_t pi,
-                                  const std::vector<std::uint32_t>& emb) {
+                                const std::vector<std::uint32_t>& emb) {
   const deduce::RulePlan& pl = plans_[pi];
   const GARule& r = state_->rules()[pl.rule];
   if (!VertexLabelsOk(r, g_, emb.data())) return;
@@ -355,9 +343,9 @@ void DeduceSession::AddComplete(std::uint32_t pi,
   prod_->SetPending(pi, true);
 }
 
-void DeduceSession::AddPartialMatches(
-    std::uint32_t pi, const deduce::DeferrableEdge& de,
-    const std::vector<std::uint32_t>& embs) {
+void DeduceSession::AddPartialMatches(std::uint32_t pi,
+                                      const deduce::DeferrableEdge& de,
+                                      const std::vector<std::uint32_t>& embs) {
   const deduce::RulePlan& pl = plans_[pi];
   const GARule& r = state_->rules()[pl.rule];
   const auto ns = de.sub_spec.num_vertices;
@@ -365,20 +353,20 @@ void DeduceSession::AddPartialMatches(
   const std::uint64_t n_emb = embs.size() / ns;
   for (std::uint64_t t = 0; t < n_emb; ++t) {
     const std::uint32_t* se = embs.data() + t * ns;
-    std::vector<std::uint32_t> full =
-        deduce::ExpandPartial(de, se, static_cast<std::uint32_t>(
-                                            r.num_vertices()));
+    std::vector<std::uint32_t> full = deduce::ExpandPartial(
+        de, se, static_cast<std::uint32_t>(r.num_vertices()));
     if (!VertexLabelsOk(r, g_, full.data())) continue;
     // Deferred edge satisfaction on current Γ.
     const std::uint32_t eu = full[de.pu], ev = full[de.pv];
     const bool u_bound = eu != UINT32_MAX, v_bound = ev != UINT32_MAX;
     bool present = false;
     if (u_bound && v_bound) {
-      present = g_.RelationPairSet(de.slot).count(gar::core::graph::PackPair(eu, ev)) != 0;
+      present = g_.RelationPairSet(de.slot).count(
+                    gar::core::graph::PackPair(eu, ev)) != 0;
     } else if (u_bound) {
       const auto& pairs = g_.RelationPairs(de.slot);
-      auto lo =
-          std::lower_bound(pairs.begin(), pairs.end(), gar::core::graph::PackPair(eu, 0));
+      auto lo = std::lower_bound(pairs.begin(), pairs.end(),
+                                 gar::core::graph::PackPair(eu, 0));
       present = lo != pairs.end() && (*lo >> 32) == eu;
     } else if (v_bound) {
       // dst-side presence: the mirror slot's pairs are (dst, src).
@@ -386,8 +374,8 @@ void DeduceSession::AddPartialMatches(
                                        ? g_.BaseRelation(de.slot)
                                        : de.slot + g_.num_relations();
       const auto& pairs = g_.RelationPairs(mirror);
-      auto lo =
-          std::lower_bound(pairs.begin(), pairs.end(), gar::core::graph::PackPair(ev, 0));
+      auto lo = std::lower_bound(pairs.begin(), pairs.end(),
+                                 gar::core::graph::PackPair(ev, 0));
       present = lo != pairs.end() && (*lo >> 32) == ev;
     }
     if (present) continue;  // really complete; complete enum covers it
@@ -409,9 +397,8 @@ void DeduceSession::AddPartialMatches(
       sw.wait.bound_value = u_bound ? eu : ev;
     }
     auto& ref = ws_.AddSuspended(std::move(sw));
-    Trace("suspend-partial\trule=" + r.name +
-          "\twait_slot=" + g_.SlotName(de.slot) +
-          "\taction=" + std::to_string(ref.id));
+    Trace("suspend-partial\trule=" + r.name + "\twait_slot=" +
+          g_.SlotName(de.slot) + "\taction=" + std::to_string(ref.id));
     prod_->SetPending(pi, true);
     ++res_.stats->suspend_events;
   }
@@ -468,7 +455,9 @@ void DeduceSession::GenerateStar(std::uint32_t pi) {
     requests.push_back(MatchRequest{de.sub_spec, cfg_.match_cap_per_rule,
                                     GoalSubPins(pl, de)});
   }
+  const auto gen_t0 = std::chrono::steady_clock::now();
   const std::vector<MatchResult> results = match_backend_->RunBatch(requests);
+  const auto gen_t1 = std::chrono::steady_clock::now();
   const auto n = pl.spec.num_vertices;
   const std::vector<std::uint32_t>& embs = results.front().embeddings;
   if (results.front().capped) ++res_.stats->candidate_caps;
@@ -481,6 +470,11 @@ void DeduceSession::GenerateStar(std::uint32_t pi) {
     if (result.capped) ++res_.stats->candidate_caps;
     AddPartialMatches(pi, pl.defers[i], result.embeddings);
   }
+  const auto gen_t2 = std::chrono::steady_clock::now();
+  res_.stats->gen_match_ms +=
+      std::chrono::duration<double, std::milli>(gen_t1 - gen_t0).count();
+  res_.stats->gen_add_ms +=
+      std::chrono::duration<double, std::milli>(gen_t2 - gen_t1).count();
   prod_->MarkGenerated(pi);
   RefreshPeaks();
   VerifyGeneration();
@@ -521,9 +515,9 @@ void DeduceSession::CompleteDeltas(
           pins[e[1]] = pd;
           const std::uint32_t edge =
               static_cast<std::uint32_t>(&e - pl.spec.edges.data());
-          requests->push_back(MatchRequest{
-              pl.spec, cfg_.match_cap_per_rule, std::move(pins),
-              EdgeSeed{e[2], ps, pd, edge}});
+          requests->push_back(MatchRequest{pl.spec, cfg_.match_cap_per_rule,
+                                           std::move(pins),
+                                           EdgeSeed{e[2], ps, pd, edge}});
           jobs->push_back(DeltaMatchJob{pi, 0, false});
         }
       }
@@ -532,7 +526,7 @@ void DeduceSession::CompleteDeltas(
 }
 
 void DeduceSession::CompletePartials(const gar::core::graph::DerivedEdge& d,
-                                       std::uint32_t mirror) {
+                                     std::uint32_t mirror) {
   std::vector<std::uint64_t> done;
   for (const std::uint64_t id : ws_.MatchingPartials(d, mirror)) {
     auto* swp = ws_.FindSuspended(id);
@@ -551,8 +545,7 @@ void DeduceSession::CompletePartials(const gar::core::graph::DerivedEdge& d,
     }
     bool complete_now = false;
     if (!sw.wait.open_side) {
-      complete_now =
-          (sw.wait.ground == KeyOf(MakeEdgeFact(de.slot, fs, fd)));
+      complete_now = (sw.wait.ground == KeyOf(MakeEdgeFact(de.slot, fs, fd)));
     } else if (sw.wait.bound_is_src && fs == sw.wait.bound_value) {
       sw.partial[de.pv] = fd;
       complete_now = true;
@@ -616,9 +609,9 @@ void DeduceSession::GrowPartials(
             pins[e[1]] = pd;
             const std::uint32_t edge =
                 static_cast<std::uint32_t>(&e - de.sub_spec.edges.data());
-            requests->push_back(MatchRequest{
-                de.sub_spec, cfg_.match_cap_per_rule, std::move(pins),
-                EdgeSeed{e[2], ps, pd, edge}});
+            requests->push_back(
+                MatchRequest{de.sub_spec, cfg_.match_cap_per_rule,
+                             std::move(pins), EdgeSeed{e[2], ps, pd, edge}});
             jobs->push_back(DeltaMatchJob{pi, di, true});
           }
         }
@@ -728,9 +721,8 @@ int DeduceSession::Evaluate(const deduce::ActionRecord& rec) {
       }
       continue;
     }
-    const deduce::PrecondState st =
-        deduce::ClassifyPredicate(pred, r, emb, state_->attrs(), g_, ctx_,
-                                  state_->ml_models());
+    const deduce::PrecondState st = deduce::ClassifyPredicate(
+        pred, r, emb, state_->attrs(), g_, ctx_, state_->ml_models());
     const bool ok = st == deduce::PrecondState::kStaticTrue ||
                     st == deduce::PrecondState::kDynamicPresent;
     H_.Record(pkey, ok, !dyn, state_->version());
@@ -782,28 +774,45 @@ int DeduceSession::Evaluate(const deduce::ActionRecord& rec) {
   return 2;
 }
 
-gar::core::graph::DerivedEdge DeduceSession::Derive(const deduce::ActionRecord& rec) {
+gar::core::graph::DerivedEdge DeduceSession::Derive(
+    const deduce::ActionRecord& rec) {
   auto& fx = *res_.stats;
   const GARule& r = state_->rules()[rec.motif.rule];
   const std::uint32_t* emb = rec.motif.embedding.data();
   const gar::core::graph::DerivedEdge d{
       emb[rec.head.pu], emb[rec.head.pv], rec.head.slot, rec.motif.rule,
       static_cast<std::uint32_t>(res_.chain.size() + 1)};
+  const auto ms = [](auto a, auto b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+  };
+  const auto t0 = std::chrono::steady_clock::now();
   state_->ApplyDerivation(d);
   match_backend_->CommitDerived(d);
+  const auto t1 = std::chrono::steady_clock::now();
   std::vector<Fact> premises;
   GroundPremises(r, rec.motif, g_, *ctx_.table, &premises);
+  const auto t2 = std::chrono::steady_clock::now();
   for (const Fact& f : premises) RecordWitness(f);
   RecordWitness(MakeEdgeFact(d.slot, d.src, d.dst));
+  const auto t3 = std::chrono::steady_clock::now();
   AgentStep step;
   step.motif = rec.motif;
   step.success = true;
   step.cost = kit_.cost_model->RuleLowerBound(r);
   step.derived = d;
+  step.action_id = rec.id;
+  step.handcrafted_score = rec.score.total;
   res_.chain.push_back(std::move(step));
+  const auto t4 = std::chrono::steady_clock::now();
   ++fx.derive_events;
   Trace("derive\trule=" + r.name + "\tfact=" + g_.SlotName(d.slot) + "(" +
         g_.EntityName(d.src) + "," + g_.EntityName(d.dst) + ")");
+  const auto t5 = std::chrono::steady_clock::now();
+  fx.derive_apply_ms += ms(t0, t1);
+  fx.derive_ground_ms += ms(t1, t2);
+  fx.derive_witness_ms += ms(t2, t3);
+  fx.derive_chain_ms += ms(t3, t4);
+  fx.derive_trace_ms += ms(t4, t5);
   if (GoalSatisfied(goal_, d)) res_.goal_derived = true;
   return d;
 }
@@ -853,10 +862,22 @@ double DeduceSession::GoalProofCost() const {
 
 double DeduceSession::MeasuredCostMs() const {
   const auto& fx = *res_.stats;
-  return fx.prepare_wall_ms + fx.generation_wall_ms +
-         fx.selection_wall_ms + fx.ready_remove_wall_ms +
-         fx.evaluation_wall_ms + fx.derivation_wall_ms + fx.delta_wall_ms +
-         fx.revival_wall_ms;
+  if (std::getenv("GAR_DERIVE_PROFILE") != nullptr) {
+    std::fprintf(stderr,
+                 "[derive-profile] events=%llu derivation=%.1fms | apply=%.1f "
+                 "ground=%.1f witness=%.1f chain=%.1f trace=%.1f | "
+                 "prepare=%.1f generation=%.1f selection=%.1f score=%.1f "
+                 "eval=%.1f delta=%.1f | gen_match=%.1f gen_add=%.1f\n",
+                 (unsigned long long)fx.derive_events, fx.derivation_wall_ms,
+                 fx.derive_apply_ms, fx.derive_ground_ms, fx.derive_witness_ms,
+                 fx.derive_chain_ms, fx.derive_trace_ms, fx.prepare_wall_ms,
+                 fx.generation_wall_ms, fx.selection_wall_ms, fx.score_wall_ms,
+                 fx.evaluation_wall_ms, fx.delta_wall_ms, fx.gen_match_ms,
+                 fx.gen_add_ms);
+  }
+  return fx.prepare_wall_ms + fx.generation_wall_ms + fx.selection_wall_ms +
+         fx.ready_remove_wall_ms + fx.evaluation_wall_ms +
+         fx.derivation_wall_ms + fx.delta_wall_ms + fx.revival_wall_ms;
 }
 
 bool DeduceSession::RevivalPass() {
@@ -880,10 +901,12 @@ bool DeduceSession::RevivalPass() {
       for (const FactKey& k : sw.missing) {
         // W wait keys are normalized edge FactKeys: (kind|base slot, src,
         // dst) — check Γ directly (a present fact stays present).
-        const std::uint32_t slot = static_cast<std::uint32_t>(k.hi & 0xffffffffu);
+        const std::uint32_t slot =
+            static_cast<std::uint32_t>(k.hi & 0xffffffffu);
         const std::uint32_t s = static_cast<std::uint32_t>(k.lo >> 32);
         const std::uint32_t d = static_cast<std::uint32_t>(k.lo);
-        if (g_.RelationPairSet(slot).count(gar::core::graph::PackPair(s, d)) == 0) {
+        if (g_.RelationPairSet(slot).count(gar::core::graph::PackPair(s, d)) ==
+            0) {
           fulfilled = false;
           const std::uint32_t pid = ctx_.table->Find(g_.RelationName(
               slot < g_.num_relations() ? slot : slot - g_.num_relations()));
@@ -924,7 +947,8 @@ bool DeduceSession::RevivalPass() {
       const std::uint32_t dd = static_cast<std::uint32_t>(sw.wait.ground.lo);
       const std::uint32_t slot =
           static_cast<std::uint32_t>(sw.wait.ground.hi & 0xffffffffu);
-      present = g_.RelationPairSet(slot).count(gar::core::graph::PackPair(s, dd)) != 0;
+      present = g_.RelationPairSet(slot).count(
+                    gar::core::graph::PackPair(s, dd)) != 0;
     } else {
       // Open-side: any fact with the bound endpoint now?
       const auto& pairs = g_.RelationPairs(sw.wait.slot);
@@ -934,10 +958,9 @@ bool DeduceSession::RevivalPass() {
                                    gar::core::graph::PackPair(bv, 0));
         present = lo != pairs.end() && (*lo >> 32) == bv;
       } else {
-        const std::uint32_t mirror =
-            g_.IsInverse(sw.wait.slot)
-                ? g_.BaseRelation(sw.wait.slot)
-                : sw.wait.slot + g_.num_relations();
+        const std::uint32_t mirror = g_.IsInverse(sw.wait.slot)
+                                         ? g_.BaseRelation(sw.wait.slot)
+                                         : sw.wait.slot + g_.num_relations();
         const auto& mp = g_.RelationPairs(mirror);
         auto lo = std::lower_bound(mp.begin(), mp.end(),
                                    gar::core::graph::PackPair(bv, 0));
@@ -960,8 +983,7 @@ bool DeduceSession::RevivalPass() {
   }
   for (std::uint64_t id : drop) ws_.RemoveSuspended(id);
   for (const auto& rec : completed) {
-    if (state_->ContainsEdge(rec.head.slot,
-                             rec.motif.embedding[rec.head.pu],
+    if (state_->ContainsEdge(rec.head.slot, rec.motif.embedding[rec.head.pu],
                              rec.motif.embedding[rec.head.pv])) {
       continue;
     }
@@ -972,8 +994,76 @@ bool DeduceSession::RevivalPass() {
   return progressed > 0;
 }
 
-void DeduceSession::WriteDecisionTrace(
-    const deduce::ActionRecord& chosen) {
+void DeduceSession::WritePolicyTrace() {
+  if (!policy_trace_) return;
+  policy_trace_->goal_derived = res_.goal_derived;
+  if (res_.goal_derived) {
+    std::unordered_map<FactKey, std::size_t, FactKeyHash> by_fact;
+    for (std::size_t i = 0; i < res_.chain.size(); ++i) {
+      if (res_.chain[i].derived) {
+        const auto& derived = *res_.chain[i].derived;
+        by_fact.emplace(
+            KeyOf(MakeEdgeFact(derived.slot, derived.src, derived.dst)), i);
+      }
+    }
+    std::vector<bool> proof(res_.chain.size(), false);
+    std::vector<std::size_t> pending;
+    for (std::size_t i = res_.chain.size(); i-- > 0;) {
+      if (res_.chain[i].derived &&
+          GoalSatisfied(goal_, *res_.chain[i].derived)) {
+        proof[i] = true;
+        pending.push_back(i);
+        break;
+      }
+    }
+    while (!pending.empty()) {
+      const std::size_t index = pending.back();
+      pending.pop_back();
+      const AgentStep& step = res_.chain[index];
+      std::vector<Fact> premises;
+      GroundPremises(state_->rules()[step.motif.rule], step.motif, g_,
+                     *ctx_.table, &premises);
+      for (const Fact& premise : premises) {
+        const auto it = by_fact.find(KeyOf(premise));
+        if (it == by_fact.end() || proof[it->second]) continue;
+        proof[it->second] = true;
+        pending.push_back(it->second);
+      }
+    }
+    auto append_candidate = [&](std::size_t index) {
+      const AgentStep& step = res_.chain[index];
+      const auto& derived = *step.derived;
+      policy_trace_->candidates.push_back(learning::CandidateSnapshot{
+          index, step.action_id,
+          MakeEdgeFact(derived.slot, derived.src, derived.dst),
+          step.handcrafted_score, true});
+    };
+    for (std::size_t i = 0; i < res_.chain.size(); ++i) {
+      if (!proof[i]) continue;
+      const AgentStep& step = res_.chain[i];
+      std::vector<Fact> premises;
+      GroundPremises(state_->rules()[step.motif.rule], step.motif, g_,
+                     *ctx_.table, &premises);
+      const auto& derived = *step.derived;
+      policy_trace_->derivations.push_back(learning::DerivationRecord{
+          step.action_id, MakeEdgeFact(derived.slot, derived.src, derived.dst),
+          premises});
+      append_candidate(i);
+    }
+    std::vector<std::size_t> negatives;
+    for (std::size_t i = 0; i < res_.chain.size(); ++i) {
+      if (res_.chain[i].derived && !proof[i]) negatives.push_back(i);
+    }
+    std::mt19937_64 rng(cfg_.seed);
+    std::shuffle(negatives.begin(), negatives.end(), rng);
+    negatives.resize(std::min<std::size_t>(cfg_.policy_trace_negative_count,
+                                           negatives.size()));
+    for (const std::size_t index : negatives) append_candidate(index);
+  }
+  learning::WritePolicyTrace(cfg_.policy_trace_path, *policy_trace_);
+}
+
+void DeduceSession::WriteDecisionTrace(const deduce::ActionRecord& chosen) {
   if (!decision_trace_.is_open()) return;
   auto write = [&](const deduce::ActionRecord& rec, bool is_chosen) {
     decision_trace_ << decision_index_ << '\t' << is_chosen << '\t'
@@ -1000,8 +1090,7 @@ void DeduceSession::WriteDecisionTrace(
       alternatives.push_back(&rec);
     }
     std::sort(alternatives.begin(), alternatives.end(),
-              [](const deduce::ActionRecord* a,
-                 const deduce::ActionRecord* b) {
+              [](const deduce::ActionRecord* a, const deduce::ActionRecord* b) {
                 if (a->selection_priority != b->selection_priority) {
                   return a->selection_priority > b->selection_priority;
                 }
@@ -1070,9 +1159,9 @@ deduce::ActionRecord* DeduceSession::SelectReady() {
       for (auto& rec : ws_.ready()) {
         rec.score.admissible =
             rec.score.admissible &&
-            !state_->ContainsEdge(
-                rec.head.slot, rec.motif.embedding.data()[rec.head.pu],
-                rec.motif.embedding.data()[rec.head.pv]);
+            !state_->ContainsEdge(rec.head.slot,
+                                  rec.motif.embedding.data()[rec.head.pu],
+                                  rec.motif.embedding.data()[rec.head.pv]);
         totals.push_back(rec.score.total);
         admissible.push_back(rec.score.admissible);
       }
@@ -1105,6 +1194,18 @@ AgentResult DeduceSession::Run() {
   res_.stats.emplace();
   t0_ = std::chrono::steady_clock::now();
   verify_ = std::getenv("GAR_VERIFY_DEDUCE") != nullptr;
+  if (!cfg_.policy_trace_path.empty()) {
+    const auto* score_config = kit_.scorer->handcrafted_config();
+    if (!IncrementalScores() || score_config == nullptr) {
+      throw std::invalid_argument(
+          "policy tracing requires exact incremental scoring");
+    }
+    policy_trace_.emplace();
+    policy_trace_->goal = goal_;
+    policy_trace_->hdc = {ctx_.encoder.dim(), ctx_.encoder.seed()};
+    policy_trace_->scorer = *score_config;
+    policy_trace_->graph_fingerprint = GraphFingerprint(g_);
+  }
   if (!cfg_.decision_trace_path.empty()) {
     const std::filesystem::path path(cfg_.decision_trace_path);
     if (!path.parent_path().empty()) {
@@ -1126,16 +1227,30 @@ AgentResult DeduceSession::Run() {
       state_->ContainsEdge(goal_.slot, *goal_.args[0], *goal_.args[1])) {
     res_.goal_derived = true;
     res_.termination = "goal_already_in_graph";
+    WritePolicyTrace();
     return res_;
   }
 
   const auto prepared_at = std::chrono::steady_clock::now();
   BuildPlans();
+  const auto plans_at = std::chrono::steady_clock::now();
   match_backend_ = MakeMatchBackend(cfg_.engine, g_);
+  const auto backend_at = std::chrono::steady_clock::now();
   res_.stats->prepare_wall_ms +=
-      std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - prepared_at)
+      std::chrono::duration<double, std::milli>(backend_at - prepared_at)
           .count();
+  if (std::getenv("GAR_DERIVE_PROFILE") != nullptr) {
+    std::fprintf(stderr,
+                 "[prepare-profile] BuildPlans=%.1fms MakeMatchBackend=%.1fms "
+                 "rules=%zu\n",
+                 std::chrono::duration<double, std::milli>(plans_at -
+                                                           prepared_at)
+                     .count(),
+                 std::chrono::duration<double, std::milli>(backend_at -
+                                                           plans_at)
+                     .count(),
+                 state_->rules().size());
+  }
   res_.termination = "fixpoint";
 
   // Star discipline (approved algorithm): expand ONE star on the current
@@ -1153,7 +1268,7 @@ AgentResult DeduceSession::Run() {
       break;
     }
     if (ws_.ReadyEmpty()) {
-      if (cfg_.engine == MatchEngine::kGpu) FlushDerivations();
+      FlushDerivations();
       if (!ws_.ReadyEmpty()) continue;
       if (next_star_ < plans_.size() && cfg_.revival_threshold > 0 &&
           ws_.suspended().size() >= cfg_.revival_threshold) {
@@ -1192,15 +1307,13 @@ AgentResult DeduceSession::Run() {
         break;
       }
       if (!progressed) {
-        res_.termination = res_.stats->candidate_caps > 0
-                               ? "candidate_cap"
-                               : "fixpoint";
+        res_.termination =
+            res_.stats->candidate_caps > 0 ? "candidate_cap" : "fixpoint";
         break;
       }
       continue;
     }
 
-    const double decision_cost_ms = MeasuredCostMs();
     std::vector<deduce::ActionRecord> batch;
     const auto selection_started = std::chrono::steady_clock::now();
     if (cfg_.batch_size == 1) {
@@ -1243,7 +1356,7 @@ AgentResult DeduceSession::Run() {
         res_.termination = "budget";
         break;
       }
-      if (ProcessAction(rec, decision_cost_ms)) {
+      if (ProcessAction(rec)) {
         res_.termination = "goal";
         break;
       }
@@ -1256,17 +1369,18 @@ AgentResult DeduceSession::Run() {
   res_.stats->proof_cost = GoalProofCost();
   res_.budget_exhausted = res_.termination == "budget";
   res_.derived = state_->journal();
-  WriteQTrace();
-  if (kit_.value_model != nullptr) {
-    const auto& model = *kit_.value_model;
-    std::fprintf(stderr,
-                 "[ada-deduce] value-model: calls=%llu infer_ms=%.3f avg_us=%.3f\n",
-                 static_cast<unsigned long long>(model.infer_calls),
-                 model.infer_ns / 1.0e6,
-                 model.infer_calls == 0
-                     ? 0.0
-                     : model.infer_ns / 1.0e3 / model.infer_calls);
+  if (kit_.relevance_model != nullptr) {
+    const auto& model = *kit_.relevance_model;
+    std::fprintf(
+        stderr,
+        "[ada-deduce] relevance-model: calls=%llu infer_ms=%.3f avg_us=%.3f\n",
+        static_cast<unsigned long long>(model.infer_calls()),
+        model.infer_ns() / 1.0e6,
+        model.infer_calls() == 0
+            ? 0.0
+            : model.infer_ns() / 1.0e3 / model.infer_calls());
   }
+  WritePolicyTrace();
   return res_;
 }
 

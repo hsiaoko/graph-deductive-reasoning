@@ -9,10 +9,18 @@ project(gar_engine_agent LANGUAGES CXX)
 #######################
 add_library(gar_engine_agent STATIC
     src/motif.cpp
+    src/fact_encoder.cpp
     src/witness.cpp
     src/scorer.cpp
+    src/learning/policy_trace.cpp
+    src/learning/proof_dataset.cpp
+    src/learning/relevance_model.cpp
+    src/learning/relevance_trainer.cpp
+    src/learning/learned_policy.cpp
     src/ada_deduce_executor.cpp
     src/backward_executor.cpp
+    src/hybrid_executor.cpp
+    src/learned_strategy_executor.cpp
     src/batch_session.cpp
     src/match_backend.cpp
     src/cpu_match_backend.cpp

@@ -29,6 +29,12 @@ struct HandcraftedConfig {
   double cost_weight = 1.0;  // residual evaluation-cost weight
   double nu2 = 0.5;          // experimental confidence weight
   bool use_confidence = false;
+  // Level-preserving predicate prior rho_q (paper LLM guide): multiplies the
+  // symbolic relevance gamma^d(q) by rho_q to reorder predicates WITHIN one
+  // distance level. With rho_max/rho_min < 1/gamma a nearer predicate still
+  // outranks any farther one, so goal-level completeness is unchanged. Empty
+  // map = uniform prior (plain gamma^d). Keyed by PredicateTable id.
+  std::unordered_map<std::uint32_t, double> predicate_prior;
 };
 
 // Rebuilt once per goal: the goal's d(.) table plus the predicate table it
@@ -71,6 +77,7 @@ class Scorer {
   // Exact/null scores can be maintained through new exact-witness facts.
   // HDC currently uses the full-rescoring path after a new distinct witness.
   virtual bool SupportsIncrementalScoring() const { return false; }
+  virtual const HandcraftedConfig* handcrafted_config() const { return nullptr; }
 };
 
 class ExactScorer final : public Scorer {
@@ -85,6 +92,7 @@ class ExactScorer final : public Scorer {
                  ScoredRule* out) const override;
 
   bool SupportsIncrementalScoring() const override { return true; }
+  const HandcraftedConfig* handcrafted_config() const override { return &cfg_; }
 
  private:
   HandcraftedConfig cfg_;

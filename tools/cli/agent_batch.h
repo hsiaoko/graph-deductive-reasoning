@@ -187,6 +187,10 @@ inline TaskResult RunOne(
 }
 
 inline int Run(const FullDeduceArgs& io, const AgentModeArgs& args) {
+  if (!args.policy_trace_path.empty()) {
+    throw std::invalid_argument(
+        "--policy-trace is supported only in single-goal agent mode");
+  }
   const auto started = std::chrono::steady_clock::now();
   FullDeduceInputs inputs = LoadFullDeduceInputs(io, "gar_agent_batch");
   const std::vector<Task> tasks = LoadTasks(args.tasks_path);

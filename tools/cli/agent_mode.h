@@ -3,11 +3,12 @@
 // gar_reason --mode agent: policy-guided goal deduction (paper §3-§5).
 // Argument parsing, execution and output
 // live here; the engine itself is engine/agent/. The
-// --verify-against-closure cross-check composes gar::core::engine::deduction at the
-// app layer — the agent library never sees its sibling engine.
+// --verify-against-closure cross-check composes gar::core::engine::deduction at
+// the app layer — the agent library never sees its sibling engine.
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -20,11 +21,14 @@
 #include <vector>
 
 #include "full_deduce_cli.h"  // FullDeduceArgs + loaders + closure_output.h
-#include "gar/core/analysis/dependency_graph.h"
 #include "gar/core/agent/executor.h"
+#include "gar/core/agent/fact_encoder.h"
+#include "gar/core/agent/learning/learned_policy.h"
+#include "gar/core/agent/learning/relevance_model.h"
 #include "gar/core/agent/reasoning_agent.h"
-#include "gar/core/chase/cpu_chase_engine.h"
 #include "gar/core/agent/value_model.h"
+#include "gar/core/analysis/dependency_graph.h"
+#include "gar/core/chase/cpu_chase_engine.h"
 #include "gar/core/hdc/const.h"
 
 namespace gar_apps {
@@ -37,6 +41,7 @@ struct AgentModeArgs {
       gar::core::engine::agent::SearchDirection::kForward;
   std::uint32_t backward_max_depth = 64;
   std::uint64_t backward_max_calls = 100000;
+  std::string strategy_model_path;
   std::uint64_t budget = 100;
   std::uint32_t batch_size = 1;
   gar::core::engine::agent::PolicyKind policy =
@@ -48,6 +53,7 @@ struct AgentModeArgs {
   std::uint64_t revival_threshold = 0;
   gar::core::engine::agent::StarOrder star_order =
       gar::core::engine::agent::StarOrder::kInput;
+  std::string star_order_model_path;
   std::uint32_t hdc_dim = gar::core::hdc::kHdcDefaultDim;
   std::uint64_t seed = 42;
   // Seed decoupling (--policy-seed / --hdc-seed; both fall back to --seed).
@@ -58,9 +64,12 @@ struct AgentModeArgs {
   [[nodiscard]] std::uint64_t PolicySeed() const {
     return policy_seed.value_or(seed);
   }
-  [[nodiscard]] std::uint64_t HdcSeed() const { return hdc_seed.value_or(seed); }
+  [[nodiscard]] std::uint64_t HdcSeed() const {
+    return hdc_seed.value_or(seed);
+  }
   std::uint32_t max_candidates_per_rule = 256;
   gar::core::engine::agent::HandcraftedConfig score;
+  std::string predicate_prior_path;
   bool verify_against_closure = false;
   // Ablation: --no-dg removes dependency-graph guidance (d(.) table all
   // zeros: no candidate hard-filter, rel_fam neutral, price = w0). The DG
@@ -84,16 +93,18 @@ struct AgentModeArgs {
   std::string llm_model = "deepseek-chat";
   std::uint32_t llm_timeout_ms = 120000;
   double wall_limit_sec = 0.0;
-  std::string value_model;
+  std::string relevance_model;
+  double learned_handcrafted_weight = 0.0;
+  double learned_relevance_weight = 1.0;
+  std::uint32_t learned_prefilter = 0;
   std::string proof_star_model;
   double proof_star_weight = 1.0;
   double proof_star_min_cost = 0.0;
-  gar::core::engine::agent::HdcBackend hdc_value_backend =
-      gar::core::engine::agent::HdcBackend::kBitLut;
-  std::string q_trace_path;
   std::string decision_trace_path;
   std::uint64_t decision_sample_stride = 0;
   std::uint32_t decision_alternative_count = 0;
+  std::string policy_trace_path;
+  std::uint32_t policy_trace_negative_count = 256;
   std::string replay_actions_path;
   std::vector<gar::core::engine::agent::ReplayAction> replay_actions;
   // Multi-goal execution: independent goals share one process and DG, while
@@ -116,8 +127,10 @@ inline gar::core::engine::agent::SearchDirection ParseSearchDirection(
   using gar::core::engine::agent::SearchDirection;
   if (value == "forward") return SearchDirection::kForward;
   if (value == "backward") return SearchDirection::kBackward;
+  if (value == "hybrid") return SearchDirection::kHybrid;
+  if (value == "learned-strategy") return SearchDirection::kLearnedStrategy;
   throw std::invalid_argument("unknown --search-direction: " + value +
-                              " (forward|backward)");
+                              " (forward|backward|hybrid|learned-strategy)");
 }
 
 inline gar::core::engine::agent::PolicyKind ParsePolicyKind(
@@ -125,13 +138,12 @@ inline gar::core::engine::agent::PolicyKind ParsePolicyKind(
   using gar::core::engine::agent::PolicyKind;
   if (value == "deterministic") return PolicyKind::kDeterministic;
   if (value == "random") return PolicyKind::kRandom;
+  if (value == "uniform-random") return PolicyKind::kUniformRandom;
   if (value == "hybrid") return PolicyKind::kHybrid;
   if (value == "jev") return PolicyKind::kJev;
   if (value == "learned") return PolicyKind::kLearned;
   if (value == "adaptive") return PolicyKind::kAdaptive;
   if (value == "replay") return PolicyKind::kReplay;
-  if (value == "q-hdc") return PolicyKind::kQHdc;
-  if (value == "q-numeric") return PolicyKind::kQNumeric;
   throw std::invalid_argument("unknown --policy: " + value);
 }
 
@@ -150,8 +162,9 @@ inline gar::core::engine::agent::StarOrder ParseStarOrder(
   using gar::core::engine::agent::StarOrder;
   if (value == "input") return StarOrder::kInput;
   if (value == "goal") return StarOrder::kGoal;
+  if (value == "learned") return StarOrder::kLearned;
   throw std::invalid_argument("unknown --star-order: " + value +
-                              " (input|goal)");
+                              " (input|goal|learned)");
 }
 
 inline gar::core::engine::agent::ExecConfig MakeExecConfig(
@@ -165,16 +178,19 @@ inline gar::core::engine::agent::ExecConfig MakeExecConfig(
   config.fair_interval = args.fair_interval;
   config.revival_threshold = args.revival_threshold;
   config.star_order = args.star_order;
+  config.star_order_model_path = args.star_order_model_path;
   config.guide_strength = args.llm_guide ? args.guide_strength : 0.0;
   config.proof_star_weight =
       args.proof_star_model.empty() ? 0.0 : args.proof_star_weight;
   config.proof_star_min_cost = args.proof_star_min_cost;
-  config.q_trace_path = args.q_trace_path;
   config.decision_trace_path = args.decision_trace_path;
   config.decision_sample_stride = args.decision_sample_stride;
   config.decision_alternative_count = args.decision_alternative_count;
+  config.policy_trace_path = args.policy_trace_path;
+  config.policy_trace_negative_count = args.policy_trace_negative_count;
   config.backward_max_depth = args.backward_max_depth;
   config.backward_max_calls = args.backward_max_calls;
+  config.strategy_model_path = args.strategy_model_path;
   config.seed = args.PolicySeed();
   return config;
 }
@@ -183,66 +199,96 @@ inline gar::core::engine::agent::ExecConfig MakeExecConfig(
 template <typename NextFn>
 bool ParseAgentModeOption(const std::string& k, NextFn&& next,
                           AgentModeArgs* a) {
-  if (k == "--goal") a->goal_spec = next();
-  else if (k == "--tasks") a->tasks_path = next();
-  else if (k == "--workers") a->workers = std::stoul(next());
-  else if (k == "--gt") a->ground_truth_dir = next();
-  else if (k == "--engine") a->engine = ParseMatchEngine(next());
+  if (k == "--goal")
+    a->goal_spec = next();
+  else if (k == "--tasks")
+    a->tasks_path = next();
+  else if (k == "--workers")
+    a->workers = std::stoul(next());
+  else if (k == "--gt")
+    a->ground_truth_dir = next();
+  else if (k == "--engine")
+    a->engine = ParseMatchEngine(next());
   else if (k == "--search-direction")
     a->search_direction = ParseSearchDirection(next());
   else if (k == "--backward-max-depth")
     a->backward_max_depth = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--backward-max-calls")
     a->backward_max_calls = std::stoull(next());
-  else if (k == "--budget") a->budget = std::stoull(next());
+  else if (k == "--strategy-model")
+    a->strategy_model_path = next();
+  else if (k == "--budget")
+    a->budget = std::stoull(next());
   else if (k == "--batch-size") {
     a->batch_size = static_cast<std::uint32_t>(std::stoul(next()));
     if (a->batch_size == 0) {
       throw std::invalid_argument("--batch-size must be positive");
     }
-  }
-  else if (k == "--policy") a->policy = ParsePolicyKind(next());
-  else if (k == "--scorer") a->scorer = ParseScorerKind(next());
-  else if (k == "--hdc-dim") a->hdc_dim = static_cast<std::uint32_t>(std::stoul(next()));
-  else if (k == "--seed") a->seed = std::stoull(next());
-  else if (k == "--policy-seed") a->policy_seed = std::stoull(next());
-  else if (k == "--hdc-seed") a->hdc_seed = std::stoull(next());
+  } else if (k == "--policy")
+    a->policy = ParsePolicyKind(next());
+  else if (k == "--scorer")
+    a->scorer = ParseScorerKind(next());
+  else if (k == "--hdc-dim")
+    a->hdc_dim = static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--seed")
+    a->seed = std::stoull(next());
+  else if (k == "--policy-seed")
+    a->policy_seed = std::stoull(next());
+  else if (k == "--hdc-seed")
+    a->hdc_seed = std::stoull(next());
   else if (k == "--max-candidates-per-rule")
     a->max_candidates_per_rule = static_cast<std::uint32_t>(std::stoul(next()));
-  else if (k == "--alpha") a->score.alpha = std::stod(next());
-  else if (k == "--beta" || k == "--nu") a->score.beta = std::stod(next());
-  else if (k == "--lambda") a->score.cost_weight = std::stod(next());
-  else if (k == "--gamma") a->score.gamma = std::stod(next());
-  else if (k == "--nu2") a->score.nu2 = std::stod(next());
-  else if (k == "--use-confidence") a->score.use_confidence = true;
-  else if (k == "--no-confidence") a->score.use_confidence = false;
-  else if (k == "--no-dg") a->no_dg = true;
-  else if (k == "--verify-against-closure") a->verify_against_closure = true;
-  else if (k == "--jev-endpoint") a->jev.endpoint = next();
+  else if (k == "--alpha")
+    a->score.alpha = std::stod(next());
+  else if (k == "--beta" || k == "--nu")
+    a->score.beta = std::stod(next());
+  else if (k == "--lambda")
+    a->score.cost_weight = std::stod(next());
+  else if (k == "--gamma")
+    a->score.gamma = std::stod(next());
+  else if (k == "--predicate-prior")
+    a->predicate_prior_path = next();
+  else if (k == "--nu2")
+    a->score.nu2 = std::stod(next());
+  else if (k == "--use-confidence")
+    a->score.use_confidence = true;
+  else if (k == "--no-confidence")
+    a->score.use_confidence = false;
+  else if (k == "--no-dg")
+    a->no_dg = true;
+  else if (k == "--verify-against-closure")
+    a->verify_against_closure = true;
+  else if (k == "--jev-endpoint")
+    a->jev.endpoint = next();
   else if (k == "--jev-timeout-ms")
     a->jev.timeout_ms = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--jev-top-k")
     a->jev.top_k = static_cast<std::size_t>(std::stoull(next()));
-  else if (k == "--llm-guide") a->llm_guide = true;
-  else if (k == "--llm-mock") a->llm_mock = true;
-  else if (k == "--paper-guide") a->paper_guide = true;
-  else if (k == "--paper-guide-response") a->paper_guide_response = next();
-  else if (k == "--paper-guide-cache-dir") a->paper_guide_cache_dir = next();
+  else if (k == "--llm-guide")
+    a->llm_guide = true;
+  else if (k == "--llm-mock")
+    a->llm_mock = true;
+  else if (k == "--paper-guide")
+    a->paper_guide = true;
+  else if (k == "--paper-guide-response")
+    a->paper_guide_response = next();
+  else if (k == "--paper-guide-cache-dir")
+    a->paper_guide_cache_dir = next();
   else if (k == "--guide-lambda") {
     a->guide_lambda = std::stod(next());
     if (a->guide_lambda < 0.0 || a->guide_lambda > 1.0) {
       throw std::invalid_argument("--guide-lambda must be in [0,1]");
     }
-  }
-  else if (k == "--llm-backend") {
+  } else if (k == "--llm-backend") {
     a->llm_backend = next();
     if (a->llm_backend != "openai" && a->llm_backend != "jev") {
       throw std::invalid_argument("unknown --llm-backend: " + a->llm_backend +
                                   " (openai|jev)");
     }
-  }
-  else if (k == "--llm-base-url") a->llm_base_url = next();
-  else if (k == "--llm-model") a->llm_model = next();
+  } else if (k == "--llm-base-url")
+    a->llm_base_url = next();
+  else if (k == "--llm-model")
+    a->llm_model = next();
   else if (k == "--llm-timeout-ms")
     a->llm_timeout_ms = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--guide-strength") {
@@ -250,78 +296,78 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     if (a->guide_strength < 0.0) {
       throw std::invalid_argument("--guide-strength must be nonnegative");
     }
-  }
-  else if (k == "--guide-max-options") {
+  } else if (k == "--guide-max-options") {
     a->guide_max_options = std::stoull(next());
     if (a->guide_max_options == 0) {
       throw std::invalid_argument("--guide-max-options must be positive");
     }
-  }
-  else if (k == "--guide-min-cost") {
+  } else if (k == "--guide-min-cost") {
     a->guide_min_cost = std::stod(next());
     if (a->guide_min_cost < 0.0) {
       throw std::invalid_argument("--guide-min-cost must be nonnegative");
     }
-  }
-  else if (k == "--wall-limit") a->wall_limit_sec = std::stod(next());
+  } else if (k == "--wall-limit")
+    a->wall_limit_sec = std::stod(next());
   else if (k == "--fair-interval")
     a->fair_interval = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--revival-threshold")
     a->revival_threshold = std::stoull(next());
-  else if (k == "--star-order") a->star_order = ParseStarOrder(next());
-  else if (k == "--value-model") a->value_model = next();
-  else if (k == "--proof-star-model") a->proof_star_model = next();
+  else if (k == "--star-order")
+    a->star_order = ParseStarOrder(next());
+  else if (k == "--star-order-model")
+    a->star_order_model_path = next();
+  else if (k == "--relevance-model")
+    a->relevance_model = next();
+  else if (k == "--learned-handcrafted-weight")
+    a->learned_handcrafted_weight = std::stod(next());
+  else if (k == "--learned-relevance-weight")
+    a->learned_relevance_weight = std::stod(next());
+  else if (k == "--learned-prefilter")
+    a->learned_prefilter = static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--proof-star-model")
+    a->proof_star_model = next();
   else if (k == "--proof-star-weight") {
     a->proof_star_weight = std::stod(next());
     if (a->proof_star_weight < 0.0) {
       throw std::invalid_argument("--proof-star-weight must be nonnegative");
     }
-  }
-  else if (k == "--proof-star-min-cost") {
+  } else if (k == "--proof-star-min-cost") {
     a->proof_star_min_cost = std::stod(next());
     if (a->proof_star_min_cost < 0.0) {
-      throw std::invalid_argument(
-          "--proof-star-min-cost must be nonnegative");
+      throw std::invalid_argument("--proof-star-min-cost must be nonnegative");
     }
-  }
-  else if (k == "--hdc-value-backend") {
-    const std::string backend = next();
-    if (backend == "original") {
-      a->hdc_value_backend = gar::core::engine::agent::HdcBackend::kOriginal;
-    } else if (backend == "simd") {
-      a->hdc_value_backend = gar::core::engine::agent::HdcBackend::kSimd;
-    } else if (backend == "bit-lut") {
-      a->hdc_value_backend = gar::core::engine::agent::HdcBackend::kBitLut;
-    } else {
-      throw std::invalid_argument(
-          "unknown --hdc-value-backend: " + backend +
-          " (original|simd|bit-lut)");
-    }
-  }
-  else if (k == "--q-trace") a->q_trace_path = next();
-  else if (k == "--decision-trace") a->decision_trace_path = next();
+  } else if (k == "--decision-trace")
+    a->decision_trace_path = next();
   else if (k == "--decision-stride")
     a->decision_sample_stride = std::stoull(next());
   else if (k == "--decision-alternatives")
     a->decision_alternative_count =
         static_cast<std::uint32_t>(std::stoul(next()));
-  else if (k == "--replay-actions") a->replay_actions_path = next();
-  else if (k == "--jev-sample") a->jev.sample = true;
-  else if (k == "--jev-mock") a->jev_mock = true;
-  else return false;
+  else if (k == "--policy-trace")
+    a->policy_trace_path = next();
+  else if (k == "--policy-trace-negatives")
+    a->policy_trace_negative_count =
+        static_cast<std::uint32_t>(std::stoul(next()));
+  else if (k == "--replay-actions")
+    a->replay_actions_path = next();
+  else if (k == "--jev-sample")
+    a->jev.sample = true;
+  else if (k == "--jev-mock")
+    a->jev_mock = true;
+  else
+    return false;
   return true;
 }
 
 // Parses "rel_name(src,dst)": the relation name resolves to a base slot
 // through the graph's relation dictionary; arguments are entity names
 // resolved through the entity dictionary, or '_' for an open variable.
-inline gar::core::engine::agent::Goal ParseGoalSpec(const std::string& spec,
-                                              const gar::core::graph::Graph& g) {
+inline gar::core::engine::agent::Goal ParseGoalSpec(
+    const std::string& spec, const gar::core::graph::Graph& g) {
   const auto lp = spec.find('(');
   const auto rp = spec.rfind(')');
   if (lp == std::string::npos || rp == std::string::npos || rp < lp) {
-    throw std::invalid_argument("bad --goal (want rel_name(src,dst)): " +
-                                spec);
+    throw std::invalid_argument("bad --goal (want rel_name(src,dst)): " + spec);
   }
   const std::string rel = spec.substr(0, lp);
   const std::string args = spec.substr(lp + 1, rp - lp - 1);
@@ -344,8 +390,7 @@ inline gar::core::engine::agent::Goal ParseGoalSpec(const std::string& spec,
   if (!found) {
     throw std::invalid_argument("unknown relation in --goal: " + rel);
   }
-  auto resolve = [&](const std::string& name)
-      -> std::optional<std::uint32_t> {
+  auto resolve = [&](const std::string& name) -> std::optional<std::uint32_t> {
     if (name == "_") return std::nullopt;
     for (std::uint32_t v = 0; v < g.num_entities(); ++v) {
       if (g.EntityName(v) == name) return v;
@@ -417,8 +462,9 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
   }
   if (args.policy == agent::PolicyKind::kJev) {
     if (goal == nullptr || graph == nullptr || rules == nullptr) {
-      throw std::invalid_argument("--policy jev needs goal/graph/rules "
-                                  "context (MakeReasoningAgent)");
+      throw std::invalid_argument(
+          "--policy jev needs goal/graph/rules "
+          "context (MakeReasoningAgent)");
     }
     std::unique_ptr<agent::JevClient> client;
     if (args.jev_mock) {
@@ -437,21 +483,26 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
       throw std::invalid_argument("--policy replay requires --replay-actions");
     }
     if (args.batch_size != 1) {
-      throw std::invalid_argument("--policy replay currently requires --batch-size 1");
+      throw std::invalid_argument(
+          "--policy replay currently requires --batch-size 1");
     }
     comps.policy = std::make_unique<agent::ReplayPolicy>(args.replay_actions);
   } else if (args.policy == agent::PolicyKind::kRandom) {
     comps.policy = std::make_unique<agent::RandomizedPolicy>(args.PolicySeed());
+  } else if (args.policy == agent::PolicyKind::kUniformRandom) {
+    comps.policy = std::make_unique<agent::UniformRandomPolicy>(args.PolicySeed());
   } else if (args.policy == agent::PolicyKind::kHybrid) {
     comps.policy = std::make_unique<agent::HybridNeuroSymbolicPolicy>();
   } else if (args.policy == agent::PolicyKind::kLearned ||
-             args.policy == agent::PolicyKind::kAdaptive ||
-             args.policy == agent::PolicyKind::kQHdc ||
-             args.policy == agent::PolicyKind::kQNumeric) {
-    if (args.value_model.empty()) {
+             args.policy == agent::PolicyKind::kAdaptive) {
+    if (goal == nullptr || graph == nullptr || rules == nullptr) {
       throw std::invalid_argument(
-          std::string("--policy ") + agent::PolicyName(args.policy) +
-          " requires --value-model PATH");
+          "learned policies need goal/graph/rules context");
+    }
+    if (args.relevance_model.empty()) {
+      throw std::invalid_argument(std::string("--policy ") +
+                                  agent::PolicyName(args.policy) +
+                                  " requires --relevance-model PATH");
     }
     if (args.policy == agent::PolicyKind::kAdaptive && !args.llm_guide) {
       throw std::invalid_argument("--policy adaptive requires --llm-guide");
@@ -459,29 +510,37 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
     if (args.scorer != agent::ScorerKind::kExact) {
       throw std::invalid_argument("learned policies require --scorer exact");
     }
-    auto vm = std::make_shared<agent::ValueModel>();
-    vm->SetHdcBackend(args.hdc_value_backend);
-    if (!vm->Load(args.value_model)) {
-      throw std::runtime_error("failed to load value model: " +
-                               args.value_model);
+    if (args.search_direction != agent::SearchDirection::kForward) {
+      throw std::invalid_argument("learned policies require forward deduction");
     }
-    if (args.policy != agent::PolicyKind::kLearned) {
-      const std::string want =
-          args.policy == agent::PolicyKind::kQHdc ? "hdc" : "numeric";
-      if (vm->kind() != want) {
-        throw std::runtime_error(
-            std::string("--policy ") + agent::PolicyName(args.policy) +
-            " got a " + vm->kind() + " model: " + args.value_model);
-      }
+    auto model = std::make_shared<agent::learning::RelevanceModel>(
+        agent::learning::RelevanceModel::Load(args.relevance_model));
+    const auto& metadata = model->metadata();
+    if (metadata.dim != args.hdc_dim || metadata.hdc_seed != args.HdcSeed() ||
+        metadata.graph_fingerprint != agent::GraphFingerprint(*graph)) {
+      throw std::invalid_argument(
+          "relevance model does not match the graph or HDC configuration");
     }
+    if (!std::isfinite(args.learned_handcrafted_weight) ||
+        !std::isfinite(args.learned_relevance_weight) ||
+        args.learned_handcrafted_weight < 0.0 ||
+        args.learned_relevance_weight < 0.0 ||
+        (args.learned_handcrafted_weight == 0.0 &&
+         args.learned_relevance_weight == 0.0)) {
+      throw std::invalid_argument("learned weights must be finite and nonnegative");
+    }
+    agent::FactEncoder fact_encoder(encoder, graph, &dg->table());
+    auto learned = std::make_unique<agent::learning::LearnedPolicy>(
+        model.get(), fact_encoder, *goal, rules,
+        args.learned_handcrafted_weight, args.learned_relevance_weight,
+        args.learned_prefilter > 0);
     if (args.policy == agent::PolicyKind::kAdaptive) {
       comps.policy = std::make_unique<agent::AdaptivePolicy>(
-          std::make_unique<agent::DeterministicPolicy>(),
-          std::make_unique<agent::LearnedQPolicy>(vm.get()));
+          std::make_unique<agent::DeterministicPolicy>(), std::move(learned));
     } else {
-      comps.policy = std::make_unique<agent::LearnedQPolicy>(vm.get());
+      comps.policy = std::move(learned);
     }
-    comps.value_model = std::move(vm);
+    comps.relevance_model = std::move(model);
   } else {
     comps.policy = std::make_unique<agent::DeterministicPolicy>();
   }
@@ -514,15 +573,16 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
         std::move(client), goal, graph, dg, rules, rule_ids,
         args.guide_max_options, args.guide_min_cost);
     if (args.policy == agent::PolicyKind::kAdaptive) {
-      static_cast<agent::AdaptivePolicy*>(comps.policy.get())->SetGuide(
-          guide.get());
+      static_cast<agent::AdaptivePolicy*>(comps.policy.get())
+          ->SetGuide(guide.get());
     }
     if (guide_out != nullptr) *guide_out = guide.get();
     comps.star_guide = std::move(guide);
   }
   if (args.paper_guide) {
     if (goal == nullptr || graph == nullptr || rules == nullptr) {
-      throw std::invalid_argument("--paper-guide needs goal/graph/rules context");
+      throw std::invalid_argument(
+          "--paper-guide needs goal/graph/rules context");
     }
     std::unique_ptr<agent::LlmClient> client;
     if (args.llm_mock) {
@@ -552,7 +612,8 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
       }
     }
     if (!args.paper_guide_cache_dir.empty()) {
-      const std::string goal_key = graph->RelationName(goal->slot) + "(" +
+      const std::string goal_key =
+          graph->RelationName(goal->slot) + "(" +
           (goal->args[0] ? graph->EntityName(*goal->args[0]) : "_") + "," +
           (goal->args[1] ? graph->EntityName(*goal->args[1]) : "_") + ")";
       std::uint64_t hash = 14695981039346656037ULL;
@@ -573,12 +634,12 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
     if (paper_guide_out != nullptr) *paper_guide_out = guide.get();
     comps.paper_guide = std::move(guide);
   }
-  if (!args.q_trace_path.empty() &&
-      args.scorer != agent::ScorerKind::kExact) {
-    throw std::invalid_argument("--q-trace requires --scorer exact");
-  }
   if (args.search_direction == agent::SearchDirection::kBackward) {
     comps.executor = std::make_unique<agent::BackwardExecutor>();
+  } else if (args.search_direction == agent::SearchDirection::kHybrid) {
+    comps.executor = std::make_unique<agent::HybridExecutor>();
+  } else if (args.search_direction == agent::SearchDirection::kLearnedStrategy) {
+    comps.executor = std::make_unique<agent::LearnedStrategyExecutor>();
   } else {
     comps.executor = std::make_unique<agent::AdaDeduceExecutor>();
   }
@@ -599,12 +660,10 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   gar::core::graph::Graph g =
       gar::core::graph::LoadGraph(io.csr_dir, /*with_inverses=*/true);
   std::cerr << "[gar_reason] |V|=" << g.num_entities()
-            << " |R|=" << g.num_relations() << " |E|=" << g.num_edges()
-            << "\n";
+            << " |R|=" << g.num_relations() << " |E|=" << g.num_edges() << "\n";
   std::vector<std::filesystem::path> rule_dirs;
   for (const auto& e : std::filesystem::directory_iterator(io.rules_root)) {
-    if (e.is_directory() &&
-        std::filesystem::exists(e.path() / "rule.yaml")) {
+    if (e.is_directory() && std::filesystem::exists(e.path() / "rule.yaml")) {
       rule_dirs.push_back(e.path());
     }
   }
@@ -616,14 +675,15 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
     rule_ids.push_back(d.filename().string());
   }
   std::cerr << "[gar_reason] " << rules.size() << " rules\n";
-  gar::core::graph::VertexAttributes attrs = gar::core::graph::LoadVertexAttributes(io.csr_dir);
+  gar::core::graph::VertexAttributes attrs =
+      gar::core::graph::LoadVertexAttributes(io.csr_dir);
   std::cerr << "[gar_reason] " << attrs.columns.size()
             << " numeric attribute columns\n";
   auto ml_models = LoadMlModelRegistry(io.ml_config);
 
   const agent::Goal goal = ParseGoalSpec(args.goal_spec, g);
-  std::cerr << "[gar_reason] goal: " << args.goal_spec << " (slot "
-            << goal.slot << ")\n";
+  std::cerr << "[gar_reason] goal: " << args.goal_spec << " (slot " << goal.slot
+            << ")\n";
 
   // ---- dependency graph (once per rule set; d(.) is per goal) ----
   gar::core::analysis::PredicateTable table;
@@ -642,6 +702,21 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   if (!args.replay_actions_path.empty()) {
     effective_args.replay_actions = ReadReplayActions(args.replay_actions_path);
   }
+  if (!args.predicate_prior_path.empty()) {
+    std::ifstream prior_in(args.predicate_prior_path);
+    if (!prior_in)
+      throw std::runtime_error("cannot read predicate prior: " +
+                               args.predicate_prior_path);
+    std::string line;
+    while (std::getline(prior_in, line)) {
+      if (line.empty() || line[0] == '#') continue;
+      const auto tab = line.find('\t');
+      if (tab == std::string::npos) continue;
+      const std::uint32_t id = table.Find(line.substr(0, tab));
+      if (id == gar::core::analysis::kInvalidPredicate) continue;
+      effective_args.score.predicate_prior[id] = std::stod(line.substr(tab + 1));
+    }
+  }
   agent::JevPolicy* jev = nullptr;
   agent::LlmStarGuide* guide = nullptr;
   agent::PaperGuide* paper_guide = nullptr;
@@ -655,14 +730,14 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   const agent::ExecConfig ec = MakeExecConfig(args);
 
   std::cerr << "[gar_reason] running: engine="
-            << agent::MatchEngineName(args.engine)
-            << " direction=" << agent::SearchDirectionName(args.search_direction)
+            << agent::MatchEngineName(args.engine) << " direction="
+            << agent::SearchDirectionName(args.search_direction)
             << " policy=" << agent::PolicyName(args.policy)
             << " scorer=" << agent::ScorerName(args.scorer)
             << " budget=" << args.budget << " hdc_dim=" << args.hdc_dim
             << " seed=" << args.seed << " policy_seed=" << args.PolicySeed()
-            << " hdc_seed=" << args.HdcSeed()
-            << " llm_guide=" << args.llm_guide << "\n";
+            << " hdc_seed=" << args.HdcSeed() << " llm_guide=" << args.llm_guide
+            << "\n";
   const auto run_t0 = std::chrono::steady_clock::now();
   const agent::AgentResult res = rag.Run(&state, goal, ec);
   const double wall =
@@ -673,9 +748,9 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   for (std::size_t i = 0; i < res.chain.size(); ++i) {
     const auto& s = res.chain[i];
     cum += s.cost;
-    std::cerr << "[gar_reason] step " << i + 1 << ": "
-              << rule_ids[s.motif.rule] << " ok=" << (s.success ? 1 : 0)
-              << " cost=" << s.cost << " cum=" << cum
+    std::cerr << "[gar_reason] step " << i + 1 << ": " << rule_ids[s.motif.rule]
+              << " ok=" << (s.success ? 1 : 0) << " cost=" << s.cost
+              << " cum=" << cum
               << (s.derived ? " derived=" + FormatFact(g, *s.derived) : "")
               << "\n";
   }
@@ -685,7 +760,8 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << " termination=" << res.termination << " wall=" << wall << "s\n";
 
   // ---- optional soundness cross-check against the full closure (L4
-  // composition: the agent library itself never sees gar::core::engine::deduction) ----
+  // composition: the agent library itself never sees
+  // gar::core::engine::deduction) ----
   bool sound = true;
   if (args.verify_against_closure) {
     const auto v_t0 = std::chrono::steady_clock::now();
@@ -696,11 +772,11 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
     const gar::core::engine::chase::ChaseConfig closure_cfg;
     const auto closure = closure_engine.Run(rules, closure_cfg);
     for (const auto& e : res.derived) {
-      if (g2.RelationPairSet(e.slot)
-              .count(gar::core::graph::PackPair(e.src, e.dst)) == 0) {
+      if (g2.RelationPairSet(e.slot).count(
+              gar::core::graph::PackPair(e.src, e.dst)) == 0) {
         sound = false;
-        std::cerr << "[gar_reason] SOUNDNESS VIOLATION: "
-                  << FormatFact(g, e) << " not in closure\n";
+        std::cerr << "[gar_reason] SOUNDNESS VIOLATION: " << FormatFact(g, e)
+                  << " not in closure\n";
       }
     }
     std::cerr << "[gar_reason] verify-against-closure: soundness="
@@ -728,8 +804,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
         if (u) f << ",";
         f << g.EntityName(s.motif.embedding[u]);
       }
-      f << '\t' << (s.success ? 1 : 0) << '\t' << s.cost << '\t' << acc
-        << '\t'
+      f << '\t' << (s.success ? 1 : 0) << '\t' << s.cost << '\t' << acc << '\t'
         << (s.derived ? FormatFact(g, *s.derived) : "-") << "\n";
     }
   }
@@ -765,8 +840,10 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "llm_base_url: " << args.llm_base_url << "\n"
       << "llm_model: " << args.llm_model << "\n"
       << "hdc_dim: " << args.hdc_dim << "\n"
-      << "hdc_value_backend: "
-      << gar::core::engine::agent::HdcBackendName(args.hdc_value_backend) << "\n"
+      << "relevance_model: " << args.relevance_model << "\n"
+      << "learned_handcrafted_weight: " << args.learned_handcrafted_weight << "\n"
+      << "learned_relevance_weight: " << args.learned_relevance_weight << "\n"
+      << "learned_prefilter: " << args.learned_prefilter << "\n"
       << "seed: " << args.seed << "\n"
       << "policy_seed: " << args.PolicySeed() << "\n"
       << "hdc_seed: " << args.HdcSeed() << "\n"
@@ -782,8 +859,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       // AdaDeduceExecutor instrumentation (flat fields; the event trace is
       // written to deduce_trace.tsv below).
       f << "select_events: " << res.stats->select_events << "\n"
-        << "fair_select_events: " << res.stats->fair_select_events
-        << "\n"
+        << "fair_select_events: " << res.stats->fair_select_events << "\n"
         << "evaluate_events: " << res.stats->evaluate_events << "\n"
         << "suspend_events: " << res.stats->suspend_events << "\n"
         << "revive_events: " << res.stats->revive_events << "\n"
@@ -809,20 +885,18 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
         << "derivation_wall_ms: " << res.stats->derivation_wall_ms << "\n"
         << "delta_wall_ms: " << res.stats->delta_wall_ms << "\n"
         << "delta_match_wall_ms: " << res.stats->delta_match_wall_ms << "\n"
-        << "delta_complete_wall_ms: "
-        << res.stats->delta_complete_wall_ms << "\n"
-        << "partial_complete_wall_ms: "
-        << res.stats->partial_complete_wall_ms << "\n"
-        << "partial_grow_wall_ms: " << res.stats->partial_grow_wall_ms
+        << "delta_complete_wall_ms: " << res.stats->delta_complete_wall_ms
         << "\n"
+        << "partial_complete_wall_ms: " << res.stats->partial_complete_wall_ms
+        << "\n"
+        << "partial_grow_wall_ms: " << res.stats->partial_grow_wall_ms << "\n"
         << "revival_wall_ms: " << res.stats->revival_wall_ms << "\n";
     }
     if (!args.proof_star_model.empty() && res.stats) {
       f << "proof_star:\n"
         << "  weight: " << args.proof_star_weight << "\n"
         << "  min_cost: " << args.proof_star_min_cost << "\n"
-        << "  estimated_cost: " << res.stats->proof_star_estimated_cost
-        << "\n"
+        << "  estimated_cost: " << res.stats->proof_star_estimated_cost << "\n"
         << "  active: " << (res.stats->proof_star_active ? "true" : "false")
         << "\n";
     }
@@ -869,8 +943,7 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
             << "  logical_cost: " << res.logical_cost
             << "  termination: " << res.termination << "\n";
   for (std::size_t i = 0;
-       i < res.chain.size() && i < static_cast<std::size_t>(io.print_n);
-       ++i) {
+       i < res.chain.size() && i < static_cast<std::size_t>(io.print_n); ++i) {
     const auto& s = res.chain[i];
     std::cout << "  " << i + 1 << ". " << rule_ids[s.motif.rule]
               << (s.success ? " OK " : " FAIL ")

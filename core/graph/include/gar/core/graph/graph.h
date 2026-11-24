@@ -110,7 +110,15 @@ class Graph {
   [[nodiscard]] const std::vector<std::uint64_t>& RelationPairs(
       std::uint32_t rel) const {
     EnsureSlotView(rel);
-    return slot_views_valid_[rel] ? rel_pairs_[rel] : base_->rel_pairs[rel];
+    if (!slot_views_valid_[rel]) return base_->rel_pairs[rel];
+    auto& pairs = rel_pairs_[rel];
+    const std::size_t prefix = slot_sorted_len_[rel];
+    if (prefix < pairs.size()) {
+      std::sort(pairs.begin() + prefix, pairs.end());
+      std::inplace_merge(pairs.begin(), pairs.begin() + prefix, pairs.end());
+      slot_sorted_len_[rel] = pairs.size();
+    }
+    return pairs;
   }
   // Hash view of the same pairs, for O(1) membership tests.
   [[nodiscard]] const std::unordered_set<std::uint64_t>& RelationPairSet(
@@ -236,6 +244,16 @@ class Graph {
                                    vertex_labels_.data());
     return arrays;
   }
+  // Precomputed base adjacency (sorted per-slot pairs + hash sets), shared so
+  // matchers can reuse it instead of rebuilding from raw edges.
+  [[nodiscard]] const std::vector<std::vector<std::uint64_t>>&
+  BaseRelPairs() const {
+    return base_->rel_pairs;
+  }
+  [[nodiscard]] const std::vector<std::unordered_set<std::uint64_t>>&
+  BaseRelPairSets() const {
+    return base_->rel_pair_sets;
+  }
   [[nodiscard]] std::uint64_t version() const { return version_; }
 
  private:
@@ -261,6 +279,7 @@ class Graph {
     rel_pair_sets_.clear();
     rel_pair_sets_.resize(num_slots());
     slot_views_valid_.assign(num_slots(), 0);
+    slot_sorted_len_.assign(num_slots(), 0);
     all_out_offsets_.clear();
     all_out_dsts_.clear();
     all_out_slots_.clear();
@@ -292,6 +311,12 @@ class Graph {
   mutable std::vector<std::vector<std::uint64_t>> rel_pairs_;
   mutable std::vector<std::unordered_set<std::uint64_t>> rel_pair_sets_;
   mutable std::vector<char> slot_views_valid_;
+  // Length of the sorted prefix of rel_pairs_[slot]. Delta edges are appended
+  // unsorted in O(1); ordered access sorts only the appended suffix and merges
+  // it into the sorted prefix (O(n + k log k)), instead of an O(n) sorted-vector
+  // shift per fact (O(n^2)) or a full O(n log n) re-sort per batch. The hash view
+  // rel_pair_sets_ stays eagerly maintained for O(1) membership (ContainsEdge).
+  mutable std::vector<std::size_t> slot_sorted_len_;
 
   // Local unified adjacency, used only when has_delta_ is true.
   mutable std::vector<std::uint32_t> all_out_offsets_;

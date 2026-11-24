@@ -36,9 +36,12 @@ class PatternMatcher {
  public:
   explicit PatternMatcher(const Graph& g) : g_(g) {
     if (g_.version() == 0) {
+      // Reuse the graph's already-materialized base adjacency (sorted pairs +
+      // hash sets) instead of rebuilding it from raw edges (O(E log E)).
       static_index_ = std::make_unique<
           sics::matrixgraph::core::task::cpu_task::HomMatchIndex>(
-          g_.Arrays(), static_cast<int>(g_.num_relations()));
+          g_.BaseRelPairs(), g_.BaseRelPairSets(),
+          static_cast<int>(g_.num_relations()));
     }
   }
 

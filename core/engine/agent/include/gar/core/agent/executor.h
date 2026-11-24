@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "gar/core/analysis/dependency_graph.h"
 #include "gar/core/agent/config.h"
 #include "gar/core/agent/cost_model.h"
 #include "gar/core/agent/goal.h"
@@ -20,6 +19,7 @@
 #include "gar/core/agent/scorer.h"
 #include "gar/core/agent/state.h"
 #include "gar/core/agent/witness.h"
+#include "gar/core/analysis/dependency_graph.h"
 #include "gar/core/hdc/encoder.h"
 
 namespace gar::core::engine {
@@ -52,9 +52,12 @@ struct ExecConfig {
   // soft size threshold. Zero defers completion until every star is expanded.
   std::uint64_t revival_threshold = 0;
   // Input preserves rule-path order; goal stable-sorts stars by
-  // consequent-to-goal DG distance. Both expand every cone star unless the
-  // goal, a cap, or a budget/wall limit stops the run.
+  // consequent-to-goal DG distance; learned picks between the two per goal via
+  // star_order_model_path. All expand every cone star unless the goal, a cap,
+  // or a budget/wall limit stops the run.
   StarOrder star_order = StarOrder::kInput;
+  // Goal-level logistic model (gar_star_order_v1) for StarOrder::kLearned.
+  std::string star_order_model_path;
   // Initial LLM star-guide strength; zero disables the guide.
   double guide_strength = 0.0;
   // Positive weight enables proof-efficiency ordering. Goal-head stars use
@@ -62,28 +65,33 @@ struct ExecConfig {
   // star and blends efficiency into the remainder. Zero preserves baseline.
   double proof_star_weight = 0.0;
   double proof_star_min_cost = 0.0;
-  // Optional per-evaluated-action trace for offline cost-to-go training.
-  // Empty disables all tracing overhead; labels are finite only on goal hits.
-  std::string q_trace_path;
   // Optional decision replay trace. Every chosen action is recorded; sampled
   // states additionally include their best unchosen ready actions.
   std::string decision_trace_path;
   std::uint64_t decision_sample_stride = 0;
   std::uint32_t decision_alternative_count = 0;
+  std::string policy_trace_path;
+  std::uint32_t policy_trace_negative_count = 256;
   std::uint32_t backward_max_depth = 64;
   std::uint64_t backward_max_calls = 100000;
+  // Learned strategy selector (path C): a goal-level logistic model predicting
+  // backward success from cone size and predicate degree. When set, the
+  // LearnedStrategyExecutor routes to backward only if predicted to succeed.
+  std::string strategy_model_path;
 };
 
 // The collaborators an executor needs; ReasoningAgent fills it from its
 // injected components.
 class ValueModel;
+namespace learning {
+class RelevanceModel;
+}  // namespace learning
 struct ExecKit {
   const Scorer* scorer;
   Policy* policy;
   const CostModel* cost_model;
-  // Optional value model for BNB branch or AdaDeduce action ordering.
-  const ValueModel* value_model = nullptr;
   const ValueModel* proof_star_model = nullptr;
+  const learning::RelevanceModel* relevance_model = nullptr;
   LlmStarGuide* star_guide = nullptr;
   PaperGuide* paper_guide = nullptr;
 };
@@ -93,12 +101,15 @@ struct AgentStep {
   bool success = false;
   double cost = 0.0;
   std::optional<gar::core::graph::DerivedEdge> derived;
+  std::uint64_t action_id = 0;
+  double handcrafted_score = 0.0;
 };
 
 struct AgentResult {
   std::vector<AgentStep> chain;
-  std::vector<gar::core::graph::DerivedEdge> derived;  // every fact derived, in order
-  double logical_cost = 0.0;      // charged action cost used by the budget
+  std::vector<gar::core::graph::DerivedEdge>
+      derived;                     // every fact derived, in order
+  double logical_cost = 0.0;       // charged action cost used by the budget
   double execution_cost_ms = 0.0;  // measured non-overlapping execution phases
   bool goal_derived = false;
   bool budget_exhausted = false;
@@ -114,12 +125,12 @@ struct AgentResult {
   struct DeduceStats {
     std::uint64_t select_events = 0;
     std::uint64_t fair_select_events = 0;
-    std::uint64_t evaluate_events = 0;   // == search_cost charged
+    std::uint64_t evaluate_events = 0;  // == search_cost charged
     std::uint64_t suspend_events = 0;
     std::uint64_t revive_events = 0;
     std::uint64_t prune_events = 0;
     std::uint64_t derive_events = 0;
-    std::uint64_t candidate_caps = 0;    // enumerations that hit match cap
+    std::uint64_t candidate_caps = 0;  // enumerations that hit match cap
     std::uint64_t ready_peak = 0;
     std::uint64_t suspended_peak = 0;
     std::uint64_t generation_events = 0;
@@ -137,6 +148,15 @@ struct AgentResult {
     double ready_remove_wall_ms = 0.0;
     double evaluation_wall_ms = 0.0;
     double derivation_wall_ms = 0.0;
+    // Derive() sub-phase breakdown (probe for the per-fact derivation cost).
+    double derive_apply_ms = 0.0;
+    double derive_ground_ms = 0.0;
+    double derive_witness_ms = 0.0;
+    double derive_chain_ms = 0.0;
+    double derive_trace_ms = 0.0;
+    // GenerateStar() sub-phase breakdown (probe for generation cost).
+    double gen_match_ms = 0.0;
+    double gen_add_ms = 0.0;
     double delta_wall_ms = 0.0;
     double delta_match_wall_ms = 0.0;
     double delta_complete_wall_ms = 0.0;
@@ -154,9 +174,8 @@ class Executor {
  public:
   virtual ~Executor() = default;
   virtual AgentResult Run(const Goal& goal, AgentState* state,
-                          WitnessLog* witness,
-                          const AgentContext& ctx, const ExecConfig& cfg,
-                          const ExecKit& kit) = 0;
+                          WitnessLog* witness, const AgentContext& ctx,
+                          const ExecConfig& cfg, const ExecKit& kit) = 0;
 };
 
 // AdaDeduceExecutor: two working sets
@@ -171,15 +190,39 @@ class Executor {
 class AdaDeduceExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
-                  const AgentContext& ctx,
-                  const ExecConfig& cfg, const ExecKit& kit) override;
+                  const AgentContext& ctx, const ExecConfig& cfg,
+                  const ExecKit& kit) override;
 };
 
 class BackwardExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
-                  const AgentContext& ctx,
-                  const ExecConfig& cfg, const ExecKit& kit) override;
+                  const AgentContext& ctx, const ExecConfig& cfg,
+                  const ExecKit& kit) override;
+};
+
+// HybridExecutor: proof-directed backward first, forward fallback. Backward
+// derives a goal with very few facts when its reverse search stays bounded, but
+// fails on central predicates (call/depth limit). On failure we run forward
+// AdaDeduce from the state backward left, so the goal is still completed. The
+// returned result merges both phases (derived facts, chain, costs).
+class HybridExecutor final : public Executor {
+ public:
+  AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
+                  const AgentContext& ctx, const ExecConfig& cfg,
+                  const ExecKit& kit) override;
+};
+
+// LearnedStrategyExecutor: a goal-level learned gate over the hybrid. A logistic
+// model on dependency-cone size and predicate degree predicts whether backward
+// search will succeed; route to backward (+ forward fallback) only when predicted
+// to succeed, otherwise run forward directly. This skips futile backward attempts
+// on central predicates while keeping the proof-directed gain on shallow goals.
+class LearnedStrategyExecutor final : public Executor {
+ public:
+  AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
+                  const AgentContext& ctx, const ExecConfig& cfg,
+                  const ExecKit& kit) override;
 };
 
 }  // namespace agent

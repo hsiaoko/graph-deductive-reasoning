@@ -69,6 +69,35 @@ project(gar_apps LANGUAGES CXX)
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
 
+    add_executable(gar_train_policy gar_train_policy.cpp)
+    target_link_libraries(gar_train_policy PRIVATE
+        gar::core::graph gar::core::analysis gar::core::engine::agent
+    )
+    target_compile_features(gar_train_policy PRIVATE cxx_std_20)
+
+    # Diagnostic probe: HDC action-goal similarity vs handcrafted score for
+    # proof-membership AUC. Throwaway instrument, not a product surface.
+    add_executable(gar_hdc_probe gar_hdc_probe.cpp)
+    target_link_libraries(gar_hdc_probe PRIVATE
+        gar::core::graph gar::core::analysis gar::core::engine::agent
+    )
+    target_compile_features(gar_hdc_probe PRIVATE cxx_std_20)
+
+    # Diagnostic probe: multi-hop graph proximity (BFS distance) for
+    # proof-membership AUC. Throwaway instrument, not a product surface.
+    add_executable(gar_graph_probe gar_graph_probe.cpp)
+    target_link_libraries(gar_graph_probe PRIVATE
+        gar::core::graph gar::core::analysis gar::core::engine::agent
+    )
+    target_compile_features(gar_graph_probe PRIVATE cxx_std_20)
+
+    # Diagnostic feature extractor for the learned strategy selector (path C).
+    add_executable(gar_goal_features gar_goal_features.cpp)
+    target_link_libraries(gar_goal_features PRIVATE
+        gar::core::graph gar::core::analysis gar::core::engine::agent
+    )
+    target_compile_features(gar_goal_features PRIVATE cxx_std_20)
+
     add_executable(gar_reason gar_reason.cu)
     target_link_libraries(gar_reason PRIVATE gar::core::graph gar::core::engine::chase gar::core::engine::agent)
     target_compile_options(gar_reason PRIVATE

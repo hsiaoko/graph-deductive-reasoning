@@ -151,10 +151,9 @@ double GuidedPolicy::SelectionPriority(std::uint64_t action_id, double total) {
   return base_->SelectionPriority(action_id, total);
 }
 
-double GuidedPolicy::SelectionPriorityWithFeatures(
-    std::uint64_t action_id, double total,
-    const std::array<double, 11>& features) {
-  return base_->SelectionPriorityWithFeatures(action_id, total, features);
+double GuidedPolicy::SelectionPriorityForCandidate(
+    std::uint64_t action_id, const ScoredMotif& candidate) {
+  return base_->SelectionPriorityForCandidate(action_id, candidate);
 }
 
 void GuidedPolicy::ReleaseSelectionPriority(std::uint64_t action_id) {

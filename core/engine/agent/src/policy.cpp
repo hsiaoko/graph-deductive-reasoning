@@ -6,7 +6,6 @@
 #include "gar/core/agent/policy.h"
 
 #include "gar/core/analysis/predicate_table.h"
-#include "gar/core/agent/value_model.h"
 #include "rule_support.h"
 
 #include <stdexcept>
@@ -349,10 +348,9 @@ double AdaptivePolicy::SelectionPriority(std::uint64_t action_id, double total) 
   return Current().SelectionPriority(action_id, total);
 }
 
-double AdaptivePolicy::SelectionPriorityWithFeatures(
-    std::uint64_t action_id, double total,
-    const std::array<double, 11>& features) {
-  return Current().SelectionPriorityWithFeatures(action_id, total, features);
+double AdaptivePolicy::SelectionPriorityForCandidate(
+    std::uint64_t action_id, const ScoredMotif& candidate) {
+  return Current().SelectionPriorityForCandidate(action_id, candidate);
 }
 
 void AdaptivePolicy::ReleaseSelectionPriority(std::uint64_t action_id) {
@@ -398,46 +396,6 @@ std::optional<std::size_t> ReplayPolicy::Select(
     const std::vector<ScoredMotif>& cands) {
   (void)cands;
   throw std::logic_error("ReplayPolicy requires incremental action IDs");
-}
-
-double LearnedQPolicy::SelectionPriorityWithFeatures(
-    std::uint64_t action_id, double total,
-    const std::array<double, 11>& features) {
-  (void)action_id;
-  (void)total;
-  return -model_->PredictRemaining(features);
-}
-
-std::optional<std::size_t> LearnedQPolicy::Select(
-    const std::vector<ScoredMotif>& cands) {
-  (void)cands;
-  throw std::logic_error("LearnedQPolicy requires AdaDeduce feature selection");
-}
-
-std::optional<std::size_t> LearnedQPolicy::SelectScores(
-    const std::vector<double>& totals, const std::vector<char>& admissible) {
-  (void)totals;
-  (void)admissible;
-  throw std::logic_error("LearnedQPolicy requires AdaDeduce feature selection");
-}
-
-std::vector<std::size_t> LearnedQPolicy::SelectBatch(
-    const std::vector<BatchCandidate>& cands, std::size_t max_actions) {
-  std::vector<std::pair<double, std::size_t>> predictions;
-  predictions.reserve(cands.size());
-  for (std::size_t i = 0; i < cands.size(); ++i) {
-    predictions.emplace_back(model_->PredictRemaining(*cands[i].features), i);
-  }
-  std::stable_sort(predictions.begin(), predictions.end(),
-                   [](const auto& a, const auto& b) { return a.first < b.first; });
-  std::vector<std::size_t> indices;
-  indices.reserve(std::min(max_actions, predictions.size()));
-  for (const auto& [prediction, index] : predictions) {
-    (void)prediction;
-    indices.push_back(index);
-  }
-  indices.resize(std::min(max_actions, indices.size()));
-  return indices;
 }
 
 }  // namespace agent

@@ -7,6 +7,7 @@
 
 #include "gar/core/analysis/dependency_graph.h"
 #include "gar/core/agent/state.h"
+#include "gar/core/agent/fact_encoder.h"
 #include "gar/core/agent/witness.h"
 #include "gar/core/hdc/evidence.h"
 
@@ -15,7 +16,8 @@ namespace agent {
 
 namespace {
 
-double RelFam(const GARule& rule, const ScoringContext& ctx, double gamma) {
+double RelFam(const GARule& rule, const ScoringContext& ctx,
+              const HandcraftedConfig& cfg) {
   if (!rule.consequent) return 0.0;
   const std::uint32_t id = ctx.predicates->Find(
       gar::core::analysis::PredicateIdOf(*rule.consequent, rule));
@@ -23,7 +25,10 @@ double RelFam(const GARule& rule, const ScoringContext& ctx, double gamma) {
       (*ctx.distances)[id] == gar::core::analysis::kUnreachable) {
     return 0.0;
   }
-  return std::pow(gamma, (*ctx.distances)[id]);
+  double weight = std::pow(cfg.gamma, (*ctx.distances)[id]);
+  const auto prior = cfg.predicate_prior.find(id);
+  if (prior != cfg.predicate_prior.end()) weight *= prior->second;
+  return weight;
 }
 
 // d(p0): distance of the consequent's predicate to the goal.
@@ -89,7 +94,7 @@ double Total(const HandcraftedConfig& cfg, double confidence,
 void FillScoredRule(const HandcraftedConfig& cfg, const CostModel& cost,
                     const GARule& rule, const ScoringContext& ctx,
                     ScoredRule* out) {
-  out->rel_fam = RelFam(rule, ctx, cfg.gamma);
+  out->rel_fam = RelFam(rule, ctx, cfg);
   out->confidence = cfg.use_confidence ? rule.quality.confidence : 0.0;
   const std::uint32_t dp0 = HeadDistance(rule, ctx);
   out->price = dp0 == gar::core::analysis::kUnreachable
@@ -124,7 +129,7 @@ void HdcScorer::ScoreRule(const GARule& rule, const ScoringContext& ctx,
 void ExactScorer::Score(const GARule& rule, const Motif& mu,
                         const ScoringContext& ctx, ScoredMotif* out) const {
   out->motif = mu;
-  out->rel_fam = RelFam(rule, ctx, cfg_.gamma);
+  out->rel_fam = RelFam(rule, ctx, cfg_);
   FillPriceAdmissible(rule, mu, ctx, *cost_, out);
 
   const std::vector<Fact> premises = DistinctPremises(rule, mu, ctx);
@@ -146,7 +151,7 @@ void ExactScorer::Score(const GARule& rule, const Motif& mu,
 void HdcScorer::Score(const GARule& rule, const Motif& mu,
                       const ScoringContext& ctx, ScoredMotif* out) const {
   out->motif = mu;
-  out->rel_fam = RelFam(rule, ctx, cfg_.gamma);
+  out->rel_fam = RelFam(rule, ctx, cfg_);
   FillPriceAdmissible(rule, mu, ctx, *cost_, out);
 
   const std::vector<Fact> premises = DistinctPremises(rule, mu, ctx);
