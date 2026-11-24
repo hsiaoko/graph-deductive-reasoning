@@ -21,6 +21,7 @@ add_library(gar_engine_agent STATIC
     src/backward_executor.cpp
     src/hybrid_executor.cpp
     src/learned_strategy_executor.cpp
+    src/bidirectional_executor.cpp
     src/batch_session.cpp
     src/match_backend.cpp
     src/cpu_match_backend.cpp

@@ -22,9 +22,12 @@ struct ChaseConfig {
   std::uint64_t max_derivations = 10'000'000;      // total new-facts cap
   std::uint32_t max_rounds = 100;
   bool keep_matches = true;  // retain final-round embeddings for output
-  // CPU engine: oneTBB max_allowed_parallelism (0 = all cores). The GPU
-  // engine ignores it (its host-side work is tiny).
-  std::uint32_t threads = 0;
+  // CPU engine: oneTBB max_allowed_parallelism (0 = all cores). Default 1 so
+  // chase wall is measured single-threaded, matching the agent and dep-only
+  // baselines (which are serial); otherwise chase would silently use all cores
+  // and the cross-method wall comparison would be unfair. The GPU engine
+  // ignores it (its host-side work is tiny).
+  std::uint32_t threads = 1;
   // Optional (slot, src, dst) goal. CPU naive chase stops after the round
   // that derives it; nullopt preserves the ordinary full-closure behavior.
   std::optional<std::array<std::uint32_t, 3>> stop_edge;

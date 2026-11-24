@@ -19,6 +19,12 @@ enum class SearchDirection {
   // success from cone size and predicate degree, routing to backward only when
   // predicted to succeed (skips futile backward on central predicates).
   kLearnedStrategy,
+  // Bidirectional proof search: a bounded backward attempt first (wins shallow
+  // goals cheaply), then alternating bounded forward frontier passes and
+  // backward connect passes over shared state. Forward derives the middle facts
+  // backward's reverse search would otherwise recurse to find, so the two meet
+  // in the middle instead of backward exploding on central predicates.
+  kBidirectional,
 };
 
 enum class PolicyKind {
@@ -61,6 +67,8 @@ inline const char* SearchDirectionName(SearchDirection direction) {
       return "hybrid";
     case SearchDirection::kLearnedStrategy:
       return "learned-strategy";
+    case SearchDirection::kBidirectional:
+      return "bidirectional";
   }
   return "forward";
 }

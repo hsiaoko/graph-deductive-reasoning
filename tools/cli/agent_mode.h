@@ -41,6 +41,8 @@ struct AgentModeArgs {
       gar::core::engine::agent::SearchDirection::kForward;
   std::uint32_t backward_max_depth = 64;
   std::uint64_t backward_max_calls = 100000;
+  std::uint64_t bidirectional_forward_budget = 2000;
+  std::uint32_t bidirectional_rounds = 8;
   std::string strategy_model_path;
   std::uint64_t budget = 100;
   std::uint32_t batch_size = 1;
@@ -129,6 +131,7 @@ inline gar::core::engine::agent::SearchDirection ParseSearchDirection(
   if (value == "backward") return SearchDirection::kBackward;
   if (value == "hybrid") return SearchDirection::kHybrid;
   if (value == "learned-strategy") return SearchDirection::kLearnedStrategy;
+  if (value == "bidirectional") return SearchDirection::kBidirectional;
   throw std::invalid_argument("unknown --search-direction: " + value +
                               " (forward|backward|hybrid|learned-strategy)");
 }
@@ -190,6 +193,8 @@ inline gar::core::engine::agent::ExecConfig MakeExecConfig(
   config.policy_trace_negative_count = args.policy_trace_negative_count;
   config.backward_max_depth = args.backward_max_depth;
   config.backward_max_calls = args.backward_max_calls;
+  config.bidirectional_forward_budget = args.bidirectional_forward_budget;
+  config.bidirectional_rounds = args.bidirectional_rounds;
   config.strategy_model_path = args.strategy_model_path;
   config.seed = args.PolicySeed();
   return config;
@@ -215,6 +220,10 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->backward_max_depth = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--backward-max-calls")
     a->backward_max_calls = std::stoull(next());
+  else if (k == "--bidirectional-forward-budget")
+    a->bidirectional_forward_budget = std::stoull(next());
+  else if (k == "--bidirectional-rounds")
+    a->bidirectional_rounds = static_cast<std::uint32_t>(std::stoul(next()));
   else if (k == "--strategy-model")
     a->strategy_model_path = next();
   else if (k == "--budget")
@@ -640,6 +649,8 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
     comps.executor = std::make_unique<agent::HybridExecutor>();
   } else if (args.search_direction == agent::SearchDirection::kLearnedStrategy) {
     comps.executor = std::make_unique<agent::LearnedStrategyExecutor>();
+  } else if (args.search_direction == agent::SearchDirection::kBidirectional) {
+    comps.executor = std::make_unique<agent::BidirectionalExecutor>();
   } else {
     comps.executor = std::make_unique<agent::AdaDeduceExecutor>();
   }

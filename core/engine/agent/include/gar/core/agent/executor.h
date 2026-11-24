@@ -74,6 +74,11 @@ struct ExecConfig {
   std::uint32_t policy_trace_negative_count = 256;
   std::uint32_t backward_max_depth = 64;
   std::uint64_t backward_max_calls = 100000;
+  // Bidirectional search: after the initial bounded backward attempt fails,
+  // alternate forward frontier passes and backward connect passes. Each forward
+  // pass is bounded by this logical-cost budget; rounds caps the alternation.
+  std::uint64_t bidirectional_forward_budget = 2000;
+  std::uint32_t bidirectional_rounds = 8;
   // Learned strategy selector (path C): a goal-level logistic model predicting
   // backward success from cone size and predicate degree. When set, the
   // LearnedStrategyExecutor routes to backward only if predicted to succeed.
@@ -219,6 +224,19 @@ class HybridExecutor final : public Executor {
 // to succeed, otherwise run forward directly. This skips futile backward attempts
 // on central predicates while keeping the proof-directed gain on shallow goals.
 class LearnedStrategyExecutor final : public Executor {
+ public:
+  AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
+                  const AgentContext& ctx, const ExecConfig& cfg,
+                  const ExecKit& kit) override;
+};
+
+// BidirectionalExecutor: bounded backward first, then alternating bounded
+// forward frontier passes and backward connect passes over shared state. The
+// forward passes derive the middle facts that backward's reverse search would
+// otherwise recurse to find, so the two searches meet in the middle. Keeps
+// backward's cheap win on shallow goals and extends proof-directed search to
+// central predicates where backward alone explodes.
+class BidirectionalExecutor final : public Executor {
  public:
   AgentResult Run(const Goal& goal, AgentState* state, WitnessLog* witness,
                   const AgentContext& ctx, const ExecConfig& cfg,

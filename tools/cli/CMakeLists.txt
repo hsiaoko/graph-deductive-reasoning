@@ -98,6 +98,12 @@ project(gar_apps LANGUAGES CXX)
     )
     target_compile_features(gar_goal_features PRIVATE cxx_std_20)
 
+    add_executable(gar_cone_union gar_cone_union.cpp)
+    target_link_libraries(gar_cone_union PRIVATE
+        gar::core::graph gar::core::analysis
+    )
+    target_compile_features(gar_cone_union PRIVATE cxx_std_20)
+
     add_executable(gar_reason gar_reason.cu)
     target_link_libraries(gar_reason PRIVATE gar::core::graph gar::core::engine::chase gar::core::engine::agent)
     target_compile_options(gar_reason PRIVATE
