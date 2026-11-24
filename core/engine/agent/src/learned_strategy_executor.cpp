@@ -29,8 +29,12 @@ AgentResult LearnedStrategyExecutor::Run(const Goal& goal, AgentState* state,
     HybridExecutor hybrid;
     return hybrid.Run(goal, state, witness, ctx, cfg, kit);
   }
-  AdaDeduceExecutor forward;
-  return forward.Run(goal, state, witness, ctx, cfg, kit);
+  // Backward predicted to fail (central predicate): route to bidirectional
+  // search rather than pure forward. It attempts a bounded backward connect
+  // against a forward frontier before falling back to full forward, so it is
+  // never worse than forward and can meet in the middle on provable hard goals.
+  BidirectionalExecutor bidirectional;
+  return bidirectional.Run(goal, state, witness, ctx, cfg, kit);
 }
 
 }  // namespace gar::core::engine::agent
