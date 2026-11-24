@@ -12,7 +12,6 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "experiments/llm_guide/run_fb15k_jev.py"
-REPORT = ROOT / "experiments/llm_guide/write_full_report.py"
 STATUS = ROOT / ".work_hdcv/fb15k_full_queue_status.json"
 SERVICE_LOG = ROOT / ".work_hdcv/fb15k_jev_service.log"
 SERVICE_PID = ROOT / ".work_hdcv/fb15k_jev_service.pid"
@@ -150,11 +149,10 @@ def command_for(slug):
         command += ["--base-policy", "random"]
     else:
         command += [
-            "--base-policy", "learned", "--value-model",
-            str(ROOT / f".work_hdcv/fixpoint_q640/models/q_{slug}.meta"),
+            "--base-policy", "learned", "--relevance-model",
+            str(ROOT / ".work_hdcv/relevance640/models/selected.meta"),
+            "--hdc-dim", "128",
         ]
-        if slug == "hdc":
-            command += ["--hdc-value-backend", "original"]
     return command
 
 
@@ -203,7 +201,7 @@ def validate_raw_runs(work):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--numeric-pid", type=int)
+    parser.add_argument("--learned-pid", type=int)
     parser.add_argument("--existing-jev-pid", type=int)
     args = parser.parse_args()
     if args.existing_jev_pid is not None:
@@ -211,19 +209,16 @@ def main():
     try:
         write_status("queue_started", pid=os.getpid())
         ensure_service()
-        if args.numeric_pid is not None:
-            wait_for_external("numeric", args.numeric_pid)
-        for slug in ("numeric", "random", "hdc"):
+        if args.learned_pid is not None:
+            wait_for_external("learned", args.learned_pid)
+        for slug in ("learned", "random"):
             run_suite(slug)
-        subprocess.run(["python3", str(REPORT)], cwd=ROOT, check=True)
         counts = {slug: validate_raw_runs(
             ROOT / f".work_hdcv/fb15k_jev640_{slug}")
-            for slug in ("numeric", "random", "hdc")}
+            for slug in ("learned", "random")}
         counts["deterministic"] = validate_raw_runs(
             ROOT / ".work_hdcv/fb15k_jev640")
-        write_status("complete", runs=counts,
-                     total_runs=sum(counts.values()),
-                     report="experiments/fb15k-237-results/full-performance-report.md")
+        write_status("complete", runs=counts, total_runs=sum(counts.values()))
     except Exception as error:
         write_status("failed", error=str(error))
         raise

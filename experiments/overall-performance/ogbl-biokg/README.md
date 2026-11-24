@@ -11,12 +11,12 @@ Compare five methods on one BioKG graph, one frozen rule set, and the same 36 gr
 1. **Deterministic**: deterministic action selection using the exact handcrafted score.
 2. **DepOnly**: dependency-cone reasoning with every other optimization disabled.
 3. **Random**: softmax action selection using the exact score.
-4. **Learned**: action-level numeric-Q that predicts remaining evaluation cost.
+4. **Learned**: action-goal HDC relevance regression with deterministic Top-k selection.
 5. **AdaDeduceStar**: the proof-star extension with learned proof-efficiency star ordering, exact deterministic action selection, and executor optimizations. Learning may reorder within a goal-distance bucket but cannot promote a high-yield distant star across buckets.
 
 This experiment does not use an LLM or JEV. Chase produces ground truth and a non-equivalent work reference; it is not ranked as a sixth goal-directed method.
 
-The AdaDeduce executor is shared by several agent arms. **AdaDeduceStar** names this proof-star variant, while **Learned** names action-level numeric-Q. They are not interchangeable.
+The AdaDeduce executor is shared by several agent arms. **AdaDeduceStar** names this proof-star variant, while **Learned** names action-goal relevance regression. They are not interchangeable.
 
 ## 2. Frozen inputs
 
@@ -102,14 +102,14 @@ Select another 24 training goals, eight per stratum. They must:
 
 - differ from every test goal spec;
 - exclude all relation-disjoint test relations;
-- avoid sharing chains, proofs, Q traces, or derivation journals with test goals;
+- avoid sharing chains, proofs, policy traces, or derivation journals with test goals;
 - use the independent salt `20261117-biokg-overall-train-v1`.
 
-### Learned numeric-Q
+### Learned HDC relevance
 
-Run Deterministic and Random(seed=7) continuations for each training goal. Labels are the remaining actual evaluations from the selected action through goal arrival.
+Run Deterministic and Random(seed=7) continuations for each training goal. Extract the goal proof DAG from each successful policy trace. Assign `label_gamma^distance` to proof actions and zero to sampled candidates outside the proof. Repeated fact-goal pairs use the smallest observed distance.
 
-Sample at most 256 evenly spaced rows per successful trajectory. Do not assign artificial finite labels to failed trajectories or unobserved alternative actions. Fit features and normalization using training goals only.
+Use only goal-hit traces. Split training, validation, and test by goal. Fit the model on the HDC action vector, HDC goal vector, and current handcrafted score. Do not use test-goal ranking or wall time to select the model.
 
 ### AdaDeduceStar proof-star model
 
@@ -134,7 +134,7 @@ Persist `trained_on`, feature version, training rows, seed, and model hash for b
 | DepOnly | `--mode dep-only`; fixed input order, single-threaded goal-cone Chase, no scoring, learning, ready heap, delta optimization, precondition cache, or R/W scheduler |
 | Deterministic | `--policy deterministic --scorer exact --star-order goal` with the optimized executor and no learning |
 | Random | `--policy random --scorer exact --star-order goal` with score-based softmax |
-| Learned | `--policy learned --scorer exact --star-order goal --value-model <biokg-q-numeric>` |
+| Learned | `--policy learned --scorer exact --star-order goal --relevance-model <biokg-relevance>` |
 | AdaDeduceStar | `--policy deterministic --scorer exact --star-order goal --proof-star-model <biokg-proof-efficiency-model> --proof-star-weight 0.5 --proof-star-min-cost 0` |
 
 `--scorer null` still uses the optimized AdaDeduce executor and cannot represent DepOnly. All arms use CPU and no LLM.

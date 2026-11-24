@@ -100,7 +100,7 @@ def extract_proof(run, rule_edges):
 
 def static_features(run, rule_ids):
     result = {}
-    with (run / "q_trace.tsv").open() as stream:
+    with (run / "decision_trace.tsv").open() as stream:
         reader = csv.DictReader(stream, delimiter="\t")
         for row in reader:
             rule = int(row["rule"])

@@ -11,7 +11,7 @@ import run_full_queue as infra
 
 ROOT = Path(__file__).resolve().parents[2]
 TRAIN_GOALS = ROOT / ".work_hdcv/fixpoint_q640/train_goals.tsv"
-MODEL = ROOT / ".work_hdcv/fixpoint_q640/models/q_numeric.meta"
+MODEL = ROOT / ".work_hdcv/relevance640/models/selected.meta"
 PROBE = ROOT / ".work_hdcv/adaptive_gate_train_probe_cpu"
 GUIDED = ROOT / ".work_hdcv/adaptive_gate_train_guided_cpu"
 SELECTION = ROOT / ".work_hdcv/adaptive_gate_selection_cpu.json"
@@ -46,7 +46,7 @@ def run_guided():
         subprocess.run([
             "python3", str(ROOT / "experiments/llm_guide/run_fb15k_jev.py"),
             "--work", str(GUIDED), "--goals", str(TRAIN_GOALS),
-            "--base-policy", "adaptive", "--value-model", str(MODEL),
+            "--base-policy", "adaptive", "--relevance-model", str(MODEL), "--hdc-dim", "128",
             "--arm", "jev", "--guide-min-cost", "0",
             "--guide-max-options", "64", "--phase", "all",
         ], cwd=ROOT, check=False)
@@ -93,12 +93,9 @@ def main():
         subprocess.run([
             "python3", str(ROOT / "experiments/llm_guide/run_fb15k_jev.py"),
             "--work", str(TEST), "--base-policy", "adaptive",
-            "--value-model", str(MODEL), "--guide-min-cost",
+            "--relevance-model", str(MODEL), "--hdc-dim", "128", "--guide-min-cost",
             str(selected["selected_threshold"]), "--guide-max-options", "64",
             "--phase", "all",
-        ], cwd=ROOT, check=True)
-        subprocess.run([
-            "python3", str(ROOT / "experiments/llm_guide/write_full_report.py")
         ], cwd=ROOT, check=True)
         write_status("complete", outcome="tested", selection=str(SELECTION),
                      report=str(TEST / "summary.md"))

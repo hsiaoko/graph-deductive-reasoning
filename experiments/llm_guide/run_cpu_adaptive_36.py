@@ -10,7 +10,7 @@ import run_full_queue as infra
 ROOT = Path(__file__).resolve().parents[2]
 WORK = ROOT / ".work_hdcv/adaptive_fb15k_cpu_fixed"
 STATUS = ROOT / ".work_hdcv/adaptive_fb15k_cpu_fixed_status.json"
-MODEL = ROOT / ".work_hdcv/fixpoint_q640/models/q_numeric.meta"
+MODEL = ROOT / ".work_hdcv/relevance640/models/selected.meta"
 
 
 def write_status(state, **extra):
@@ -34,7 +34,7 @@ def main():
             result = subprocess.run([
                 "python3", str(ROOT / "experiments/llm_guide/run_fb15k_jev.py"),
                 "--work", str(WORK), "--engine", "cpu",
-                "--base-policy", "adaptive", "--value-model", str(MODEL),
+                "--base-policy", "adaptive", "--relevance-model", str(MODEL), "--hdc-dim", "128",
                 "--guide-min-cost", "0", "--guide-max-options", "64",
                 "--phase", "all",
             ], cwd=ROOT, check=False)

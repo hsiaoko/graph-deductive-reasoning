@@ -3,7 +3,6 @@ import argparse
 import csv
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -108,32 +107,19 @@ def agent_command(goal, output):
 
 
 def trace():
-    with (WORK / "train_goals.tsv").open() as stream:
-        goals = list(csv.DictReader(stream, delimiter="\t"))
-    for goal in goals:
-        for policy in ("deterministic", "random"):
-            name = f"{goal['goal_id']}/{policy}"
-            output = WORK / "traces" / name
-            command = agent_command(goal, output) + [
-                "--policy", policy, "--policy-seed", "7",
-                "--q-trace", output / "q_trace.tsv"]
-            run(name, command, WORK / "traces")
+    import run_relevance
+    return run_relevance.trace(0)
 
 
 def evaluate():
-    with (WORK / "test_goals.tsv").open() as stream:
-        goals = list(csv.DictReader(stream, delimiter="\t"))
-    for goal in goals:
-        for arm, policy, model in (("det", "deterministic", None),
-                                   ("q_numeric", "learned", WORK / "models/q_numeric.meta"),
-                                   ("q_hdc", "learned", WORK / "models/q_hdc.meta")):
-            name = f"{goal['goal_id']}/{arm}"
-            command = agent_command(goal, WORK / "runs" / name) + ["--policy", policy]
-            if model is not None:
-                command += ["--value-model", str(model), "--fair-interval", "1024"]
-            if arm == "q_hdc":
-                command += ["--hdc-value-backend", "original"]
-            run(name, command, WORK / "runs")
+    import run_relevance
+    goals = run_relevance.load_goals(run_relevance.TEST_GOALS)
+    return run_relevance.evaluate(goals, [7])
+
+
+def train():
+    import run_relevance
+    return run_relevance.train()
 
 
 def main():
@@ -148,12 +134,7 @@ def main():
     if args.phase in ("trace", "all"):
         trace()
     if args.phase in ("train", "all"):
-        env = dict(os.environ, PYTHONHASHSEED="0")
-        subprocess.run(["python3",
-                        str(ROOT / "experiments/fixpoint_policy/train_fixpoint_q.py")],
-                       cwd=ROOT, check=True, env=env)
-        subprocess.run(["./build/bin/value_model_check", str(WORK / "models/q_hdc.meta")], cwd=ROOT, check=True)
-        subprocess.run(["./build/bin/value_model_check", str(WORK / "models/q_numeric.meta")], cwd=ROOT, check=True)
+        train()
     if args.phase in ("eval", "all"):
         evaluate()
 

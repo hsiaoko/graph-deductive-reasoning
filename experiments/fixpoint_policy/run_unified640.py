@@ -12,13 +12,12 @@ ROOT = Path(__file__).resolve().parents[2]
 WORK = ROOT / ".work_hdcv/fixpoint_unified640"
 GT = ROOT / ".work_hdcv/fixpoint_rules640/runs/chase/rep1"
 SEEDS = (7, 13, 42)
-ARMS = ("goal_chase", "deterministic", "random", "q_numeric", "q_hdc")
+ARMS = ("goal_chase", "deterministic", "random", "learned")
 LABELS = {
     "goal_chase": "GoalChase",
     "deterministic": "Deterministic",
     "random": "Random",
-    "q_numeric": "Learned numeric-Q",
-    "q_hdc": "Learned HDC-Q",
+    "learned": "Learned HDC relevance",
 }
 MEDIAN_KEYS = ("wall", "internal_wall", "branches", "ready", "matches",
                "evaluations", "derived")
@@ -36,13 +35,11 @@ def command_for(goal, arm, seed):
         command += ["--policy", "deterministic", "--scorer", "exact"]
     elif arm == "random":
         command += ["--policy", "random", "--scorer", "exact"]
-    elif arm == "q_numeric":
+    elif arm == "learned":
         command += ["--policy", "learned", "--scorer", "exact",
-                    "--value-model", str(base.WORK / "models/q_numeric.meta")]
-    elif arm == "q_hdc":
-        command += ["--policy", "learned", "--scorer", "exact",
-                    "--value-model", str(base.WORK / "models/q_hdc.meta"),
-                    "--hdc-value-backend", "original"]
+                    "--relevance-model",
+                    str(ROOT / ".work_hdcv/relevance640/models/selected.meta"),
+                    "--hdc-dim", "128"]
     else:
         raise ValueError(f"unknown arm: {arm}")
     return name, command

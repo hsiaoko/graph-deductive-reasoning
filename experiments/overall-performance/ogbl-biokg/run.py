@@ -25,6 +25,12 @@ RAW_RULES = DATASET / "rules"
 WORK = ROOT / ".work_hdcv/overall-performance/ogbl-biokg"
 STATUS = WORK / "status.json"
 SEED = 7
+SEEDS = (7, 13, 42)
+# Per-stratum instance-disjoint test quotas (count, max_per_relation). The
+# relation-disjoint cohort adds 4 round1 + 4 round2 = 8 goals on top. Default
+# 8+8+12=28 instance + 8 relation = 36 goals; --instance-quota 14,14,14 gives
+# 42 instance + 8 relation = 50 goals (deep cap 7 covers its 2 relations).
+INSTANCE_QUOTAS = {"round1": (8, 2), "round2": (8, 2), "deep": (12, 6)}
 RULE_QUOTA = 32
 METHODS = ("DepOnly", "Deterministic", "Random", "Learned", "AdaDeduceStar")
 
@@ -242,8 +248,10 @@ def goal_row(raw, cohort):
             "cohort": cohort}
 
 
-def choose(candidates, count, salt, max_per_relation, excluded_specs,
-           excluded_relations, quota_per_stratum=False):
+def choose(candidates, quotas, salt, excluded_specs, excluded_relations):
+    # quotas maps stratum -> (count, max_per_relation). Per-stratum caps let the
+    # sparse BioKG deep stratum (only 2 relations) use a relaxed cap while the
+    # dense round1/round2 strata keep tight diversity caps.
     groups = {}
     for raw in candidates:
         row = goal_row(raw, "candidate")
@@ -251,15 +259,13 @@ def choose(candidates, count, salt, max_per_relation, excluded_specs,
             continue
         groups.setdefault(row["stratum"], []).append(row)
     selected = []
-    used_relations = {}
-    for stratum in ("round1", "round2", "deep"):
-        if quota_per_stratum:
-            used_relations = {}
-        rows = groups[stratum]
+    for stratum, (count, cap) in quotas.items():
+        rows = groups.get(stratum, [])
         rows.sort(key=lambda row: stable(row["spec"], salt))
+        used_relations = {}
         chosen = 0
         for row in rows:
-            if used_relations.get(row["relation"], 0) >= max_per_relation:
+            if used_relations.get(row["relation"], 0) >= cap:
                 continue
             selected.append(row)
             excluded_specs.add(row["spec"])
@@ -268,7 +274,8 @@ def choose(candidates, count, salt, max_per_relation, excluded_specs,
             if chosen == count:
                 break
         if chosen != count:
-            raise RuntimeError(f"cannot sample {count} {stratum} goals under frozen constraints")
+            raise RuntimeError(
+                f"cannot sample {count} {stratum} goals (cap {cap})")
     return selected
 
 
@@ -277,19 +284,29 @@ def freeze_goals():
     if output.exists():
         return
     closure = read_closure()
-    relation = choose(closure, 4, "20261117-biokg-overall-relation-split-v1", 2,
-                      set(), set(), quota_per_stratum=True)
+    # BioKG's deep stratum has only 2 relations (protein-protein_binding /
+    # reaction), which also occur in round1/round2. A relation-disjoint deep
+    # cohort is infeasible, and holding these relations out would leave no deep
+    # relation for train. So the relation-disjoint cohort spans round1/round2
+    # relations EXCLUDING the deep ones; deep goals are all instance-disjoint
+    # with a relaxed per-relation cap.
+    deep_relations = {goal_row(raw, "candidate")["relation"] for raw in closure
+                      if goal_row(raw, "candidate")["stratum"] == "deep"}
+    relation = choose(closure, {"round1": (4, 2), "round2": (4, 2)},
+                      "20261117-biokg-overall-relation-split-v1", set(),
+                      deep_relations)
     for row in relation:
         row["cohort"] = "relation-disjoint"
     heldout = {row["relation"] for row in relation}
     test_specs = {row["spec"] for row in relation}
-    instance = choose(closure, 8, "20261117-biokg-overall-test-v1", 2,
-                      test_specs, set())
+    instance = choose(closure, INSTANCE_QUOTAS,
+                      "20261117-biokg-overall-test-v1", test_specs, set())
     for row in instance:
         row["cohort"] = "instance-disjoint"
     test = instance + relation
-    train = choose(closure, 8, "20261117-biokg-overall-train-v1", 2,
-                   test_specs, heldout, quota_per_stratum=True)
+    train = choose(closure,
+                   {"round1": (8, 2), "round2": (8, 2), "deep": (8, 4)},
+                   "20261117-biokg-overall-train-v1", test_specs, heldout)
     for row in train:
         row["cohort"] = "train"
     for index, row in enumerate(test):
@@ -316,14 +333,15 @@ def freeze_goals():
     (WORK / "goals_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
-def agent_command(goal, output):
+def agent_command(goal, output, seed=SEED):
     return [
         "./build/bin/gar_reason", "--mode", "agent", "--engine", "cpu",
         "--csr", str(CSR), "--rules", str(WORK / "rules"),
         "--goal", goal["spec"], "--out", str(output), "--print", "0",
         "--star-order", "goal", "--scorer", "exact", "--budget", "1000000000",
-        "--wall-limit", "900", "--max-candidates-per-rule", "100000",
-        "--fair-interval", "0", "--policy-seed", str(SEED),
+        "--wall-limit", "900", "--max-candidates-per-rule", "10000000",
+        "--fair-interval", "0", "--policy-seed", str(seed),
+        "--hdc-dim", "128",
     ]
 
 
@@ -335,16 +353,21 @@ def train_models():
             name = f"traces/{goal['goal_id']}/{policy}"
             output = WORK / "runs" / name
             command = agent_command(goal, output) + [
-                "--policy", policy, "--q-trace", str(output / "q_trace.tsv"),
+                "--policy", policy,
+                "--policy-trace", str(output / "policy_trace.json"),
+                "--policy-trace-negatives", "8",
+                "--decision-trace", str(output / "decision_trace.tsv"),
             ]
             run(name, command)
-    if not (WORK / "models/q_numeric.meta").exists():
+    if not (WORK / "models/relevance.meta").exists():
         subprocess.run([
-            "python3", str(ROOT / "experiments/fixpoint_policy/train_fixpoint_q.py"),
+            "./build/bin/gar_train_policy",
+            "--csr", str(CSR), "--rules", str(WORK / "rules"),
             "--traces", str(WORK / "runs/traces"),
-            "--out", str(WORK / "models"),
+            "--out", str(WORK / "models/relevance.meta"),
             "--test-goals", str(WORK / "goals.tsv"),
-        ], cwd=ROOT, check=True, env=dict(os.environ, PYTHONHASHSEED="0"))
+            "--epochs", "8", "--batch-size", "32", "--seed", "42",
+        ], cwd=ROOT, check=True)
     if not (WORK / "proof_efficiency_model/model/proof_star.meta").exists():
         subprocess.run([
             "python3", str(ROOT / "experiments/fixpoint_policy/validate_proof_dag.py"),
@@ -359,38 +382,40 @@ def evaluate():
         goals = list(csv.DictReader(stream, delimiter="\t"))
     for goal in goals:
         for method in METHODS:
-            base.gate()
-            name = f"{goal['goal_id']}/{method}/seed7"
-            output = WORK / "runs" / name
-            if method == "DepOnly":
-                command = [
-                    "./build/bin/gar_reason", "--mode", "dep-only",
-                    "--csr", str(CSR), "--rules", str(WORK / "rules"),
-                    "--goal", goal["spec"],
-                    "--out", str(output), "--max-rounds", "100",
-                    "--max-derivations", "1000000000", "--max-matches", "100000",
-                    "--no-matches", "--print", "0",
-                ]
-            else:
-                command = agent_command(goal, output)
-                if method == "Deterministic":
-                    command += ["--policy", "deterministic"]
-                elif method == "Random":
-                    command += ["--policy", "random"]
-                elif method == "Learned":
-                    command += ["--policy", "learned", "--value-model",
-                                str(WORK / "models/q_numeric.meta")]
-                else:
-                    command += [
-                        "--policy", "deterministic", "--proof-star-model",
-                        str(WORK / "proof_efficiency_model/model/proof_star.meta"),
-                        "--proof-star-weight", "0.5", "--proof-star-min-cost", "0",
+            for seed in SEEDS:
+                base.gate()
+                name = f"{goal['goal_id']}/{method}/seed{seed}"
+                output = WORK / "runs" / name
+                if method == "DepOnly":
+                    command = [
+                        "./build/bin/gar_reason", "--mode", "dep-only",
+                        "--csr", str(CSR), "--rules", str(WORK / "rules"),
+                        "--goal", goal["spec"],
+                        "--out", str(output), "--max-rounds", "100",
+                        "--max-derivations", "1000000000",
+                        "--max-matches", "1000000000",
+                        "--no-matches", "--print", "0",
                     ]
-            run(name, command)
+                else:
+                    command = agent_command(goal, output, seed)
+                    if method == "Deterministic":
+                        command += ["--policy", "deterministic"]
+                    elif method == "Random":
+                        command += ["--policy", "random"]
+                    elif method == "Learned":
+                        command += ["--policy", "learned", "--relevance-model",
+                                    str(WORK / "models/relevance.meta")]
+                    else:
+                        command += [
+                            "--policy", "deterministic", "--proof-star-model",
+                            str(WORK / "proof_efficiency_model/model/proof_star.meta"),
+                            "--proof-star-weight", "0.5", "--proof-star-min-cost", "0",
+                        ]
+                run(name, command)
 
 
-def read_run(goal, method):
-    run_dir = WORK / "runs" / goal["goal_id"] / method / "seed7"
+def read_run(goal, method, seed):
+    run_dir = WORK / "runs" / goal["goal_id"] / method / f"seed{seed}"
     resource = json.loads((run_dir / "resource.json").read_text())
     meta = summary(run_dir / "summary.yaml")
     if method == "DepOnly":
@@ -409,7 +434,7 @@ def read_run(goal, method):
         caps = int(number(meta, "candidate_caps"))
     return {
         "goal": goal["goal_id"], "stratum": goal["stratum"],
-        "cohort": goal["cohort"], "method": method,
+        "cohort": goal["cohort"], "method": method, "seed": seed,
         "wall": resource["wall_sec"], "internal_wall": internal,
         "hit": hit, "termination": termination,
         "sound": int(facts(run_dir / "closure_edges.tsv") <= GT_FACTS),
@@ -424,30 +449,53 @@ def aggregate():
     GT_FACTS = facts(WORK / "ground_truth/chase/closure_edges.tsv")
     with (WORK / "goals.tsv").open() as stream:
         goals = list(csv.DictReader(stream, delimiter="\t"))
-    rows = [read_run(goal, method) for goal in goals for method in METHODS]
+    rows = [read_run(goal, method, seed) for goal in goals
+            for method in METHODS for seed in SEEDS]
+    # UNIFIED640 protocol: per-goal median across the 3 seeds, then macro mean
+    # (and sum for the "total time" big-table column).
+    per_goal = {}
+    for row in rows:
+        per_goal.setdefault((row["goal"], row["method"]), []).append(row)
+    goal_medians = []
+    for (gid, method), grp in per_goal.items():
+        evs = [r["evaluations"] for r in grp if r["evaluations"] is not None]
+        goal_medians.append({
+            "goal": gid, "method": method,
+            "wall": statistics.median(r["wall"] for r in grp),
+            "derived": statistics.median(r["derived"] for r in grp),
+            "evaluations": statistics.median(evs) if evs else None,
+            "hit": min(r["hit"] for r in grp),
+            "sound": min(r["sound"] for r in grp),
+            "termination": grp[0]["termination"],
+            "caps": sum(r["caps"] for r in grp),
+            "rss": max(r["rss"] for r in grp),
+        })
     arms = {}
     for method in METHODS:
-        selected = [row for row in rows if row["method"] == method]
-        evaluated = [row["evaluations"] for row in selected
-                     if row["evaluations"] is not None]
+        selected = [g for g in goal_medians if g["method"] == method]
+        evaluated = [g["evaluations"] for g in selected
+                     if g["evaluations"] is not None]
         arms[method] = {
-            "runs": len(selected),
-            "wall": statistics.mean(row["wall"] for row in selected),
-            "derived": statistics.mean(row["derived"] for row in selected),
+            "runs": len(selected) * len(SEEDS), "goals": len(selected),
+            "wall": statistics.mean(g["wall"] for g in selected),
+            "total_wall": sum(g["wall"] for g in selected),
+            "derived": statistics.mean(g["derived"] for g in selected),
+            "total_derived": sum(g["derived"] for g in selected),
             "evaluations": statistics.mean(evaluated) if evaluated else None,
-            "hit_rate": statistics.mean(row["hit"] for row in selected),
-            "soundness_rate": statistics.mean(row["sound"] for row in selected),
-            "timeouts": sum(row["termination"] == "timeout" for row in selected),
-            "caps": sum(row["caps"] for row in selected),
-            "max_rss": max(row["rss"] for row in selected),
+            "hit_rate": statistics.mean(g["hit"] for g in selected),
+            "soundness_rate": statistics.mean(g["sound"] for g in selected),
+            "timeouts": sum(g["termination"] == "timeout" for g in selected),
+            "caps": sum(g["caps"] for g in selected),
+            "max_rss": max(g["rss"] for g in selected),
             "wall_speedup_vs_deterministic": None,
         }
     for method in METHODS:
         arms[method]["wall_speedup_vs_deterministic"] = (
             arms["Deterministic"]["wall"] / arms[method]["wall"])
+    planned = len(goals) * len(METHODS) * len(SEEDS)
     report = {
-        "status": "complete" if len(rows) == 180 else "incomplete",
-        "runs": len(rows), "planned_runs": 180, "seed": 7,
+        "status": "complete" if len(rows) == planned else "incomplete",
+        "runs": len(rows), "planned_runs": planned, "seeds": list(SEEDS),
         "validation_failures": sum(not row["sound"] for row in rows),
         "arms": arms, "rows": rows,
         "rules": json.loads((WORK / "rules_manifest.json").read_text()),
@@ -461,20 +509,20 @@ def aggregate():
         writer.writeheader()
         writer.writerows(rows)
     lines = [
-        "# OGBL-BioKG overall-performance（CPU，36 goal，seed 7）", "",
-        f"状态：{report['status']}；观测 {len(rows)}/180；"
+        "# OGBL-BioKG overall-performance（CPU，36 goal × 3 seeds，UNIFIED640）", "",
+        f"状态：{report['status']}；观测 {len(rows)}/{planned}；"
         f"soundness failures={report['validation_failures']}。", "",
-        "| 方法 | wall(s) | 相对 D 加速 | 求值 | 派生 | hit | soundness | timeout | cap |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "逐 goal 取 3 seed 中位数；总时间/总派生 = 36 goal 中位数之和。", "",
+        "| 方法 | 总时间(s) | 均wall(s) | 相对 D | 总派生 | 均派生 | hit | sound |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for method in METHODS:
         arm = arms[method]
-        evaluations = "N/A" if arm["evaluations"] is None else f"{arm['evaluations']:.1f}"
         lines.append(
-            f"| {method} | {arm['wall']:.3f} | "
-            f"{arm['wall_speedup_vs_deterministic']:.3f}x | {evaluations} | "
+            f"| {method} | {arm['total_wall']:.2f} | {arm['wall']:.3f} | "
+            f"{arm['wall_speedup_vs_deterministic']:.3f}x | {arm['total_derived']:.0f} | "
             f"{arm['derived']:.1f} | {arm['hit_rate']:.3f} | "
-            f"{arm['soundness_rate']:.3f} | {arm['timeouts']} | {arm['caps']} |")
+            f"{arm['soundness_rate']:.3f} |")
     lines += ["", "逐 goal 数据见 rows.tsv；所有派生均与冻结规则集的完整 Chase 闭包对账。", ""]
     (WORK / "summary.md").write_text("\n".join(lines))
     print(json.dumps({"status": report["status"], "runs": len(rows),
@@ -483,15 +531,22 @@ def aggregate():
 
 
 def main():
-    global WORK, STATUS, RULE_QUOTA
+    global WORK, STATUS, RULE_QUOTA, INSTANCE_QUOTAS
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", choices=("all", "prepare", "train", "evaluate",
                                             "aggregate"), default="all")
     parser.add_argument("--work", type=Path, default=WORK)
     parser.add_argument("--rule-quota", type=int, default=RULE_QUOTA)
+    parser.add_argument("--instance-quota", default=None,
+                        help="per-stratum instance test counts r1,r2,deep "
+                             "(e.g. 14,14,14 for 50 goals); deep cap auto")
     args = parser.parse_args()
     if args.rule_quota <= 0:
         parser.error("--rule-quota must be positive")
+    if args.instance_quota:
+        r1, r2, deep = (int(x) for x in args.instance_quota.split(","))
+        INSTANCE_QUOTAS = {"round1": (r1, 2), "round2": (r2, 2),
+                           "deep": (deep, max(2, (deep + 1) // 2))}
     WORK = args.work.resolve()
     STATUS = WORK / "status.json"
     RULE_QUOTA = args.rule_quota

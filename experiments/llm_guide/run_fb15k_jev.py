@@ -62,12 +62,11 @@ def command_for(args, goal, arm, seed):
     policy = ("deterministic" if args.base_policy == "adaptive" and
               arm == "baseline" else args.base_policy)
     command += ["--fair-interval", "0", "--policy-seed", str(seed),
-                "--policy", policy, "--scorer", "exact"]
-    if args.value_model is not None and (args.base_policy != "adaptive" or
+                "--policy", policy, "--scorer", "exact",
+                "--hdc-dim", str(args.hdc_dim)]
+    if args.relevance_model is not None and (args.base_policy != "adaptive" or
                                          arm == "jev"):
-        command += ["--value-model", str(args.value_model)]
-    if args.hdc_value_backend is not None:
-        command += ["--hdc-value-backend", args.hdc_value_backend]
+        command += ["--relevance-model", str(args.relevance_model)]
     if arm == "jev":
         command += [
             "--llm-guide", "--llm-backend", "jev",
@@ -117,10 +116,10 @@ def manifest_for(args, model_info):
         "binary_sha256": sha256(ROOT / "build/bin/gar_reason"),
         "engine": args.engine,
         "policy": args.base_policy,
-        "value_model": str(args.value_model) if args.value_model else None,
-        "value_model_sha256": sha256(args.value_model) if args.value_model else None,
-        "hdc_value_backend": args.hdc_value_backend,
+        "relevance_model": str(args.relevance_model) if args.relevance_model else None,
+        "relevance_model_sha256": sha256(args.relevance_model) if args.relevance_model else None,
         "scorer": "exact",
+        "hdc_dim": args.hdc_dim,
         "star_order": "goal",
         "budget": 1000000000,
         "candidate_cap": 100000,
@@ -143,8 +142,8 @@ def write_or_check_manifest(args, model_info):
         saved = json.loads(path.read_text())
         for key in ("goals_sha256", "rule_ids_sha256", "ground_truth_sha256",
                     "binary_sha256", "llm_model", "guide_strength", "policy",
-                    "value_model_sha256", "hdc_value_backend",
-                    "guide_max_options", "guide_min_cost", "llm_mock"):
+                    "relevance_model_sha256", "hdc_dim", "guide_max_options",
+                    "guide_min_cost", "llm_mock"):
             if saved.get(key) != manifest[key]:
                 raise RuntimeError(
                     f"manifest mismatch for {key}: use a new --work directory")
@@ -410,11 +409,10 @@ def aggregate(args):
         labels = {"baseline": "Random", "jev": "Random + local Jev"}
     elif args.base_policy == "adaptive":
         labels = {"baseline": "Deterministic",
-                  "jev": "Adaptive numeric-Q + local Jev"}
+                  "jev": "Adaptive HDC relevance + local Jev"}
     elif args.base_policy == "learned":
-        name = "HDC-Q" if args.hdc_value_backend else "numeric-Q"
-        labels = {"baseline": f"Learned {name}",
-                  "jev": f"Learned {name} + local Jev"}
+        labels = {"baseline": "Learned HDC relevance",
+                  "jev": "Learned HDC relevance + local Jev"}
     lines = [f"# FB15K-237 local Jev guide（rules640，{len(goals)} goal）", "",
              f"状态：{report['status']}；观测 {len(rows)}/{report['planned_runs']}；"
              f"soundness failures={report['validation_failures']}。", "",
@@ -484,9 +482,8 @@ def main():
     parser.add_argument("--base-policy",
                         choices=("deterministic", "random", "learned", "adaptive"),
                         default="deterministic")
-    parser.add_argument("--value-model", type=Path)
-    parser.add_argument("--hdc-value-backend",
-                        choices=("original", "simd", "bit-lut"))
+    parser.add_argument("--relevance-model", type=Path)
+    parser.add_argument("--hdc-dim", type=int, default=8192)
     parser.add_argument("--llm-base-url", default="http://127.0.0.1:30000")
     parser.add_argument("--llm-model", default="local-model")
     parser.add_argument("--llm-timeout-ms", type=int, default=120000)
@@ -498,14 +495,12 @@ def main():
     args.work = args.work.resolve()
     args.goals = args.goals.resolve()
     model_policies = ("learned", "adaptive")
-    if args.base_policy in model_policies and args.value_model is None:
-        parser.error(f"--base-policy {args.base_policy} requires --value-model")
-    if args.base_policy not in model_policies and args.value_model is not None:
-        parser.error("--value-model requires --base-policy learned or adaptive")
-    if args.base_policy != "learned" and args.hdc_value_backend is not None:
-        parser.error("--hdc-value-backend requires --base-policy learned")
-    if args.value_model is not None:
-        args.value_model = args.value_model.resolve()
+    if args.base_policy in model_policies and args.relevance_model is None:
+        parser.error(f"--base-policy {args.base_policy} requires --relevance-model")
+    if args.base_policy not in model_policies and args.relevance_model is not None:
+        parser.error("--relevance-model requires --base-policy learned or adaptive")
+    if args.relevance_model is not None:
+        args.relevance_model = args.relevance_model.resolve()
     if args.phase in ("eval", "all"):
         evaluate(args)
     if args.phase in ("aggregate", "all") and args.goal_id is None:
