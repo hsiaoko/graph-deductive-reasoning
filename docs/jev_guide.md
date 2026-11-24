@@ -29,7 +29,7 @@ gar_reason --mode agent
         |
         v
 ReasoningAgent
-  ├── Local Scorer / Policy / ValueModel
+  ├── Local Scorer / Policy / RelevanceModel
   |
   ├── LlmStarGuide             --llm-guide
   |       |
@@ -150,7 +150,7 @@ export DEEPSEEK_API_KEY='your-key'
   --csr /path/to/immutable_csr --rules /path/to/rules \
   --goal 'relation(a,b)' --budget 1000 \
   --policy learned --scorer exact --star-order goal \
-  --value-model /path/to/q_numeric.meta \
+  --relevance-model /path/to/relevance.meta \
   --paper-guide --llm-backend openai \
   --llm-base-url https://api.deepseek.com \
   --llm-model deepseek-chat \
@@ -165,7 +165,7 @@ The key is read only when the client makes a request. Do not write real keys int
 ./build/bin/gar_reason --mode agent \
   --csr /path/to/immutable_csr --rules /path/to/rules \
   --goal 'relation(a,b)' --budget 1000 \
-  --policy learned --value-model /path/to/q_numeric.meta \
+  --policy learned --relevance-model /path/to/relevance.meta \
   --paper-guide --llm-mock \
   --paper-guide-response /path/to/guide.json \
   --out /tmp/garagent-paper-guide-mock
@@ -181,7 +181,7 @@ Use a cache directory to reuse a real response for the same goal:
 ./build/bin/gar_reason --mode agent \
   --csr /path/to/immutable_csr --rules /path/to/rules \
   --goal 'relation(a,b)' --budget 1000 \
-  --policy learned --value-model /path/to/q_numeric.meta \
+  --policy learned --relevance-model /path/to/relevance.meta \
   --paper-guide --paper-guide-cache-dir /path/to/guide-cache \
   --llm-backend openai --llm-model deepseek-chat \
   --out /tmp/garagent-paper-guide-cached
@@ -347,7 +347,7 @@ Compare at least:
 - a local model if relevant;
 - an explicit warm-cache arm if repeated-goal execution matters.
 
-Use mock only for control-flow validation. Keep the graph, rules, goals, value model, scorer, backend, and execution limits fixed across semantic comparisons.
+Use mock only for control-flow validation. Keep the graph, rules, goals, relevance model, scorer, backend, and execution limits fixed across semantic comparisons.
 
 Report service startup, unseen-goal requests, repeated requests, and training separately. A warm prefix cache or response cache must not be presented as cold-start performance. A reduction in reasoning steps does not prove an end-to-end speedup.
 

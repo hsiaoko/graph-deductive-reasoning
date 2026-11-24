@@ -12,8 +12,9 @@ All agent variants must use the same graph, frozen rules, goals, predicate seman
 | DepOnly | Fixed-input-order, single-threaded goal-cone Chase | Dependency filter only |
 | Deterministic | AdaDeduce with `--policy deterministic --scorer exact` | None |
 | Random | AdaDeduce with `--policy random --scorer exact` | Policy seed |
-| Learned | AdaDeduce with `--policy learned --scorer exact` | Action-level value model |
-| AdaDeduce | Learned policy with optional `--paper-guide` | Value model and optional real LLM guide |
+| UniformRandom | AdaDeduce with `--policy uniform-random`; ignores all scores | Policy seed |
+| Learned | AdaDeduce with `--policy learned --scorer exact` | Action-goal relevance model |
+| AdaDeduce | Learned policy with optional `--paper-guide` | Relevance model and optional real LLM guide |
 | AdaDeduceStar | Explicit action policy with proof-efficiency star ordering | Proof-star model |
 
 Do not substitute `--scorer null` for DepOnly. Null scoring still uses the optimized AdaDeduce executor, while DepOnly deliberately uses the fixed-order Chase path.
@@ -119,13 +120,13 @@ For learned policies, freeze train and test goals before training. Keep these fo
 
 - **Instance-disjoint:** no identical grounded goal appears in training and testing.
 - **Relation-disjoint:** all training goals and traces for selected test relations are excluded.
-- **Proof-disjoint:** test goals do not share training chains, proof DAGs, Q traces, or derivation journals.
+- **Proof-disjoint:** test goals do not share training chains, proof DAGs, policy traces, or derivation journals.
 
 If a requested stratum cannot satisfy the constraints, report the constraint failure instead of removing difficult goals after seeing method results.
 
-## 4. Collect training traces
+## 4. Collect training traces and train
 
-`--q-trace` requires `--scorer exact`:
+Use `--policy-trace` with exact incremental scoring. After execution, the trace keeps proof actions, grounded proof premises, and a random sample of successful actions outside the proof. The run does not record every candidate or derivation. Collection does not change the reasoning chain.
 
 ```bash
 ./build/bin/gar_reason --mode agent --engine cpu \
@@ -133,24 +134,37 @@ If a requested stratum cannot satisfy the constraints, report the constraint fai
   --goal 'relation(a,b)' --budget 1000000 \
   --policy deterministic --scorer exact --star-order goal \
   --fair-interval 0 \
-  --q-trace /path/to/traces/goal-000/deterministic.tsv \
-  --out /path/to/runs/goal-000/deterministic
+  --policy-trace /path/to/traces/goal-000/deterministic/policy_trace.json \
+  --policy-trace-negatives 256 \
+  --out /path/to/traces/goal-000/deterministic
 ```
 
-Labels represent measured remaining execution cost after the selected action. Failed rollouts must not receive artificial finite labels. Alternative actions that were never observed must not be presented as measured rollouts.
+Only goal-hit traces produce training examples. The trainer extracts the goal proof DAG and assigns `label_gamma^distance` to proof actions. It assigns zero to sampled candidates outside the proof. Repeated fact-goal pairs use the smallest observed distance. Negative labels mean that a candidate was not observed in the proof, not that it is logically irrelevant.
 
-Train a numeric model with the existing trainer:
+Train the C++ relevance model:
 
 ```bash
-python3 experiments/fixpoint_policy/train_fixpoint_q.py \
+./build/bin/gar_train_policy \
+  --csr /path/to/immutable_csr --rules /path/to/rules \
   --traces /path/to/traces \
-  --out /path/to/models \
-  --test-goals /path/to/test-goals.tsv
+  --test-goals /path/to/test-goals.tsv \
+  --validation-goals /path/to/validation-goals.tsv \
+  --out /path/to/models/relevance.meta \
+  --epochs 8 --batch-size 32 --hidden 32 \
+  --label-gamma 0.5 --negative-ratio 4 --seed 42
 ```
 
-The trainer writes model metadata, including a feature schema and training manifest. The C++ loader rejects a model whose schema does not match the current features.
+The trainer rejects test-goal leakage. It writes `relevance.meta`, `relevance.bin`, and `relevance.report.json`. The model and report record the HDC configuration, graph fingerprint, feature schema, training goals, loss, and held-out ranking metrics.
 
-Keep the model file, training rows, excluded goals, seed, feature schema, and hashes together.
+Keep the model files, excluded goals, seeds, feature schema, and input hashes together.
+
+For the frozen FB15K-237 rules640 workload, `experiments/fixpoint_policy/run_relevance.py` runs the same phases and preserves per-goal resources:
+
+```bash
+python3 experiments/fixpoint_policy/run_relevance.py --phase all
+```
+
+Use `--phase trace`, `--phase train`, `--phase eval`, `--phase verify`, or `--phase aggregate` to resume one phase. The driver writes to `.work_hdcv/relevance640` and does not use the 36 test goals for model selection.
 
 ## 5. Evaluate variants
 
@@ -171,13 +185,13 @@ Use one command template and change only the declared variant fields. For exampl
   --csr /path/to/immutable_csr --rules /path/to/rules \
   --goal 'relation(a,b)' --budget 1000000000 \
   --policy learned --scorer exact --star-order goal \
-  --value-model /path/to/models/q_numeric.meta \
+  --relevance-model /path/to/models/relevance.meta \
   --max-candidates-per-rule 100000 --fair-interval 0 \
   --wall-limit 900 --policy-seed 7 \
   --out /path/to/runs/goal-000/Learned/seed7
 ```
 
-For AdaDeduce, add the same value model and:
+For AdaDeduce, add the same relevance model and:
 
 ```text
 --paper-guide --llm-backend openai --llm-model deepseek-chat
@@ -224,7 +238,7 @@ For a batch, pass the full closure directory through `--gt`:
 ./build/bin/gar_reason --mode agent-batch \
   --csr /path/to/immutable_csr --rules /path/to/rules \
   --tasks /path/to/test-goals.tsv --workers 4 \
-  --policy learned --value-model /path/to/models/q_numeric.meta \
+  --policy learned --relevance-model /path/to/models/relevance.meta \
   --gt /path/to/ground-truth \
   --out /path/to/batch-output
 ```

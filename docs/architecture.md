@@ -86,10 +86,10 @@ ReasoningAgent::Components
 ├── Policy
 ├── Executor
 ├── CostModel
-├── ValueModel              optional action cost-to-go model
-├── ValueModel              optional proof-star model
-├── LlmStarGuide            optional initial star preferences
-└── PaperGuide              optional restricted action guide
+├── RelevanceModel         optional action-goal relevance model
+├── ValueModel             optional proof-star model
+├── LlmStarGuide           optional initial star preferences
+└── PaperGuide             optional restricted action guide
 ```
 
 For each run it:
@@ -141,7 +141,8 @@ Batch size one retains a heap-based fast path. Action batching must not be confu
 |---|---|
 | Deterministic | Handcrafted score and deterministic maximum |
 | Random | Seeded softmax over the handcrafted score |
-| Learned | LearnedQPolicy with symbolic admissibility filtering |
+| UniformRandom | Uniform random ready-motif selection that ignores every score |
+| Learned | HDC action-goal relevance model with deterministic Top-k ordering |
 | AdaDeduce | Learned policy plus an optional compiled PaperGuide |
 | AdaDeduceStar | Selected action policy plus proof-efficiency star ordering |
 
@@ -187,11 +188,17 @@ There is no requirement for MatrixGraph to implement `GARAgentMatch`, and agent 
 
 ## Model boundaries
 
-### Value models
+### Relevance models
 
-`ValueModel` predicts action cost-to-go for ordering. A serialized model declares a feature schema. The loader rejects a model trained with incompatible features.
+`RelevanceModel` predicts action-goal relevance in `[0,1]`. Its input contains the HDC vector of the grounded consequent, the HDC goal vector, and the current handcrafted score. `LearnedPolicy` uses the prediction only for Top-k ordering.
 
-A model prediction is never logical evidence. The executor still checks symbolic admissibility and every grounded precondition.
+`PolicyTrace` records candidates and grounded derivation premises for training. `ProofDatasetBuilder` extracts proof-DAG distances and observed negative samples. `RelevanceTrainer` optimizes mean squared error. These types live under `core/engine/agent/learning` and use the same C++ encoding and inference code.
+
+The model loader checks the feature schema, HDC dimension, HDC seed, and graph fingerprint. A prediction is never logical evidence. The executor still checks every grounded precondition.
+
+### Proof-star value models
+
+`ValueModel` predicts proof-star efficiency for star ordering. Its feature schema and training manifest are independent of the action-level relevance model.
 
 ### ML predicates
 
@@ -216,7 +223,7 @@ See [jev_guide.md](jev_guide.md) for the three model entry points and their prot
 | Policy RNG and action priorities | Per-goal policy instance | Never shared |
 | Witness and provenance | Per-goal execution history | Never shared |
 | CPU/GPU scratch state | Match backend | Backend-specific |
-| Loaded value model | Agent components | Read-only sharing is allowed |
+| Loaded relevance or proof-star model | Agent components | Read-only sharing is allowed |
 | LLM response cache | Explicit external cache path | Keyed by goal, not by proof state |
 
 ## Cost accounting
@@ -232,7 +239,7 @@ CLI wall time includes additional work such as graph loading, initialization, on
 
 ## Application layer
 
-`gar_reason` provides Chase, DepOnly, single-goal agent, and multi-goal agent modes. `gar_analyze` provides dependency statistics, workload generation, chain comparison, and closure verification.
+`gar_reason` provides Chase, DepOnly, single-goal agent, and multi-goal agent modes. `gar_analyze` provides dependency statistics, workload generation, chain comparison, and closure verification. `gar_train_policy` builds a relevance model from policy traces.
 
 The CLI currently performs argument parsing and most component construction in `tools/cli/agent_mode.h`. The umbrella `gar::core` target also includes `gar_miner` from `tools/miner`. These are current code-organization facts, not additional semantic layers.
 
@@ -240,7 +247,7 @@ The CLI currently performs argument parsing and most component construction in `
 
 - Add a policy by implementing `Policy` and preserving symbolic admissibility.
 - Add a scorer by implementing `Scorer` without mutating execution history.
-- Add a value model only with an explicit feature schema and training manifest.
+- Add a relevance or proof-star model only with an explicit feature schema and training manifest.
 - Add a match backend through `MatchBackend`, not by adding policy logic to MatrixGraph.
 - Add an LLM protocol through `LlmClient`; do not introduce Python or model-weight dependencies into the C++ core.
 - Keep CPU as the default agent backend. GPU experiments must select it explicitly.

@@ -18,21 +18,20 @@ This is a historical protocol. The retired `--executor fixpoint` option correspo
 - Each run has an external limit of 1000 seconds and an internal limit of 900 seconds. Process-tree and system-used memory limits are both 256 GiB.
 - Runs are serial. A new run starts only when system-used memory is below 210 GiB. No other user's process is terminated.
 
-## Five method arms
+## Four method arms
 
 Only action selection and the scorer/model required by that selection differ.
 
 1. GoalChase: `--policy deterministic --scorer null`.
 2. Deterministic: `--policy deterministic --scorer exact`.
 3. Random: `--policy random --scorer exact`. Online Gumbel-max is distributionally equivalent to `softmax(total/tau)`.
-4. Learned numeric-Q: `--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_numeric.meta`.
-5. Learned HDC-Q: `--policy learned --scorer exact --value-model .work_hdcv/fixpoint_q640/models/q_hdc.meta --hdc-value-backend original`. This matrix fixes the original backend for consistency with the existing HDC overhead analysis. Bit-LUT belongs to a separate kernel experiment.
+4. Learned HDC relevance: `--policy learned --scorer exact --relevance-model .work_hdcv/relevance640/models/selected.meta --hdc-dim 128`.
 
 All arms share dependency-goal filtering, candidate generation, exact precondition evaluation, fact derivation, suspension/revival, and early goal termination. Rules, goals, training data, and models are not replaced after seeing test results.
 
 ## Run count and aggregation
 
-- Five arms × 36 goals × 3 seeds = 540 goal-directed runs.
+- Four arms × 36 goals × 3 seeds = 432 goal-directed runs.
 - Chase computes the full closure and is not part of the five-arm per-goal matrix. Its three existing cold runs provide a non-equivalent work reference only.
 - For each goal and method, take the median over seeds `{7,13,42}`, then take an equally weighted macro average over the 36 goals.
 - Primary metrics are external wall time, internal wall time, selection branches, ready insertions, match embeddings, evaluated actions, derived facts, goal hits, soundness, caps, timeouts, and RSS.

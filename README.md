@@ -290,6 +290,13 @@ DepOnly uses only dependency-cone filtering and the fixed-order CPU Chase. It do
   --goal 'relation(a,b)' --budget 1000 \
   --policy random --policy-seed 7 --scorer exact --star-order goal \
   --out /tmp/garagent-random
+
+# Uniform random motif selection. The policy ignores every score.
+./build/bin/gar_reason --mode agent --engine cpu \
+  --csr /path/to/immutable_csr --rules /path/to/rules \
+  --goal 'relation(a,b)' --budget 1000 \
+  --policy uniform-random --policy-seed 7 --scorer exact --star-order goal \
+  --out /tmp/garagent-uniform-random
 ```
 
 `--scorer hdc` uses set-based dense HDC evidence for ordering. `--scorer null` is an ablation, not a DepOnly implementation.
@@ -301,12 +308,12 @@ DepOnly uses only dependency-cone filtering and the fixed-order CPU Chase. It do
   --csr /path/to/immutable_csr --rules /path/to/rules \
   --goal 'relation(a,b)' --budget 1000 \
   --policy learned --scorer exact --star-order goal \
-  --value-model /path/to/q_numeric.meta \
+  --relevance-model /path/to/relevance.meta \
   --fair-interval 0 \
   --out /tmp/garagent-learned
 ```
 
-The model file declares its feature schema. Incompatible legacy models are rejected rather than evaluated with different feature semantics. Training and trace-generation workflows are described in [the experiment guide](docs/experiments.md).
+The model predicts action-goal relevance from the HDC action vector, the HDC goal vector, and the handcrafted score. Its metadata binds the model to the graph and HDC configuration. See [the experiment guide](docs/experiments.md) for trace collection and training.
 
 ### AdaDeduce with an initial LLM guide
 
@@ -319,7 +326,7 @@ export DEEPSEEK_API_KEY='your-key'
   --csr /path/to/immutable_csr --rules /path/to/rules \
   --goal 'relation(a,b)' --budget 1000 \
   --policy learned --scorer exact --star-order goal \
-  --value-model /path/to/q_numeric.meta \
+  --relevance-model /path/to/relevance.meta \
   --paper-guide --llm-backend openai \
   --llm-base-url https://api.deepseek.com \
   --llm-model deepseek-chat \
@@ -386,6 +393,7 @@ An agent output directory contains:
 | `closure_edges.tsv` | Facts derived by this goal-directed run |
 | `deduce_trace.tsv` | Ready, suspend, revive, evaluate, and derive events |
 | `paper_guide.json` | Raw guide response when `--paper-guide` is active |
+| `policy_trace.json` | Candidates and grounded derivation premises when `--policy-trace` is active |
 
 Agent-batch writes one directory per `goal_id` and an aggregate `summary.yaml` in the output root.
 
@@ -430,7 +438,7 @@ core/
     └── agent/              # AdaDeduce, policies, scoring, learning, guides
 
 tools/
-├── cli/                    # gar_reason, gar_analyze, loaders, matchers
+├── cli/                    # gar_reason, gar_analyze, gar_train_policy, loaders, matchers
 ├── miner/                  # Chain and general-pattern miners
 └── prepare_*.py            # Dataset conversion
 
