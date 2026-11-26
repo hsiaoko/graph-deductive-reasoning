@@ -73,6 +73,11 @@ double LearnedPolicy::Predict(const ScoredMotif& candidate) {
 }
 
 double LearnedPolicy::Score(const ScoredMotif& candidate) {
+  // Short-circuit: Predict encodes the consequent fact (HDC encode/project),
+  // and this runs at ready-insertion time inside GenerateStar, so its cost is
+  // booked to generation_wall, not score_wall. Skip it when it cannot affect
+  // the priority (relevance_weight_ == 0).
+  if (relevance_weight_ == 0.0) return handcrafted_weight_ * candidate.total;
   return handcrafted_weight_ * candidate.total +
          relevance_weight_ * Predict(candidate);
 }

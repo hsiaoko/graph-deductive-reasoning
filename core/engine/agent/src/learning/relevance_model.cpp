@@ -61,6 +61,50 @@ double Dot(const double* a, const double* b, std::size_t n) {
   return sum;
 }
 
+// Mixed-precision projection dot: double model weights against float fact
+// vectors (DenseVector is float to halve encode bandwidth). Widen the float
+// lanes to double in-register so the weight bandwidth (small, cached) stays
+// double while the fact bandwidth (the per-fact bottleneck) is halved.
+#if defined(__x86_64__) || defined(_M_X64)
+__attribute__((target("avx2")))
+double DotMixedAvx2(const double* w, const float* v, std::size_t n) {
+  __m256d acc = _mm256_setzero_pd();
+  std::size_t i = 0;
+  for (; i + 4 <= n; i += 4) {
+    const __m256d vd = _mm256_cvtps_pd(_mm_loadu_ps(v + i));
+    acc = _mm256_add_pd(acc, _mm256_mul_pd(_mm256_loadu_pd(w + i), vd));
+  }
+  alignas(32) double tmp[4];
+  _mm256_store_pd(tmp, acc);
+  double sum = tmp[0] + tmp[1] + tmp[2] + tmp[3];
+  for (; i < n; ++i) sum += w[i] * v[i];
+  return sum;
+}
+
+__attribute__((target("avx512f")))
+double DotMixedAvx512(const double* w, const float* v, std::size_t n) {
+  __m512d acc = _mm512_setzero_pd();
+  std::size_t i = 0;
+  for (; i + 8 <= n; i += 8) {
+    const __m512d vd = _mm512_cvtps_pd(_mm256_loadu_ps(v + i));
+    acc = _mm512_add_pd(acc, _mm512_mul_pd(_mm512_loadu_pd(w + i), vd));
+  }
+  double sum = _mm512_reduce_add_pd(acc);
+  for (; i < n; ++i) sum += w[i] * v[i];
+  return sum;
+}
+#endif
+
+double DotMixed(const double* w, const float* v, std::size_t n) {
+#if defined(__x86_64__) || defined(_M_X64)
+  if (__builtin_cpu_supports("avx512f")) return DotMixedAvx512(w, v, n);
+  if (__builtin_cpu_supports("avx2")) return DotMixedAvx2(w, v, n);
+#endif
+  double sum = 0.0;
+  for (std::size_t i = 0; i < n; ++i) sum += w[i] * v[i];
+  return sum;
+}
+
 void WriteVector(std::ofstream* out, const std::vector<double>& values) {
   out->write(reinterpret_cast<const char*>(values.data()),
              static_cast<std::streamsize>(values.size() * sizeof(double)));
@@ -188,7 +232,7 @@ RelevanceModel::RelevanceProjection RelevanceModel::Project(
   const std::size_t dim = metadata_.dim;
   for (std::size_t h = 0; h < metadata_.hidden; ++h) {
     const double* row = weights.data() + h * dim;
-    projection.hidden_input[h] = Dot(row, values.data(), dim);
+    projection.hidden_input[h] = DotMixed(row, values.data(), dim);
   }
   return projection;
 }

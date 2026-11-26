@@ -22,11 +22,15 @@ class DenseVector {
   [[nodiscard]] DenseVector Normalized() const;
 
   [[nodiscard]] std::uint32_t dim() const { return dim_; }
-  [[nodiscard]] const std::vector<double>& values() const { return values_; }
+  [[nodiscard]] const std::vector<float>& values() const { return values_; }
 
  private:
   std::uint32_t dim_;
-  std::vector<double> values_;
+  // float (not double): the learned policy encodes one vector per unique fact
+  // and the cost is memory-bandwidth-bound (random 1KB reads through a hash
+  // cache). Halving the element size halves that traffic and doubles SIMD
+  // width; cosine/ranking precision is unaffected at float accuracy.
+  std::vector<float> values_;
 };
 
 }  // namespace gar::core::hdc
