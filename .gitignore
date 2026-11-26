@@ -5,5 +5,6 @@ lib/
 *.a
 .baseline/
 .work_hdcv/
+experiments/**/work_*/
 __pycache__/
 *.pyc

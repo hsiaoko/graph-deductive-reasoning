@@ -1,0 +1,102 @@
+<style>
+  .wrap{max-width:920px;margin:0 auto;padding:24px 16px;font-family:Helvetica,Arial,sans-serif;color:#1f2937;line-height:1.5}
+  h1{font-size:22px;margin:0 0 4px} h2{font-size:16px;margin:24px 0 8px}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
+  .fig{overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff}
+  .fig svg{max-width:100%;height:auto}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+  th,td{border-bottom:1px solid #e5e7eb;padding:7px 10px;text-align:left}
+  th{background:#f9fafb;font-weight:600}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  td.strong{font-weight:700;color:#166534} td.ok{color:#166534;font-weight:600}
+  .key{background:#eff6ff;border:1px solid #1d4ed8;border-radius:8px;padding:12px 14px;font-size:14px;margin-top:16px}
+  .note{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;font-size:13px;margin-top:16px}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+<div class="wrap">
+  <h1>Nested Rule-Set Scaling · Five-Layer Solution-Space Sandwich</h1>
+  <div class="sub">BioKG · nested R₁₀⊂R₅₀⊂R₁₀₀⊂R₂₀₀⊂R₄₀₀ · same 50 goals at every size · dedup · log–log</div>
+  <div class="key"><strong>Finding:</strong> with goals fixed, growing rules explodes Chase (6,443→906,842). The methods order cleanly at every size: <strong>goals ≤ AdaDeduce ≤ Det forward ≤ DepOnly ≤ Chase</strong>. Backward AdaDeduce stays near the lower bound (50→67); forward Det (20,414) and cone-chase DepOnly (60,920) materialize progressively more of the closure.</div>
+  <div class="fig"><svg xmlns="http://www.w3.org/2000/svg" width="780" height="500" viewBox="0 0 780 500" font-family="Helvetica,Arial,sans-serif">
+<rect width="780" height="500" fill="#ffffff"/>
+<text x="82" y="34" font-size="18" font-weight="700" fill="#1f2937">AdaDeduce derives near-minimal facts as the rule set grows</text>
+<text x="82" y="56" font-size="13" fill="#6b7280">BioKG · nested random rule sets · 50 goals each · dedup counts · log–log axes</text>
+<line x1="82" y1="355.3" x2="660" y2="355.3" stroke="#e5e7eb" stroke-width="1"/>
+<text x="72" y="359.3" font-size="12" fill="#6b7280" text-anchor="end">100</text>
+<line x1="82" y1="291.3" x2="660" y2="291.3" stroke="#e5e7eb" stroke-width="1"/>
+<text x="72" y="295.3" font-size="12" fill="#6b7280" text-anchor="end">1K</text>
+<line x1="82" y1="227.3" x2="660" y2="227.3" stroke="#e5e7eb" stroke-width="1"/>
+<text x="72" y="231.3" font-size="12" fill="#6b7280" text-anchor="end">10K</text>
+<line x1="82" y1="163.3" x2="660" y2="163.3" stroke="#e5e7eb" stroke-width="1"/>
+<text x="72" y="167.3" font-size="12" fill="#6b7280" text-anchor="end">100K</text>
+<line x1="82" y1="99.3" x2="660" y2="99.3" stroke="#e5e7eb" stroke-width="1"/>
+<text x="72" y="103.3" font-size="12" fill="#6b7280" text-anchor="end">1M</text>
+<line x1="112.9" y1="400" x2="112.9" y2="405" stroke="#6b7280" stroke-width="1"/>
+<text x="112.9" y="420" font-size="12" fill="#6b7280" text-anchor="middle">10</text>
+<line x1="335.7" y1="400" x2="335.7" y2="405" stroke="#6b7280" stroke-width="1"/>
+<text x="335.7" y="420" font-size="12" fill="#6b7280" text-anchor="middle">50</text>
+<line x1="431.7" y1="400" x2="431.7" y2="405" stroke="#6b7280" stroke-width="1"/>
+<text x="431.7" y="420" font-size="12" fill="#6b7280" text-anchor="middle">100</text>
+<line x1="527.7" y1="400" x2="527.7" y2="405" stroke="#6b7280" stroke-width="1"/>
+<text x="527.7" y="420" font-size="12" fill="#6b7280" text-anchor="middle">200</text>
+<line x1="623.7" y1="400" x2="623.7" y2="405" stroke="#6b7280" stroke-width="1"/>
+<text x="623.7" y="420" font-size="12" fill="#6b7280" text-anchor="middle">400</text>
+<line x1="82" y1="400" x2="660" y2="400" stroke="#1f2937" stroke-width="1.5"/>
+<line x1="82" y1="80" x2="82" y2="400" stroke="#1f2937" stroke-width="1.5"/>
+<text x="371" y="444" font-size="13" fill="#1f2937" text-anchor="middle">Number of GARs (nested rule set)</text>
+<text x="24" y="240" font-size="13" fill="#1f2937" text-anchor="middle" transform="rotate(-90 24 240)">Facts derived (dedup, log scale)</text>
+<polyline points="112.9,374.5 335.7,374.5 431.7,374.5 527.7,374.5 623.7,374.5" fill="none" stroke="#6b7280" stroke-width="2.5" stroke-dasharray="6,4"/>
+<polyline points="112.9,239.5 335.7,200.5 431.7,108.0 527.7,104.8 623.7,102.0" fill="none" stroke="#1d4ed8" stroke-width="2.5"/>
+<circle cx="112.9" cy="239.5" r="5" fill="#1d4ed8"/>
+<circle cx="335.7" cy="200.5" r="5" fill="#1d4ed8"/>
+<circle cx="431.7" cy="108.0" r="5" fill="#1d4ed8"/>
+<circle cx="527.7" cy="104.8" r="5" fill="#1d4ed8"/>
+<circle cx="623.7" cy="102.0" r="5" fill="#1d4ed8"/>
+<polyline points="112.9,239.8 335.7,217.4 431.7,205.8 527.7,194.0 623.7,177.0" fill="none" stroke="#7c3aed" stroke-width="2.5"/>
+<polygon points="112.9,233.8 118.9,239.8 112.9,245.8 106.9,239.8" fill="#7c3aed"/>
+<polygon points="335.7,211.4 341.7,217.4 335.7,223.4 329.7,217.4" fill="#7c3aed"/>
+<polygon points="431.7,199.8 437.7,205.8 431.7,211.8 425.7,205.8" fill="#7c3aed"/>
+<polygon points="527.7,188.0 533.7,194.0 527.7,200.0 521.7,194.0" fill="#7c3aed"/>
+<polygon points="623.7,171.0 629.7,177.0 623.7,183.0 617.7,177.0" fill="#7c3aed"/>
+<polyline points="112.9,374.5 335.7,276.0 431.7,276.0 527.7,228.4 623.7,207.4" fill="none" stroke="#b45309" stroke-width="2.5"/>
+<polygon points="112.9,368.5 106.9,379.5 118.9,379.5" fill="#b45309"/>
+<polygon points="335.7,270.0 329.7,281.0 341.7,281.0" fill="#b45309"/>
+<polygon points="431.7,270.0 425.7,281.0 437.7,281.0" fill="#b45309"/>
+<polygon points="527.7,222.4 521.7,233.4 533.7,233.4" fill="#b45309"/>
+<polygon points="623.7,201.4 617.7,212.4 629.7,212.4" fill="#b45309"/>
+<polyline points="112.9,374.5 335.7,373.4 431.7,373.4 527.7,372.4 623.7,366.4" fill="none" stroke="#166534" stroke-width="2.5"/>
+<rect x="107.9" y="369.5" width="10" height="10" fill="#166534"/>
+<rect x="330.7" y="368.4" width="10" height="10" fill="#166534"/>
+<rect x="426.7" y="368.4" width="10" height="10" fill="#166534"/>
+<rect x="522.7" y="367.4" width="10" height="10" fill="#166534"/>
+<rect x="618.7" y="361.4" width="10" height="10" fill="#166534"/>
+<rect x="628" y="152" width="148" height="128" rx="6" fill="#ffffff" stroke="#e5e7eb" stroke-width="1"/>
+<circle cx="638" cy="164.0" r="5" fill="#1d4ed8"/>
+<text x="652" y="168.0" font-size="11.5" fill="#1f2937">Chase</text>
+<text x="768" y="168.0" font-size="11.5" font-weight="700" fill="#1d4ed8" text-anchor="end">906,842</text>
+<polygon points="638,183.0 643,188.0 638,193.0 633,188.0" fill="#7c3aed"/>
+<text x="652" y="192.0" font-size="11.5" fill="#1f2937">DepOnly</text>
+<text x="768" y="192.0" font-size="11.5" font-weight="700" fill="#7c3aed" text-anchor="end">60,920</text>
+<polygon points="638,207.0 633,217.0 643,217.0" fill="#b45309"/>
+<text x="652" y="216.0" font-size="11.5" fill="#1f2937">Det fwd</text>
+<text x="768" y="216.0" font-size="11.5" font-weight="700" fill="#b45309" text-anchor="end">20,414</text>
+<rect x="633" y="231.0" width="10" height="10" fill="#166534"/>
+<text x="652" y="240.0" font-size="11.5" fill="#1f2937">AdaDeduce</text>
+<text x="768" y="240.0" font-size="11.5" font-weight="700" fill="#166534" text-anchor="end">67</text>
+<line x1="632" y1="260.0" x2="644" y2="260.0" stroke="#6b7280" stroke-width="2.5" stroke-dasharray="5,3"/>
+<text x="652" y="264.0" font-size="11.5" fill="#1f2937">goals</text>
+<text x="768" y="264.0" font-size="11.5" font-weight="700" fill="#6b7280" text-anchor="end">50</text>
+<rect x="96" y="92" width="270" height="42" rx="6" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1"/>
+<text x="108" y="110" font-size="12.5" font-weight="700" fill="#1d4ed8">13,535× fewer facts than Chase</text>
+<text x="108" y="126" font-size="11.5" fill="#1f2937">at 400 rules · AdaDeduce tracks the goal lower bound</text>
+</svg></div>
+  <h2>Results (facts derived, dedup, identical 50 goals)</h2>
+  <table>
+    <tr><th>#GARs</th><th>Chase</th><th>DepOnly</th><th>Det fwd</th><th>AdaDeduce</th><th>goals</th><th>hit</th></tr>
+    <tr><td class='num'>10</td><td class='num'>6,443</td><td class='num'>6,362</td><td class='num'>50</td><td class='num strong'>50</td><td class='num'>50</td><td class='num ok'>50/50</td></tr><tr><td class='num'>50</td><td class='num'>26,240</td><td class='num'>14,278</td><td class='num'>1,731</td><td class='num strong'>52</td><td class='num'>50</td><td class='num ok'>50/50</td></tr><tr><td class='num'>100</td><td class='num'>731,208</td><td class='num'>21,610</td><td class='num'>1,731</td><td class='num strong'>52</td><td class='num'>50</td><td class='num ok'>50/50</td></tr><tr><td class='num'>200</td><td class='num'>820,921</td><td class='num'>33,121</td><td class='num'>9,584</td><td class='num strong'>54</td><td class='num'>50</td><td class='num ok'>50/50</td></tr><tr><td class='num'>400</td><td class='num'>906,842</td><td class='num'>60,920</td><td class='num'>20,414</td><td class='num strong'>67</td><td class='num'>50</td><td class='num ok'>50/50</td></tr>
+  </table>
+  <div class="note"><strong>Why this order:</strong> AdaDeduce (backward) derives only the goals' proof chains. Det forward (agent, goal star-order + granular early-stop) derives a bounded cone frontier. DepOnly (batch cone chase + early-stop) materializes whole round frontiers before hitting the goal, so it derives more than Det but less than full Chase. Chase materializes every derivable fact.<br><br>
+  <strong>Caliber:</strong> all counts dedup (Chase one closure; DepOnly/Det/Ada unions over the same 50 goals). Goals sampled from R₁₀ closure, derivable under all nested sets (hit 50/50). Fixed goals isolate rule-count scaling — all curves monotone.</div>
+  <h2>Reproduce</h2>
+  <div class="sub"><code>python3 experiments/exp-2-goal/run_nested.py</code> · <code>python3 experiments/exp-2-goal/make_fig_nested.py</code> · data: <code>work_nested/results_fixed.json</code></div>
+</div>

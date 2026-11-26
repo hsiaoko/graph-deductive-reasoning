@@ -1,0 +1,67 @@
+<style>
+  .wrap{max-width:860px;margin:0 auto;padding:24px 16px;font-family:Helvetica,Arial,sans-serif;color:#1f2937;line-height:1.5}
+  h1{font-size:22px;margin:0 0 4px} h2{font-size:16px;margin:24px 0 8px}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
+  .fig{overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fff}
+  .fig svg{max-width:100%;height:auto}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+  th,td{border-bottom:1px solid #e5e7eb;padding:7px 10px;text-align:left}
+  th{background:#f9fafb;font-weight:600}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  td.strong{font-weight:700;color:#1d4ed8} td.ok{color:#166534;font-weight:600}
+  .note{background:#fff7ed;border:1px solid #b45309;border-radius:8px;padding:12px 14px;font-size:13px;margin-top:16px}
+  .key{background:#eff6ff;border:1px solid #1d4ed8;border-radius:8px;padding:12px 14px;font-size:14px;margin-top:16px}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+<div class="wrap">
+  <h1>exp-2-goal · Safe Relevance Filtering (Proposition 2)</h1>
+  <div class="sub">BioKG · 720 GARs · single-thread · no cap · dedup derived counts (one chase per config)</div>
+  <div class="key"><strong>Finding:</strong> restricting candidate actions to <code>r(g,μ)&gt;0</code> (the goal cone) removes <strong>98–100%</strong> of candidate actions while losing <strong>0</strong> derivable goals — the safe-filtering property holds.</div>
+  <div class="fig"><svg xmlns="http://www.w3.org/2000/svg" width="760" height="480" viewBox="0 0 760 480" font-family="Helvetica,Arial,sans-serif">
+<rect width="760" height="480" fill="#ffffff"/>
+<text x="78" y="34" font-size="18" font-weight="700" fill="#1f2937">Relevance filtering removes 98–100% of candidate actions</text>
+<text x="78" y="56" font-size="13" fill="#6b7280">BioKG · 720 GARs · single-thread · safe filtering: 0 / 5 derivable goals lost</text>
+<line x1="78" y1="332.6" x2="700" y2="332.6" stroke="#e5e7eb" stroke-width="1"/>
+<text x="68" y="336.6" font-size="12" fill="#6b7280" text-anchor="end">98%</text>
+<line x1="78" y1="221.9" x2="700" y2="221.9" stroke="#e5e7eb" stroke-width="1"/>
+<text x="68" y="225.9" font-size="12" fill="#6b7280" text-anchor="end">99%</text>
+<line x1="78" y1="111.2" x2="700" y2="111.2" stroke="#e5e7eb" stroke-width="1"/>
+<text x="68" y="115.2" font-size="12" fill="#6b7280" text-anchor="end">100%</text>
+<line x1="78.0" y1="388" x2="78.0" y2="393" stroke="#6b7280" stroke-width="1"/>
+<text x="78.0" y="408" font-size="12" fill="#6b7280" text-anchor="middle">0</text>
+<line x1="224.4" y1="388" x2="224.4" y2="393" stroke="#6b7280" stroke-width="1"/>
+<text x="224.4" y="408" font-size="12" fill="#6b7280" text-anchor="middle">20</text>
+<line x1="370.7" y1="388" x2="370.7" y2="393" stroke="#6b7280" stroke-width="1"/>
+<text x="370.7" y="408" font-size="12" fill="#6b7280" text-anchor="middle">40</text>
+<line x1="517.1" y1="388" x2="517.1" y2="393" stroke="#6b7280" stroke-width="1"/>
+<text x="517.1" y="408" font-size="12" fill="#6b7280" text-anchor="middle">60</text>
+<line x1="663.4" y1="388" x2="663.4" y2="393" stroke="#6b7280" stroke-width="1"/>
+<text x="663.4" y="408" font-size="12" fill="#6b7280" text-anchor="middle">80</text>
+<line x1="78" y1="388" x2="700" y2="388" stroke="#1f2937" stroke-width="1.5"/>
+<line x1="78" y1="78" x2="78" y2="388" stroke="#1f2937" stroke-width="1.5"/>
+<text x="389" y="432" font-size="13" fill="#1f2937" text-anchor="middle">Goal-cone size (number of relevant GARs)</text>
+<text x="22" y="233" font-size="13" fill="#1f2937" text-anchor="middle" transform="rotate(-90 22 233)">Candidate actions removed (%)</text>
+<circle cx="107.3" cy="116.1" r="6" fill="#1d4ed8"/>
+<text x="107.3" y="104.1" font-size="11.5" fill="#1f2937" text-anchor="middle">irritable bowel (cone 4) · 100.0%</text>
+<circle cx="378.0" cy="156.9" r="6" fill="#1d4ed8"/>
+<text x="378.0" y="144.9" font-size="11.5" fill="#1f2937" text-anchor="middle">metabolic (cone 41) · 99.6%</text>
+<circle cx="392.7" cy="167.9" r="6" fill="#1d4ed8"/>
+<text x="392.7" y="155.9" font-size="11.5" fill="#1f2937" text-anchor="middle">viral (cone 43) · 99.5%</text>
+<circle cx="414.6" cy="219.3" r="6" fill="#1d4ed8"/>
+<text x="414.6" y="207.3" font-size="11.5" fill="#1f2937" text-anchor="middle">immune (cone 46) · 99.0%</text>
+<circle cx="656.1" cy="329.2" r="6" fill="#1d4ed8"/>
+<text x="656.1" y="317.2" font-size="11.5" fill="#1f2937" text-anchor="middle">respiratory (cone 79) · 98.0%</text>
+<rect x="438" y="88" width="250" height="40" rx="6" fill="#fff7ed" stroke="#b45309" stroke-width="1"/>
+<text x="450" y="105" font-size="12" font-weight="700" fill="#b45309">Safe filtering verified</text>
+<text x="450" y="121" font-size="11.5" fill="#1f2937">0 derivable goals lost at every point</text>
+</svg></div>
+  <h2>Results (goal panel spanning cone sizes)</h2>
+  <table>
+    <tr><th>goal predicate</th><th>cone (relevant GARs)</th><th>irrelevant %</th><th>candidates after filter</th><th>candidates removed</th><th>goals lost</th></tr>
+    <tr><td>irritable_bowel_syndrome</td><td class='num'>4</td><td class='num'>99.4%</td><td class='num'>21,030</td><td class='num strong'>100.0%</td><td class='num ok'>0</td></tr><tr><td>inherited_metabolic_disorder</td><td class='num'>41</td><td class='num'>94.3%</td><td class='num'>194,895</td><td class='num strong'>99.6%</td><td class='num ok'>0</td></tr><tr><td>viral_infectious_disease</td><td class='num'>43</td><td class='num'>94.0%</td><td class='num'>241,888</td><td class='num strong'>99.5%</td><td class='num ok'>0</td></tr><tr><td>immune_system_disease</td><td class='num'>46</td><td class='num'>93.6%</td><td class='num'>461,480</td><td class='num strong'>99.0%</td><td class='num ok'>0</td></tr><tr><td>respiratory_system_disease</td><td class='num'>79</td><td class='num'>89.0%</td><td class='num'>930,911</td><td class='num strong'>98.0%</td><td class='num ok'>0</td></tr>
+  </table>
+  <div class="note"><strong>Why safe:</strong> the goal cone is closed under premise dependency — a rule whose consequent feeds a cone rule is itself in the cone. So an out-of-cone rule can never contribute to deriving the goal (Theorem 5). Filtering removes only useless candidates.<br><br>
+  <strong>Caliber note:</strong> candidate actions = <code>embeddings_total</code> (pattern matches examined). Unrestricted E_full = 47,280,381. Derived counts here are <em>dedup</em> (one chase), not a per-goal sum — directly comparable across configs.</div>
+  <h2>Reproduce</h2>
+  <div class="sub"><code>python3 experiments/exp-2-goal/run_exp2.py</code> · <code>python3 experiments/exp-2-goal/make_fig.py</code><br>Design: <code>experiments/exp-2-goal/DESIGN.md</code> · data: <code>work_biokg/results.json</code></div>
+</div>
