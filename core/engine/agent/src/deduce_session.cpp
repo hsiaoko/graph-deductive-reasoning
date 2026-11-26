@@ -335,9 +335,14 @@ void DeduceSession::AddComplete(std::uint32_t pi,
   if (!VertexLabelsOk(r, g_, emb.data())) return;
   ++res_.stats->match_embeddings;
   if (state_->ContainsEdge(pl.head.slot, emb[pl.head.pu], emb[pl.head.pv])) {
+    ++res_.stats->match_head_known;
     return;  // conclusion already in Γ: nothing new
   }
-  if (!seen_actions_.Insert(pl.rule, emb)) return;
+  if (!seen_actions_.Insert(pl.rule, emb)) {
+    ++res_.stats->match_duplicate;
+    return;
+  }
+  ++res_.stats->match_new;
   auto& rec = EnqueueReady(Motif{pl.rule, emb}, pl.head);
   Trace("gen\trule=" + r.name + "\taction=" + std::to_string(rec.id));
   prod_->SetPending(pi, true);
@@ -517,7 +522,7 @@ void DeduceSession::CompleteDeltas(
               static_cast<std::uint32_t>(&e - pl.spec.edges.data());
           requests->push_back(MatchRequest{pl.spec, cfg_.match_cap_per_rule,
                                            std::move(pins),
-                                           EdgeSeed{e[2], ps, pd, edge}});
+                                           EdgeSeed{e[2], ps, pd, edge}, pi});
           jobs->push_back(DeltaMatchJob{pi, 0, false});
         }
       }
@@ -611,7 +616,7 @@ void DeduceSession::GrowPartials(
                 static_cast<std::uint32_t>(&e - de.sub_spec.edges.data());
             requests->push_back(
                 MatchRequest{de.sub_spec, cfg_.match_cap_per_rule,
-                             std::move(pins), EdgeSeed{e[2], ps, pd, edge}});
+                             std::move(pins), EdgeSeed{e[2], ps, pd, edge}, pi});
             jobs->push_back(DeltaMatchJob{pi, di, true});
           }
         }
@@ -622,6 +627,8 @@ void DeduceSession::GrowPartials(
 
 void DeduceSession::OnDerivations(
     const std::vector<gar::core::graph::DerivedEdge>& derived) {
+  ++res_.stats->delta_invocations;
+  res_.stats->delta_batch_edges += derived.size();
   std::vector<MatchRequest> requests;
   std::vector<DeltaMatchJob> jobs;
   auto started = std::chrono::steady_clock::now();
@@ -636,6 +643,7 @@ void DeduceSession::OnDerivations(
       std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - started)
           .count();
+  res_.stats->delta_match_requests += requests.size();
   started = std::chrono::steady_clock::now();
   const std::vector<MatchResult> results = match_backend_->RunBatch(requests);
   res_.stats->delta_match_wall_ms +=

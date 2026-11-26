@@ -25,6 +25,9 @@ struct MatchRequest {
   std::uint64_t cap = 0;
   std::unordered_map<std::uint32_t, std::uint32_t> pins;
   std::optional<EdgeSeed> seed;
+  // Owning star (rule plan index). Bulk-delta groups requests by this so matches
+  // are attributed to the correct rule/head; distinct stars may share a spec.
+  std::uint32_t group = 0;
 };
 
 struct MatchResult {

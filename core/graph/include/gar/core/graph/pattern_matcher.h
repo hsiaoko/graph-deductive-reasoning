@@ -67,6 +67,18 @@ class PatternMatcher {
       std::vector<std::uint32_t>* out_embeddings, bool* capped,
       const std::unordered_map<std::uint32_t, std::uint32_t>& pins) const;
 
+  // Bulk-delta: enumerate over a provided batch of seed-slot pairs (the new
+  // edges) instead of binary-searching the full slot array per request. Builds
+  // the pattern setup once and runs the join backtracking in a tight loop over
+  // the seeds with reused buffers. `seed_edge` selects which pattern edge is the
+  // seed (its two endpoints bind order[0]/order[1]); `seed_pairs` are raw packed
+  // (src,dst) pairs of that edge's slot, in the slot's own orientation.
+  std::uint64_t EnumerateSeeds(const PatternSpec& p, std::uint32_t seed_edge,
+                               std::uint64_t match_cap,
+                               const std::vector<std::uint64_t>& seed_pairs,
+                               std::vector<std::uint32_t>* out_embeddings,
+                               bool* capped) const;
+
  private:
   const Graph& g_;
   std::unique_ptr<sics::matrixgraph::core::task::cpu_task::HomMatchIndex>

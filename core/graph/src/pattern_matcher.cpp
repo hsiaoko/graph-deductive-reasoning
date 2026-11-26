@@ -290,4 +290,154 @@ std::uint64_t PatternMatcher::Enumerate(
   return count;
 }
 
+std::uint64_t PatternMatcher::EnumerateSeeds(
+    const PatternSpec& p, std::uint32_t seed_edge, std::uint64_t match_cap,
+    const std::vector<std::uint64_t>& seed_pairs,
+    std::vector<std::uint32_t>* out, bool* capped) const {
+  *capped = false;
+  const std::uint32_t n = p.num_vertices;
+  const std::uint32_t m = static_cast<std::uint32_t>(p.edges.size());
+  if (n == 0 || m == 0 || n < 2 || seed_edge >= m) return 0;
+  const std::uint32_t R = g_.num_relations();
+
+  struct Adj {
+    std::uint32_t edge;
+    std::uint32_t other;
+    bool is_out;
+    std::uint32_t slot;
+  };
+  std::vector<std::vector<Adj>> adj(n);
+  for (std::uint32_t e = 0; e < m; ++e) {
+    const auto [s, d, slot] = p.edges[e];
+    adj[s].push_back({e, d, true, slot});
+    adj[d].push_back({e, s, false, slot});
+  }
+  // Seed the vertex order at the chosen seed edge's endpoints so the batched
+  // new edges (which feed that pattern edge) bind order[0]/order[1].
+  const std::uint32_t seed_src = p.edges[seed_edge][0];
+  const std::uint32_t seed_dst = p.edges[seed_edge][1];
+  std::vector<std::uint32_t> order;
+  order.reserve(n);
+  {
+    std::vector<char> bound(n, 0);
+    bound[seed_src] = 1;
+    bound[seed_dst] = 1;
+    order.push_back(seed_src);
+    order.push_back(seed_dst);
+    while (order.size() < n) {
+      std::uint32_t best = n, best_back = 0;
+      for (std::uint32_t v = 0; v < n; ++v) {
+        if (bound[v]) continue;
+        std::uint32_t back = 0;
+        for (const auto& a : adj[v]) back += bound[a.other];
+        if (back == 0) continue;
+        if (back > best_back || (back == best_back && v < best)) {
+          best = v;
+          best_back = back;
+        }
+      }
+      if (best == n) {
+        for (std::uint32_t v = 0; v < n; ++v)
+          if (!bound[v]) { best = v; break; }
+      }
+      bound[best] = 1;
+      order.push_back(best);
+    }
+  }
+  std::vector<std::vector<Adj>> back_edges(n);
+  {
+    std::vector<char> earlier(n, 0);
+    earlier[order[0]] = 1;
+    for (std::size_t i = 1; i < n; ++i) {
+      const std::uint32_t v = order[i];
+      for (const auto& a : adj[v])
+        if (earlier[a.other]) back_edges[i].push_back(a);
+      earlier[v] = 1;
+    }
+  }
+  for (std::size_t i = 1; i < n; ++i)
+    if (back_edges[i].empty()) return 0;
+  // The seed edge must drive position 1's candidate scan; put it first.
+  for (std::size_t k = 0; k < back_edges[1].size(); ++k) {
+    if (back_edges[1][k].edge == seed_edge) {
+      if (k != 0) std::swap(back_edges[1][0], back_edges[1][k]);
+      break;
+    }
+  }
+
+  auto has_edge = [&](std::uint32_t src, std::uint32_t dst,
+                      std::uint32_t slot) {
+    return g_.RelationPairSet(slot).count(PackPair(src, dst)) != 0;
+  };
+  std::vector<std::uint32_t> emb(n, 0);
+  std::uint64_t count = 0;
+  auto candidates = [&](const Adj& driver, std::vector<std::uint32_t>* out_c) {
+    out_c->clear();
+    const std::uint32_t slot =
+        driver.is_out ? FlipSlot(driver.slot, R) : driver.slot;
+    const std::uint32_t anchor = emb[driver.other];
+    const auto& pairs = g_.RelationPairs(slot);
+    for (auto it = std::lower_bound(pairs.begin(), pairs.end(),
+                                    PackPair(anchor, 0));
+         it != pairs.end() && (*it >> 32) == anchor; ++it)
+      out_c->push_back(static_cast<std::uint32_t>(*it));
+  };
+  auto check_back_edges = [&](std::size_t pos) {
+    const std::uint32_t v = order[pos];
+    for (std::size_t i = 1; i < back_edges[pos].size(); ++i) {
+      const auto& a = back_edges[pos][i];
+      const std::uint32_t src = a.is_out ? emb[v] : emb[a.other];
+      const std::uint32_t dst = a.is_out ? emb[a.other] : emb[v];
+      if (!has_edge(src, dst, a.slot)) return false;
+    }
+    return true;
+  };
+
+  const Adj seed_adj = back_edges[1][0];
+  std::vector<std::vector<std::uint32_t>> cands(n);
+  std::vector<std::size_t> cand_pos(n, 0);
+  // Tight loop over the provided seed batch: setup is shared, buffers reused,
+  // no per-seed binary search into the full slot array.
+  for (std::uint64_t sp : seed_pairs) {
+    const auto ps = static_cast<std::uint32_t>(sp >> 32);
+    const auto pd = static_cast<std::uint32_t>(sp);
+    emb[order[0]] = ps;
+    emb[order[1]] = pd;
+    bool ok = true;
+    for (const auto& a : adj[order[1]]) {
+      if (a.other == order[0] && a.edge != seed_adj.edge) {
+        const std::uint32_t src = a.is_out ? emb[order[1]] : emb[order[0]];
+        const std::uint32_t dst = a.is_out ? emb[order[0]] : emb[order[1]];
+        if (!has_edge(src, dst, a.slot)) { ok = false; break; }
+      }
+    }
+    if (!ok) continue;
+    std::size_t pos = 2;
+    while (pos >= 2) {
+      if (pos == n) {
+        out->insert(out->end(), emb.begin(), emb.end());
+        if (++count >= match_cap) { *capped = true; return count; }
+        --pos;
+        continue;
+      }
+      if (cand_pos[pos] == 0) candidates(back_edges[pos][0], &cands[pos]);
+      bool advanced = false;
+      while (cand_pos[pos] < cands[pos].size()) {
+        emb[order[pos]] = cands[pos][cand_pos[pos]++];
+        if (check_back_edges(pos)) { advanced = true; break; }
+      }
+      if (advanced) {
+        ++pos;
+        if (pos < n) cand_pos[pos] = 0;
+      } else {
+        cand_pos[pos] = 0;
+        cands[pos].clear();
+        --pos;
+      }
+    }
+    if (count >= match_cap) { *capped = true; return count; }
+  }
+  return count;
+}
+
 }  // namespace gar::core::graph

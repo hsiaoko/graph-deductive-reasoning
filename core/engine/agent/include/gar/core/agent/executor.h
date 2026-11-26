@@ -140,6 +140,17 @@ struct AgentResult {
     std::uint64_t suspended_peak = 0;
     std::uint64_t generation_events = 0;
     std::uint64_t match_embeddings = 0;  // label-valid full embeddings
+    // Redundant-match probe: of the label-valid embeddings, how many were
+    // skipped because the conclusion is already in Gamma (head_known) or the
+    // action was already generated (duplicate), vs enqueued as new.
+    std::uint64_t match_head_known = 0;
+    std::uint64_t match_duplicate = 0;
+    std::uint64_t match_new = 0;
+    // Delta event-invocation probe: how often OnDerivations fires, how many
+    // derived edges and match requests each batch carries.
+    std::uint64_t delta_invocations = 0;
+    std::uint64_t delta_batch_edges = 0;
+    std::uint64_t delta_match_requests = 0;
     std::uint64_t ready_insertions = 0;  // includes revival re-enqueues
     std::uint64_t revival_passes = 0;
     std::uint64_t score_calls = 0;
