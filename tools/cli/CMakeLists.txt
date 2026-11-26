@@ -83,6 +83,16 @@ project(gar_apps LANGUAGES CXX)
     )
     target_compile_features(gar_hdc_probe PRIVATE cxx_std_20)
 
+    add_executable(gar_sketch_probe gar_sketch_probe.cpp)
+    target_link_libraries(gar_sketch_probe PRIVATE
+        gar::core::graph gar::core::analysis gar::core::engine::agent
+    )
+    target_compile_features(gar_sketch_probe PRIVATE cxx_std_20)
+
+    add_executable(gar_bulk_probe gar_bulk_probe.cpp)
+    target_link_libraries(gar_bulk_probe PRIVATE gar::core::graph)
+    target_compile_features(gar_bulk_probe PRIVATE cxx_std_20)
+
     # Diagnostic probe: multi-hop graph proximity (BFS distance) for
     # proof-membership AUC. Throwaway instrument, not a product surface.
     add_executable(gar_graph_probe gar_graph_probe.cpp)
@@ -103,6 +113,12 @@ project(gar_apps LANGUAGES CXX)
         gar::core::graph gar::core::analysis
     )
     target_compile_features(gar_cone_union PRIVATE cxx_std_20)
+
+    add_executable(gar_cone_sizes gar_cone_sizes.cpp)
+    target_link_libraries(gar_cone_sizes PRIVATE
+        gar::core::graph gar::core::analysis
+    )
+    target_compile_features(gar_cone_sizes PRIVATE cxx_std_20)
 
     add_executable(gar_reason gar_reason.cu)
     target_link_libraries(gar_reason PRIVATE gar::core::graph gar::core::engine::chase gar::core::engine::agent)
