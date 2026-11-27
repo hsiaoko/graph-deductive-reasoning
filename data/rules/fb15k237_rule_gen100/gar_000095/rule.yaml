@@ -1,0 +1,26 @@
+rule:
+  id: gar_000095
+  name: /location/country/form_of_government(x0,x1) ∧ /location/statistical_region/rent50_2./measurement_unit/dated_money_value/currency(x2,x3) → /location/statistical_region/gni_per_capita_in_ppp_dollars./measurement_unit/dated_money_value/currency(x0,x3)
+  labels:
+    /location/statistical_region/rent50_2./measurement_unit/dated_money_value/currency: 33
+    /location/statistical_region/gni_per_capita_in_ppp_dollars./measurement_unit/dated_money_value/currency: 234
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /location/statistical_region/gni_per_capita_in_ppp_dollars./measurement_unit/dated_money_value/currency
+  quality:
+    support: 109
+    confidence: 0.59239130434782605
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

@@ -9,15 +9,18 @@
 #include "core/task/cpu_task/hom_match.cuh"
 #include "gar/core/graph/graph.h"
 
-// PatternMatcher: enumerates embeddings of a small connected pattern on a
-// Graph, under homomorphism semantics (distinct pattern vertices may
-// map to the same data vertex — the same convention as ChainMiner).
+// PatternMatcher: enumerates embeddings of a small pattern on a Graph, under
+// homomorphism semantics (distinct pattern vertices may map to the same data
+// vertex — the same convention as ChainMiner).
 //
 // A pattern edge (u -> v, slot s) matches a data edge emb[u] -> emb[v] in
 // relation slot s (slots include inverse relations, id >= num_relations).
+// Disconnected patterns are decomposed into connected components and their
+// embeddings are combined by cross product. Isolated vertices have no matches.
 //
-// Matching is backtracking over a greedy vertex order: starting from vertex
-// 0, each next vertex is an unbound vertex adjacent to the bound set,
+// Matching within each component is backtracking over a greedy vertex order:
+// starting from vertex 0, each next vertex is an unbound vertex adjacent to
+// the bound set,
 // preferring the one with the most edges back into the bound set. Candidate
 // bindings are driven by the first edge to an already-bound endpoint (a
 // binary search over the slot's sorted pair array, or over the flipped

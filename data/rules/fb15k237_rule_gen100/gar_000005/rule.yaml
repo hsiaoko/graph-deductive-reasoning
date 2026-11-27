@@ -1,0 +1,26 @@
+rule:
+  id: gar_000005
+  name: /location/country/form_of_government(x0,x1) ∧ /film/actor/film./film/performance/film(x2,x3) → /media_common/netflix_genre/titles(x0,x3)
+  labels:
+    /media_common/netflix_genre/titles: 2
+    /film/actor/film./film/performance/film: 6
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /media_common/netflix_genre/titles
+  quality:
+    support: 160
+    confidence: 0.00048524844720496894
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

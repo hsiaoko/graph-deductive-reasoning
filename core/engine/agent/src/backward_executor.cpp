@@ -96,6 +96,49 @@ class BackwardSession {
     }
   }
 
+  const std::vector<std::uint32_t>* RuleOrder(
+      std::uint32_t slot, std::optional<std::uint32_t> src,
+      std::optional<std::uint32_t> dst,
+      std::vector<std::uint32_t>* learned_order) {
+    if (kit_.relevance_model == nullptr) return &head_index_[slot];
+    const auto& rules = state_->rules();
+    std::vector<std::pair<double, std::uint32_t>> priorities;
+    priorities.reserve(head_index_[slot].size());
+    for (const std::uint32_t rule_index : head_index_[slot]) {
+      const GARule& rule = rules[rule_index];
+      const RuleHead head = ResolveRuleHead(rule);
+      std::optional<std::uint32_t> head_src = src;
+      std::optional<std::uint32_t> head_dst = dst;
+      if (g_.IsInverse(head.slot)) std::swap(head_src, head_dst);
+      ScoredRule score;
+      kit_.scorer->ScoreRule(rule, sctx_, &score);
+      ScoredMotif candidate;
+      candidate.motif.rule = rule_index;
+      candidate.motif.embedding.assign(rule.num_vertices(), UINT32_MAX);
+      if (head_src) candidate.motif.embedding[head.pu] = *head_src;
+      if (head_dst) candidate.motif.embedding[head.pv] = *head_dst;
+      candidate.rel_fam = score.rel_fam;
+      candidate.price = score.price;
+      candidate.total = score.priority;
+      const double priority =
+          kit_.policy->SelectionPriorityForCandidate(rule_index, candidate);
+      kit_.policy->ReleaseSelectionPriority(rule_index);
+      priorities.emplace_back(priority, rule_index);
+    }
+    std::sort(priorities.begin(), priorities.end(), [](const auto& a,
+                                                        const auto& b) {
+      if (a.first != b.first) return a.first > b.first;
+      return a.second < b.second;
+    });
+    learned_order->clear();
+    learned_order->reserve(priorities.size());
+    for (const auto& [priority, rule_index] : priorities) {
+      (void)priority;
+      learned_order->push_back(rule_index);
+    }
+    return learned_order;
+  }
+
   bool Prove(std::uint32_t slot, std::uint32_t src, std::uint32_t dst,
              std::uint32_t depth) {
     if (g_.IsInverse(slot)) {
@@ -119,7 +162,10 @@ class BackwardSession {
                      static_cast<std::uint32_t>(pair));
       }
     }
-    for (const std::uint32_t rule_index : head_index_[slot]) {
+    std::vector<std::uint32_t> learned_order;
+    const std::vector<std::uint32_t>* rule_order =
+        RuleOrder(slot, src, dst, &learned_order);
+    for (const std::uint32_t rule_index : *rule_order) {
       if (Stopped()) return false;
       Motif motif;
       gar::core::graph::DerivedEdge derived;
@@ -164,7 +210,10 @@ class BackwardSession {
     if (!active_.insert(key).second) return false;
     ActiveGuard guard{active_, key};
     Debug("prove-open slot=" + std::to_string(slot));
-    for (const std::uint32_t rule_index : head_index_[slot]) {
+    std::vector<std::uint32_t> learned_order;
+    const std::vector<std::uint32_t>* rule_order =
+        RuleOrder(slot, src, dst, &learned_order);
+    for (const std::uint32_t rule_index : *rule_order) {
       if (Stopped()) return false;
       Motif motif;
       gar::core::graph::DerivedEdge derived;

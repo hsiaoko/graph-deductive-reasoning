@@ -29,6 +29,96 @@ std::uint32_t FlipSlot(std::uint32_t slot, std::uint32_t num_relations) {
   return slot < num_relations ? slot + num_relations : slot - num_relations;
 }
 
+struct PatternComponent {
+  PatternSpec pattern;
+  std::vector<std::uint32_t> vertices;
+  std::vector<std::uint32_t> edges;
+};
+
+std::vector<PatternComponent> DecomposePattern(const PatternSpec& p) {
+  std::vector<std::vector<std::uint32_t>> adj(p.num_vertices);
+  for (const auto& edge : p.edges) {
+    adj[edge[0]].push_back(edge[1]);
+    adj[edge[1]].push_back(edge[0]);
+  }
+
+  std::vector<PatternComponent> components;
+  std::vector<std::uint32_t> component_of(p.num_vertices);
+  std::vector<char> visited(p.num_vertices, 0);
+  for (std::uint32_t root = 0; root < p.num_vertices; ++root) {
+    if (visited[root]) continue;
+    PatternComponent component;
+    std::vector<std::uint32_t> stack = {root};
+    visited[root] = 1;
+    while (!stack.empty()) {
+      const std::uint32_t v = stack.back();
+      stack.pop_back();
+      component_of[v] = static_cast<std::uint32_t>(components.size());
+      component.vertices.push_back(v);
+      for (const std::uint32_t other : adj[v]) {
+        if (!visited[other]) {
+          visited[other] = 1;
+          stack.push_back(other);
+        }
+      }
+    }
+    std::sort(component.vertices.begin(), component.vertices.end());
+    component.pattern.num_vertices =
+        static_cast<std::uint32_t>(component.vertices.size());
+    components.push_back(std::move(component));
+  }
+
+  for (std::size_t ci = 0; ci < components.size(); ++ci) {
+    auto& component = components[ci];
+    std::vector<std::uint32_t> local(p.num_vertices);
+    for (std::uint32_t v = 0; v < component.vertices.size(); ++v) {
+      local[component.vertices[v]] = v;
+    }
+    for (std::uint32_t e = 0; e < p.edges.size(); ++e) {
+      const auto [s, d, slot] = p.edges[e];
+      if (component_of[s] != ci) continue;
+      component.pattern.edges.push_back({local[s], local[d], slot});
+      component.edges.push_back(e);
+    }
+  }
+  return components;
+}
+
+std::uint64_t AppendCrossProduct(
+    const std::vector<PatternComponent>& components,
+    const std::vector<std::vector<std::uint32_t>>& matches,
+    std::uint32_t num_vertices, std::uint64_t match_cap,
+    std::vector<std::uint32_t>* out, bool* capped) {
+  std::vector<std::size_t> positions(components.size(), 0);
+  std::vector<std::uint32_t> embedding(num_vertices);
+  std::uint64_t count = 0;
+  while (true) {
+    for (std::size_t ci = 0; ci < components.size(); ++ci) {
+      const auto& component = components[ci];
+      const std::uint32_t* local =
+          matches[ci].data() + positions[ci] * component.vertices.size();
+      for (std::size_t v = 0; v < component.vertices.size(); ++v) {
+        embedding[component.vertices[v]] = local[v];
+      }
+    }
+    out->insert(out->end(), embedding.begin(), embedding.end());
+    if (++count >= match_cap) {
+      *capped = true;
+      return count;
+    }
+
+    std::size_t ci = components.size();
+    while (ci > 0) {
+      --ci;
+      const std::size_t num_matches =
+          matches[ci].size() / components[ci].vertices.size();
+      if (++positions[ci] < num_matches) break;
+      positions[ci] = 0;
+    }
+    if (ci == 0 && positions[0] == 0) return count;
+  }
+}
+
 }  // namespace
 
 std::uint64_t PatternMatcher::Enumerate(const PatternSpec& p,
@@ -54,6 +144,27 @@ std::uint64_t PatternMatcher::Enumerate(
     const PatternSpec& p, std::uint64_t match_cap,
     std::vector<std::uint32_t>* out, bool* capped,
     const std::unordered_map<std::uint32_t, std::uint32_t>& pins) const {
+  const auto components = DecomposePattern(p);
+  if (components.size() > 1) {
+    *capped = false;
+    std::vector<std::vector<std::uint32_t>> matches(components.size());
+    for (std::size_t ci = 0; ci < components.size(); ++ci) {
+      const auto& component = components[ci];
+      if (component.pattern.edges.empty()) return 0;
+      std::unordered_map<std::uint32_t, std::uint32_t> local_pins;
+      for (std::uint32_t v = 0; v < component.vertices.size(); ++v) {
+        if (const std::uint32_t* pin = PinOf(pins, component.vertices[v])) {
+          local_pins.emplace(v, *pin);
+        }
+      }
+      bool component_capped = false;
+      Enumerate(component.pattern, match_cap, &matches[ci],
+                &component_capped, local_pins);
+      if (matches[ci].empty()) return 0;
+    }
+    return AppendCrossProduct(components, matches, p.num_vertices, match_cap,
+                              out, capped);
+  }
   if (static_index_ != nullptr && g_.version() == 0) {
     std::vector<std::int32_t> src, dst, labels;
     const auto arrays = ToGARArrays(p, &src, &dst, &labels);
@@ -298,6 +409,29 @@ std::uint64_t PatternMatcher::EnumerateSeeds(
   const std::uint32_t n = p.num_vertices;
   const std::uint32_t m = static_cast<std::uint32_t>(p.edges.size());
   if (n == 0 || m == 0 || n < 2 || seed_edge >= m) return 0;
+  const auto components = DecomposePattern(p);
+  if (components.size() > 1) {
+    std::vector<std::vector<std::uint32_t>> matches(components.size());
+    for (std::size_t ci = 0; ci < components.size(); ++ci) {
+      const auto& component = components[ci];
+      if (component.pattern.edges.empty()) return 0;
+      const auto seed_it =
+          std::find(component.edges.begin(), component.edges.end(), seed_edge);
+      bool component_capped = false;
+      if (seed_it != component.edges.end()) {
+        const auto local_seed = static_cast<std::uint32_t>(
+            std::distance(component.edges.begin(), seed_it));
+        EnumerateSeeds(component.pattern, local_seed, match_cap, seed_pairs,
+                       &matches[ci], &component_capped);
+      } else {
+        Enumerate(component.pattern, match_cap, &matches[ci],
+                  &component_capped);
+      }
+      if (matches[ci].empty()) return 0;
+    }
+    return AppendCrossProduct(components, matches, p.num_vertices, match_cap,
+                              out, capped);
+  }
   const std::uint32_t R = g_.num_relations();
 
   struct Adj {

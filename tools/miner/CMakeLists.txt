@@ -7,6 +7,7 @@ project(gar_miner LANGUAGES CXX)
 add_library(gar_miner STATIC
     src/chain_miner.cpp
     src/pattern_miner.cpp
+    src/rule_generator.cpp
 )
 add_library(gar::tools::miner ALIAS gar_miner)
 
@@ -15,6 +16,9 @@ target_include_directories(gar_miner PUBLIC
 )
 target_link_libraries(gar_miner PUBLIC gar::core::graph)
 target_compile_features(gar_miner PUBLIC cxx_std_20)
+
+add_executable(rule_gen rule_gen.cpp)
+target_link_libraries(rule_gen PRIVATE gar::tools::miner gar::core::graph)
 
 # The mine apps load ImmutableCSR graphs through the bridge module, so they
 # are only available when MatrixGraph integration is enabled.

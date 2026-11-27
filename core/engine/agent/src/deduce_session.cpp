@@ -810,6 +810,7 @@ gar::core::graph::DerivedEdge DeduceSession::Derive(
   step.derived = d;
   step.action_id = rec.id;
   step.handcrafted_score = rec.score.total;
+  step.policy_score = rec.selection_priority;
   res_.chain.push_back(std::move(step));
   const auto t4 = std::chrono::steady_clock::now();
   ++fx.derive_events;
@@ -997,7 +998,7 @@ bool DeduceSession::RevivalPass() {
     }
     const auto derived = Derive(rec);
     OnDerivations({derived});
-    if (res_.goal_derived) break;
+    if (res_.goal_derived && !cfg_.enumerate_open) break;
   }
   return progressed > 0;
 }
@@ -1287,7 +1288,7 @@ AgentResult DeduceSession::Run() {
             std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - started)
                 .count();
-        if (res_.goal_derived) {
+        if (res_.goal_derived && !cfg_.enumerate_open) {
           res_.termination = "goal";
           break;
         }
@@ -1310,7 +1311,7 @@ AgentResult DeduceSession::Run() {
           std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - started)
               .count();
-      if (res_.goal_derived) {
+      if (res_.goal_derived && !cfg_.enumerate_open) {
         res_.termination = "goal";
         break;
       }
@@ -1369,7 +1370,10 @@ AgentResult DeduceSession::Run() {
         break;
       }
     }
-    if (res_.goal_derived || res_.termination == "budget") break;
+    if ((res_.goal_derived && !cfg_.enumerate_open) ||
+        res_.termination == "budget") {
+      break;
+    }
   }
 
   res_.logical_cost = res_.stats->search_cost;

@@ -1,0 +1,26 @@
+rule:
+  id: gar_000025
+  name: /location/country/form_of_government(x0,x1) ∧ /film/film/language(x2,x3) → /location/location/contains(x0,x3)
+  labels:
+    /location/location/contains: 15
+    /film/film/language: 14
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /location/location/contains
+  quality:
+    support: 1
+    confidence: 9.2114959469417835e-05
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

@@ -1,0 +1,26 @@
+rule:
+  id: gar_000046
+  name: /location/country/form_of_government(x0,x1) ∧ /organization/organization/headquarters./location/mailing_address/country(x2,x3) → /location/administrative_division/country(x0,x3)
+  labels:
+    /organization/organization/headquarters./location/mailing_address/country: 16
+    /location/administrative_division/country: 135
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /location/administrative_division/country
+  quality:
+    support: 1
+    confidence: 0.0018115942028985507
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

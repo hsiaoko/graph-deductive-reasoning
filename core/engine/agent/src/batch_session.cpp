@@ -116,12 +116,8 @@ bool DeduceSession::ProcessAction(const deduce::ActionRecord& rec) {
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - derivation_started)
             .count();
-    if (res_.goal_derived) return true;
+    if (res_.goal_derived && !cfg_.enumerate_open) return true;
     const auto delta_started = std::chrono::steady_clock::now();
-    // Batch delta matching on CPU too: the graph's sorted slot views are rebuilt
-    // lazily on ordered reads, so flushing every 256 derivations amortizes the
-    // rebuild over the batch instead of re-sorting per fact. Goal early-stop is
-    // unaffected (checked per Derive above); ReadyEmpty flushes the remainder.
     pending_derivations_.push_back(derived);
     if (pending_derivations_.size() >= 256) FlushDerivations();
     res_.stats->delta_wall_ms +=

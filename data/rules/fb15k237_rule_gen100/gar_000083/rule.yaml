@@ -1,0 +1,26 @@
+rule:
+  id: gar_000083
+  name: /location/country/form_of_government(x0,x1) ∧ /olympics/olympic_sport/athletes./olympics/olympic_athlete_affiliation/country(x2,x3) → /location/location/adjoin_s./location/adjoining_relationship/adjoins(x0,x3)
+  labels:
+    /location/location/adjoin_s./location/adjoining_relationship/adjoins: 58
+    /olympics/olympic_sport/athletes./olympics/olympic_athlete_affiliation/country: 29
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /location/location/adjoin_s./location/adjoining_relationship/adjoins
+  quality:
+    support: 403
+    confidence: 0.010479509049303099
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

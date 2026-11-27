@@ -1,0 +1,26 @@
+rule:
+  id: gar_000066
+  name: /location/country/form_of_government(x0,x1) ∧ /people/person/place_of_birth(x2,x3) → /time/event/locations(x0,x3)
+  labels:
+    /time/event/locations: 163
+    /people/person/place_of_birth: 24
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /time/event/locations
+  quality:
+    support: 1
+    confidence: 7.7198616600790509e-06
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

@@ -1,0 +1,26 @@
+rule:
+  id: gar_000097
+  name: /location/country/form_of_government(x0,x1) ∧ /film/film/estimated_budget./measurement_unit/dated_money_value/currency(x2,x3) → /location/statistical_region/gdp_nominal_per_capita./measurement_unit/dated_money_value/currency(x0,x3)
+  labels:
+    /location/statistical_region/gdp_nominal_per_capita./measurement_unit/dated_money_value/currency: 139
+    /film/film/estimated_budget./measurement_unit/dated_money_value/currency: 34
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /location/statistical_region/gdp_nominal_per_capita./measurement_unit/dated_money_value/currency
+  quality:
+    support: 133
+    confidence: 0.10326086956521739
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

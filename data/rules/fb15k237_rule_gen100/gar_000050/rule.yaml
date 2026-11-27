@@ -1,0 +1,26 @@
+rule:
+  id: gar_000050
+  name: /location/country/form_of_government(x0,x1) ∧ /music/genre/artists(x2,x3) → /location/statistical_region/religions./location/religion_percentage/religion(x0,x3)
+  labels:
+    /location/statistical_region/religions./location/religion_percentage/religion: 18
+    /music/genre/artists: 20
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /location/statistical_region/religions./location/religion_percentage/religion
+  quality:
+    support: 4
+    confidence: 2.0017615501641443e-05
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

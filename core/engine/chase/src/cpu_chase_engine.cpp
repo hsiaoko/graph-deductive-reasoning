@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "gar/core/graph/fact_merger.h"
 #include "gar/core/graph/pattern_matcher.h"
@@ -29,6 +30,30 @@ bool HasEdge(const gar::core::graph::Graph& g, std::uint32_t s,
              std::uint32_t d, std::uint32_t slot) {
   // O(1) hash point query; always reflects the latest edges.
   return g.RelationPairSet(slot).count(gar::core::graph::PackPair(s, d)) != 0;
+}
+
+bool IsDisconnected(const gar::core::graph::PatternSpec& p) {
+  std::vector<std::vector<std::uint32_t>> adj(p.num_vertices);
+  for (const auto& edge : p.edges) {
+    adj[edge[0]].push_back(edge[1]);
+    adj[edge[1]].push_back(edge[0]);
+  }
+  std::vector<char> visited(p.num_vertices, 0);
+  std::vector<std::uint32_t> stack = {0};
+  visited[0] = 1;
+  std::size_t reached = 0;
+  while (!stack.empty()) {
+    const std::uint32_t v = stack.back();
+    stack.pop_back();
+    ++reached;
+    for (const std::uint32_t other : adj[v]) {
+      if (!visited[other]) {
+        visited[other] = 1;
+        stack.push_back(other);
+      }
+    }
+  }
+  return reached != p.num_vertices;
 }
 
 }  // namespace
@@ -55,6 +80,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
     std::uint32_t pu = 0, pv = 0;  // pivot (unused for counting here)
     std::uint32_t head_slot = 0;
     bool has_head = false;
+    bool disconnected = false;
     bool skip = false;
   };
   std::vector<Prepared> pp(rules.size());
@@ -75,6 +101,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
            static_cast<std::uint32_t>(r.edge_dst[e]),
            static_cast<LabelID>(r.edge_labels[e])});
     }
+    p.disconnected = IsDisconnected(p.spec);
     for (const auto& pred : r.antecedent) {
       if (pred.kind == PredKind::kMl &&
           (ml_models_ == nullptr || ml_models_->Find(pred.model) == nullptr)) {
@@ -130,6 +157,11 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
     const auto round_t0 = std::chrono::steady_clock::now();
     std::vector<std::vector<gar::core::graph::DerivedEdge>> contribs(rules.size());
 
+    for (std::uint32_t slot = 0; slot < g_.num_slots(); ++slot) {
+      (void)g_.RelationPairs(slot);
+      (void)g_.RelationPairSet(slot);
+    }
+
     // Rebuild the matching index from the current graph (a read-only
     // snapshot shared by this round's parallel rule processing). HomMatchIndex
     // materializes the inverse slots itself from the base-labeled flat edges.
@@ -151,6 +183,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
         static_cast<int>(ge_src.size())};
     const mg_cpu::HomMatchIndex idx(gg, static_cast<int>(g_.num_relations()));
     const mg_cpu::HomMatcher hom;
+    const gar::core::graph::PatternMatcher pattern_matcher(g_);
 
     auto process_rule = [&](std::size_t i) {
       if (pp[i].skip) return;
@@ -160,6 +193,18 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
 
       std::vector<std::uint32_t> embs;
       bool capped = false;
+      const bool is_target =
+          cfg.target_pattern && pp[i].has_head &&
+          pp[i].head_slot == cfg.target_pattern->slot;
+      std::unordered_map<std::uint32_t, std::uint32_t> pins;
+      if (is_target) {
+        if (cfg.target_pattern->args[0]) {
+          pins.emplace(pp[i].pu, *cfg.target_pattern->args[0]);
+        }
+        if (cfg.target_pattern->args[1]) {
+          pins.emplace(pp[i].pv, *cfg.target_pattern->args[1]);
+        }
+      }
       std::vector<std::int32_t> pe_src, pe_dst, pe_label;
       pe_src.reserve(pp[i].spec.edges.size());
       pe_dst.reserve(pp[i].spec.edges.size());
@@ -172,8 +217,19 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
       mg::data_structures::GARPatternArrays gp{
           nullptr, static_cast<int>(pp[i].spec.num_vertices), pe_src.data(),
           pe_dst.data(), pe_label.data(), static_cast<int>(pe_src.size())};
-      const std::uint64_t n_emb =
-          hom.Enumerate(idx, gp, cfg.max_matches_per_rule, &embs, &capped);
+      std::uint64_t n_emb = 0;
+      if (pp[i].disconnected && pins.empty()) {
+        n_emb = pattern_matcher.Enumerate(pp[i].spec, cfg.max_matches_per_rule,
+                                          &embs, &capped);
+      } else if (pp[i].disconnected) {
+        n_emb = pattern_matcher.Enumerate(pp[i].spec, cfg.max_matches_per_rule,
+                                          &embs, &capped, pins);
+      } else if (pins.empty()) {
+        n_emb = hom.Enumerate(idx, gp, cfg.max_matches_per_rule, &embs, &capped);
+      } else {
+        n_emb = hom.Enumerate(idx, gp, cfg.max_matches_per_rule, &embs, &capped,
+                              pins);
+      }
       if (capped) {
         st.match_capped = true;
         capped_out = true;
@@ -204,6 +260,25 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
         ++st.embeddings;
         const bool x_ok = eval_x(r, emb);
         if (x_ok) ++st.x_satisfied;
+        bool target_ok = true;
+        if (x_ok && is_target) {
+          for (std::uint32_t pos = 0; pos < 2; ++pos) {
+            const auto head_node = pos == 0 ? pp[i].pu : pp[i].pv;
+            const auto& pin = cfg.target_pattern->args[pos];
+            if (pin && emb[head_node] != *pin) target_ok = false;
+            for (const auto& constraint :
+                 cfg.target_pattern->attributes[pos]) {
+              Predicate pred = constraint;
+              pred.node = head_node;
+              if (target_ok &&
+                  !gar::core::graph::EvalAntecedent({pred}, emb, attrs_, g_,
+                                                    ml_models_)) {
+                target_ok = false;
+              }
+            }
+            if (!target_ok) break;
+          }
+        }
 
         const bool head_hit =
             pp[i].has_head && HasEdge(g_, emb[pp[i].pu], emb[pp[i].pv],
@@ -214,7 +289,7 @@ ChaseResult CpuChaseEngine::Run(const std::vector<GARule>& rules,
           rm->head_hit.push_back(head_hit);
         }
 
-        if (x_ok && pp[i].has_head && !head_hit) {
+        if (x_ok && target_ok && pp[i].has_head && !head_hit) {
           contribs[i].push_back(gar::core::graph::DerivedEdge{emb[pp[i].pu], emb[pp[i].pv],
                                                    pp[i].head_slot,
                                                    static_cast<std::uint32_t>(i),

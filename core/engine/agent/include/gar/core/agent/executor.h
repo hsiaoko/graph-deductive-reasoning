@@ -44,6 +44,8 @@ struct ExecConfig {
   // "timeout") and writes its partial chain/journal — an external kill
   // would lose them.
   double wall_limit_sec = 0.0;
+  // Keep deriving after any goal-conforming fact when enumerating an open goal.
+  bool enumerate_open = false;
   // Every `fair_interval` policy selections, force the longest-waiting
   // ready action (0 = off, pure policy order). The fair picks are marked
   // in the event trace.
@@ -108,6 +110,7 @@ struct AgentStep {
   std::optional<gar::core::graph::DerivedEdge> derived;
   std::uint64_t action_id = 0;
   double handcrafted_score = 0.0;
+  double policy_score = 0.0;
 };
 
 struct AgentResult {

@@ -1,0 +1,26 @@
+rule:
+  id: gar_000008
+  name: /location/country/form_of_government(x0,x1) ∧ /award/award_category/nominees./award/award_nomination/nominated_for(x2,x3) → /film/film_subject/films(x0,x3)
+  labels:
+    /film/film_subject/films: 59
+    /award/award_category/nominees./award/award_nomination/nominated_for: 7
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /film/film_subject/films
+  quality:
+    support: 7
+    confidence: 2.3777173913043478e-05
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

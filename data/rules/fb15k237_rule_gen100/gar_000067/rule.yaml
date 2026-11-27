@@ -1,0 +1,26 @@
+rule:
+  id: gar_000067
+  name: /location/country/form_of_government(x0,x1) ∧ /people/person/place_of_birth(x2,x3) → /location/administrative_division/first_level_division_of(x0,x3)
+  labels:
+    /location/administrative_division/first_level_division_of: 205
+    /people/person/place_of_birth: 24
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /location/administrative_division/first_level_division_of
+  quality:
+    support: 4
+    confidence: 3.0879446640316203e-05
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1

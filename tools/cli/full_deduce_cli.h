@@ -39,6 +39,9 @@ struct FullDeduceArgs {
   std::string goal;
   bool goal_early_stop = false;
   gar::core::engine::chase::ChaseConfig cfg;
+  bool max_rounds_set = false;
+  bool max_derivations_set = false;
+  bool max_matches_set = false;
   std::size_t print_n = 20;
 };
 
@@ -51,12 +54,16 @@ bool ParseFullDeduceOption(const std::string& k, NextFn&& next,
   if (k == "--csr") a->csr_dir = next();
   else if (k == "--rules") a->rules_root = next();
   else if (k == "--out") a->out_root = next();
-  else if (k == "--max-rounds")
+  else if (k == "--max-rounds") {
     a->cfg.max_rounds = static_cast<std::uint32_t>(std::stoul(next()));
-  else if (k == "--max-derivations") a->cfg.max_derivations = std::stoull(next());
-  else if (k == "--max-matches")
+    a->max_rounds_set = true;
+  } else if (k == "--max-derivations") {
+    a->cfg.max_derivations = std::stoull(next());
+    a->max_derivations_set = true;
+  } else if (k == "--max-matches") {
     a->cfg.max_matches_per_rule = std::stoull(next());
-  else if (k == "--no-matches") a->cfg.keep_matches = false;
+    a->max_matches_set = true;
+  } else if (k == "--no-matches") a->cfg.keep_matches = false;
   else if (k == "--ml-config") a->ml_config = next();
   else if (k == "--goal-early-stop") a->goal_early_stop = true;
   else if (k == "--print") a->print_n = std::stoull(next());

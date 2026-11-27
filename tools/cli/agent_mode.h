@@ -45,6 +45,7 @@ struct AgentModeArgs {
   std::uint32_t bidirectional_rounds = 8;
   std::string strategy_model_path;
   std::uint64_t budget = 100;
+  bool enumerate_open = false;
   std::uint32_t batch_size = 1;
   gar::core::engine::agent::PolicyKind policy =
       gar::core::engine::agent::PolicyKind::kDeterministic;
@@ -174,6 +175,7 @@ inline gar::core::engine::agent::ExecConfig MakeExecConfig(
     const AgentModeArgs& args) {
   gar::core::engine::agent::ExecConfig config;
   config.budget = args.budget;
+  config.enumerate_open = args.enumerate_open;
   config.batch_size = args.batch_size;
   config.engine = args.engine;
   config.match_cap_per_rule = args.max_candidates_per_rule;
@@ -228,6 +230,8 @@ bool ParseAgentModeOption(const std::string& k, NextFn&& next,
     a->strategy_model_path = next();
   else if (k == "--budget")
     a->budget = std::stoull(next());
+  else if (k == "--enumerate-open")
+    a->enumerate_open = true;
   else if (k == "--batch-size") {
     a->batch_size = static_cast<std::uint32_t>(std::stoul(next()));
     if (a->batch_size == 0) {
@@ -519,7 +523,11 @@ inline gar::core::engine::agent::ReasoningAgent MakeReasoningAgent(
     if (args.scorer != agent::ScorerKind::kExact) {
       throw std::invalid_argument("learned policies require --scorer exact");
     }
-    if (args.search_direction != agent::SearchDirection::kForward) {
+    const bool backward_learned =
+        args.policy == agent::PolicyKind::kLearned &&
+        args.search_direction == agent::SearchDirection::kBackward;
+    if (args.search_direction != agent::SearchDirection::kForward &&
+        !backward_learned) {
       throw std::invalid_argument("learned policies require forward deduction");
     }
     auto model = std::make_shared<agent::learning::RelevanceModel>(
@@ -803,8 +811,9 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
   std::filesystem::create_directories(io.out_root);
   {
     std::ofstream f(io.out_root + "/chain.tsv");
-    f << "# step\trule_id\trule_name\tembedding\tsuccess\tcost\tcum_cost"
-         "\tderived_fact\n";
+    f << "# step\trule_id\trule_name\tembedding\tsuccess\tcost\tcum_cost";
+    if (args.enumerate_open) f << "\tpolicy_score";
+    f << "\tderived_fact\n";
     double acc = 0.0;
     for (std::size_t i = 0; i < res.chain.size(); ++i) {
       const auto& s = res.chain[i];
@@ -815,8 +824,9 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
         if (u) f << ",";
         f << g.EntityName(s.motif.embedding[u]);
       }
-      f << '\t' << (s.success ? 1 : 0) << '\t' << s.cost << '\t' << acc << '\t'
-        << (s.derived ? FormatFact(g, *s.derived) : "-") << "\n";
+      f << '\t' << (s.success ? 1 : 0) << '\t' << s.cost << '\t' << acc;
+      if (args.enumerate_open) f << '\t' << s.policy_score;
+      f << '\t' << (s.derived ? FormatFact(g, *s.derived) : "-") << "\n";
     }
   }
   WriteClosureEdges(io.out_root, g, rule_ids, res.derived);
@@ -866,6 +876,10 @@ inline int RunAgentMode(const FullDeduceArgs& io, const AgentModeArgs& args) {
       << "budget_exhausted: " << (res.budget_exhausted ? "true" : "false")
       << "\n"
       << "termination: " << res.termination << "\n";
+    if (args.enumerate_open) {
+      f << "enumerate_open: true\n"
+        << "wall_seconds: " << wall << "\n";
+    }
     if (res.stats) {
       // AdaDeduceExecutor instrumentation (flat fields; the event trace is
       // written to deduce_trace.tsv below).

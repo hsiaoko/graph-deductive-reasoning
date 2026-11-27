@@ -17,6 +17,12 @@
 namespace gar::core::engine {
 namespace chase {
 
+struct TargetPattern {
+  std::uint32_t slot = 0;
+  std::array<std::optional<std::uint32_t>, 2> args;
+  std::array<std::vector<Predicate>, 2> attributes;
+};
+
 struct ChaseConfig {
   std::uint64_t max_matches_per_rule = 1'000'000;  // embedding cap per rule
   std::uint64_t max_derivations = 10'000'000;      // total new-facts cap
@@ -31,6 +37,10 @@ struct ChaseConfig {
   // Optional (slot, src, dst) goal. CPU naive chase stops after the round
   // that derives it; nullopt preserves the ordinary full-closure behavior.
   std::optional<std::array<std::uint32_t, 3>> stop_edge;
+  // Pins and filters rule applications that derive this target. Callers must
+  // set this only for a nonrecursive target family: pruning recursive target
+  // facts can remove intermediate facts needed by a proof.
+  std::optional<TargetPattern> target_pattern;
 };
 
 struct RuleChaseStats {

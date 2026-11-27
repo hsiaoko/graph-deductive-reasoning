@@ -243,7 +243,7 @@ Attribute mining is available through `mine_predicates` after numeric vertex att
 | Mode | Purpose | Backend |
 |---|---|---|
 | `chase` | Compute the full closure, optionally with resource caps | CPU or GPU |
-| `dep-only` | Run fixed-order, single-threaded goal-cone Chase and stop at the goal | CPU |
+| `dep-only` | Run fixed-order, single-threaded Chase over the relevant or full program to fixpoint | CPU |
 | `agent` | Run goal-directed AdaDeduce for one goal | CPU or GPU |
 | `agent-batch` | Run independent goals with shared immutable inputs | CPU or GPU |
 

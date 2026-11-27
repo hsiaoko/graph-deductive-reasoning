@@ -1,0 +1,26 @@
+rule:
+  id: gar_000073
+  name: /location/country/form_of_government(x0,x1) ∧ /film/film/country(x2,x3) → /base/aareas/schema/administrative_area/administrative_parent(x0,x3)
+  labels:
+    /base/aareas/schema/administrative_area/administrative_parent: 62
+    /film/film/country: 28
+    /location/country/form_of_government: 0
+  pattern:
+    nodes:
+      - id: 0
+      - id: 1
+      - id: 2
+      - id: 3
+    pivot:
+      - 0
+      - 3
+  consequent:
+    kind: edge
+    src: 0
+    dst: 3
+    label: /base/aareas/schema/administrative_area/administrative_parent
+  quality:
+    support: 3
+    confidence: 0.00026728439059158947
+    dataset: /ssd_data/zhuxk/graphs/KG/fb15k-237/immutable_csr
+    miner: rule-gen-v1
